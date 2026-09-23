@@ -121,7 +121,7 @@ def summarize(df: pd.DataFrame, last_price: float | None = None) -> dict[str, An
         "ret_1m": pct_return(close, 21),
         "ret_3m": pct_return(close, 63),
         "ret_6m": pct_return(close, 126),
-        "ret_12m": pct_return(close, 252),
+        "ret_12m": pct_return(close, min(252, len(close) - 1)) if len(close) >= 230 else None,   # a "1y" download has ~251 bars
         "hi52": hi52, "lo52": lo52,
         "pct_from_hi52": _f((px / hi52 - 1) * 100) if (hi52 and px) else None,
         "pct_from_lo52": _f((px / lo52 - 1) * 100) if (lo52 and px) else None,
