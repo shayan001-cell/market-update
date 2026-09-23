@@ -24,7 +24,7 @@ from . import fetch
 from . import technicals as T
 
 REGULAR_OPEN, REGULAR_CLOSE = time(9, 30), time(16, 0)
-MOMENTUM_CAP = {1: 2.0, 2: 3.0, 4: 4.0}      # |3-bar move| in % that scores full marks, by bars-per-candle
+MOMENTUM_CAP = {1: 1.5, 2: 2.0, 4: 3.0, 8: 4.0}      # |3-bar move| in % that scores full marks, by 15-minute bars per candle
 
 
 def _regular(df: pd.DataFrame) -> pd.DataFrame:
@@ -97,7 +97,8 @@ def _score_tf(s: dict[str, Any] | None, n: int, above_vwap: bool | None) -> floa
     vol = min(s["vol_ratio_3bar"], 4.0) / 4.0 * 40
     build = min(s["building_bars"], 3) / 3 * 15
     rng = min(s["range_vs_atr"] or 0, 2.5) / 2.5 * 15
-    mom = min(abs(s["chg_3bar_pct"]), MOMENTUM_CAP[n]) / MOMENTUM_CAP[n] * 15
+    cap = MOMENTUM_CAP.get(n, 4.0)
+    mom = min(abs(s["chg_3bar_pct"]), cap) / cap * 15
     confirm = (10 if (s["breakout"] or s["breakdown"]) else 0) + (5 if above_vwap is not None and (above_vwap == (s["direction"] != "down")) else 0)
     return round(vol + build + rng + mom + confirm, 1)
 
@@ -137,7 +138,7 @@ def scan(intraday: pd.DataFrame, snapshot: dict[str, dict[str, Any]], tickers: l
         if f is None or "Close" not in f:
             continue
         df30 = _regular(f)
-        if len(df30) < 30:
+        if len(df30) < 40:
             continue
         ses = _session_stats(df30)
         tfs: dict[str, Any] = {}

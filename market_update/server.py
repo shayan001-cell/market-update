@@ -34,7 +34,8 @@ from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db, fetch, mail
-from .analyze import analyze_ticker, build_report
+from . import scanner
+from .analyze import _clean, _scan_slim, analyze_ticker, build_report
 
 log = logging.getLogger("market_update.server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -49,10 +50,16 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "P
 
 @app.middleware("http")
 async def _no_stale_static(request, call_next):
-    """The page and its assets change with every deploy; make browsers revalidate them."""
+    """The page and its assets change with every deploy; make browsers revalidate them. Also counts traffic for the admin view."""
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/static/"):
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    if not path.startswith("/static/") and path != "/healthz":
+        try:
+            await asyncio.to_thread(db.count_request, path == "/")
+        except Exception:  # noqa: BLE001
+            pass
     return response
 app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
 
@@ -66,6 +73,8 @@ state: dict[str, Any] = {
     "builds": 0,
     "adhoc": {},          # ticker -> record analysed on demand from the page
     "adhoc_inflight": set(),
+    "live_scan": None,    # minute-by-minute intraday scan (numbers only; the hourly build adds the model reads)
+    "live_scan_at": 0.0,
 }
 _lock = asyncio.Lock()
 
@@ -108,6 +117,52 @@ async def do_build(reason: str) -> bool:
     return True
 
 
+def _live_scan_sync() -> dict[str, Any]:
+    r = state["report"] or {}
+    watch = config.load_watchlist()
+    universe = list(dict.fromkeys(config.UNIVERSE + watch + [x["ticker"] for x in (r.get("low_float") or {}).get("rows", [])]))
+    mstate = fetch.market_state()
+    sc = scanner.scan(fetch.fetch_intraday(universe), {}, universe, mstate)
+    if not state.get("sym_names"):
+        state["sym_names"] = {row[0]: row[1] for row in fetch.fetch_symbol_index()}
+    names = dict(state["sym_names"])
+    names.update({t: q["name"] for t, q in (r.get("lite") or {}).items() if q.get("name")})
+    reads = {x["ticker"]: x.get("ai") for x in (r.get("scan") or {}).get("rows", []) if x.get("ai")}
+    rows = []
+    for x in sorted(sc["by_ticker"].values(), key=lambda v: -v["score"])[:40]:
+        slim = _scan_slim(x)
+        slim.update(ticker=x["ticker"], name=names.get(x["ticker"], x["ticker"]), price=x["price"], chg_pct=x["chg_pct"], qualifies=x["qualifies"],
+                    session={k: x["session"].get(k) for k in ("rvol_time_of_day", "above_vwap", "range_pos", "chg_from_open_pct", "session_volume", "avg_session_volume", "bars_today", "session_date")},
+                    ai=reads.get(x["ticker"]))
+        rows.append(slim)
+    return _clean({"rows": rows, "scanned": sc["scanned"], "qualified": sc["qualified"], "as_of": time.time(), "last_bar": sc["last_bar"], "market_state": mstate,
+                   "settings": sc["settings"]})
+
+
+def _live_interval() -> int:
+    return config.SCAN_LIVE_SECONDS if fetch.market_state() in ("pre", "open", "post") else config.SCAN_LIVE_SECONDS_OFF
+
+
+async def live_scanner() -> None:
+    while True:
+        try:
+            if state["report"] is not None and time.time() - state["live_scan_at"] >= _live_interval():
+                state["live_scan"] = await asyncio.to_thread(_live_scan_sync)
+                state["live_scan_at"] = time.time()
+        except Exception:  # noqa: BLE001
+            log.exception("live scan failed")
+        await asyncio.sleep(5)
+
+
+@app.get("/api/scan/live")
+async def api_scan_live() -> JSONResponse:
+    ls = state["live_scan"]
+    if ls is None:
+        return JSONResponse({"status": "warming"}, status_code=202, headers={"Cache-Control": "no-store"})
+    nxt = max(0, int(_live_interval() - (time.time() - state["live_scan_at"])))
+    return JSONResponse({**ls, "next_in_s": nxt, "interval_s": _live_interval()}, headers={"Cache-Control": "no-store"})
+
+
 async def scheduler() -> None:
     while True:
         try:
@@ -132,6 +187,7 @@ async def _startup() -> None:
     if USERS_PATH.exists():
         log.info("imported %d accounts from users.json into %s", db.import_legacy_json(USERS_PATH), db.DB_PATH)
     asyncio.create_task(scheduler())
+    asyncio.create_task(live_scanner())
 
 
 @app.get("/")
@@ -195,7 +251,7 @@ async def symbols() -> JSONResponse:
 
 
 @app.get("/api/stock/{ticker}")
-async def api_stock(ticker: str) -> JSONResponse:
+async def api_stock(ticker: str, request: Request) -> JSONResponse:
     """Full analysis for one ticker on demand (a name added to a watchlist on the page).
     Cached for the life of the current report; re-analysed after the next build."""
     t = ticker.upper().strip()
@@ -223,6 +279,7 @@ async def api_stock(ticker: str) -> JSONResponse:
     if rec is None:
         raise HTTPException(status_code=404, detail=f"no price history for {t}")
     state["adhoc"][t] = {"build_id": (r or {}).get("build_id"), "stock": rec}
+    db.log_activity(_session_email(request), "analyzed", t)
     return JSONResponse({"status": "ok", "source": "adhoc", "stock": rec}, headers={"Cache-Control": "no-store"})
 
 
@@ -274,7 +331,7 @@ USERS_PATH = DATA_DIR / "users.json"
 TOKENS_PATH = DATA_DIR / "auth_tokens.json"
 SESSION_COOKIE = "mu_session"
 SESSION_DAYS = 30
-LINK_MINUTES = 57
+LINK_MINUTES = 10
 EXPIRED_KEEP_S = 24 * 3600      # remember expired tokens so an old link can trigger a fresh email
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -368,6 +425,7 @@ async def _issue_link(request: Request, email: str) -> dict[str, Any]:
         raise HTTPException(status_code=429, detail="a link was sent less than a minute ago; check your inbox")
     token = secrets.token_urlsafe(32)
     db.create_token(token, email, LINK_MINUTES * 60)
+    db.log_activity(email, "link_requested")
     link = f"{_public_url(request)}/auth/verify?token={token}"
     sent = False
     try:
@@ -428,6 +486,7 @@ async def auth_verify(request: Request, token: str = "") -> Response:
     email = rec["email"]
     db.ensure_user(email)
     db.touch_login(email)
+    db.log_activity(email, "login", request.headers.get("user-agent", "")[:80])
     cookie = _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}")
     db.open_session(cookie, email, SESSION_DAYS * 86400, request.headers.get("user-agent"))
     resp = RedirectResponse("/?signed_in=1", status_code=303)
@@ -442,8 +501,9 @@ async def api_me(request: Request) -> JSONResponse:
         return JSONResponse({"status": "anonymous", "logged_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
     prof = db.profile(email) or {"tickers": [], "accepted_disclaimer_at": None, "created": None}
     state_ = db.login_state(email)
-    resp = JSONResponse({"status": "ok", "logged_in": True, "email": email, "sessions": state_["active_sessions"],
-                         "profile": {"accepted_disclaimer_at": prof.get("accepted_disclaimer_at"), "tickers": prof.get("tickers", []), "created": prof.get("created")}},
+    resp = JSONResponse({"status": "ok", "logged_in": True, "email": email, "sessions": state_["active_sessions"], "role": _role(email),
+                         "name": prof.get("name") or "",
+                         "profile": {"accepted_disclaimer_at": prof.get("accepted_disclaimer_at"), "tickers": prof.get("tickers", []), "created": prof.get("created"), "name": prof.get("name")}},
                         headers={"Cache-Control": "no-store"})
     # Sliding session: every visit renews the cookie and the session row, so the login stays active
     # until the user signs out or stays away for SESSION_DAYS.
@@ -451,6 +511,35 @@ async def api_me(request: Request) -> JSONResponse:
     db.touch_session(raw, SESSION_DAYS * 86400)
     resp.set_cookie(SESSION_COOKIE, raw, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
     return resp
+
+
+def _role(email: str) -> str:
+    return "admin" if email.lower() in config.ADMIN_EMAILS else "user"
+
+
+@app.post("/api/profile/name")
+async def api_profile_name(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    email = _session_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="sign in first")
+    name = re.sub(r"[^\w .'\-]", "", str(payload.get("name", "")).strip())[:60]
+    if not name:
+        raise HTTPException(status_code=400, detail="enter a name")
+    db.set_name(email, name)
+    db.log_activity(email, "name", name)
+    return {"status": "ok", "name": name}
+
+
+@app.get("/api/admin/overview")
+async def api_admin_overview(request: Request) -> JSONResponse:
+    email = _session_email(request)
+    if not email or _role(email) != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+    ov = await asyncio.to_thread(db.admin_overview)
+    ov["admin"] = email
+    ov["build"] = {"build_id": (state["report"] or {}).get("build_id"), "generated_at": (state["report"] or {}).get("generated_at"), "builds": state["builds"], "building": state["building"]}
+    ov["adhoc_cached"] = len(state["adhoc"])
+    return JSONResponse(ov, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/auth/status")
@@ -496,6 +585,7 @@ async def api_profile_tickers(request: Request, payload: dict[str, Any] = Body(.
         raise HTTPException(status_code=400, detail="at most forty tickers")
     db.ensure_user(email)
     db.set_watchlist(email, tickers)
+    db.log_activity(email, "watchlist", ", ".join(tickers[:12]))
     if tickers:
         config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
     return JSONResponse({"status": "ok", "tickers": tickers})
@@ -503,6 +593,7 @@ async def api_profile_tickers(request: Request, payload: dict[str, Any] = Body(.
 
 @app.post("/api/auth/logout")
 async def auth_logout(request: Request) -> JSONResponse:
+    db.log_activity(_session_email(request), "logout")
     db.close_session(request.cookies.get(SESSION_COOKIE))     # the sessions row now says logged_in = 0
     resp = JSONResponse({"status": "ok", "logged_in": False})
     resp.delete_cookie(SESSION_COOKIE)

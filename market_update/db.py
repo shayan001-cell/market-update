@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_agent TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_email ON sessions(email, logged_in);
+CREATE TABLE IF NOT EXISTS traffic (
+    minute INTEGER PRIMARY KEY,        -- unix minute
+    requests INTEGER NOT NULL DEFAULT 0,
+    pages INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at REAL NOT NULL,
+    email TEXT,
+    action TEXT NOT NULL,
+    detail TEXT
+);
 CREATE TABLE IF NOT EXISTS watchlist (
     email TEXT NOT NULL,
     ticker TEXT NOT NULL,
@@ -58,10 +70,17 @@ def connect() -> Iterator[sqlite3.Connection]:
     con.row_factory = sqlite3.Row
     try:
         con.executescript(_SCHEMA)
+        _migrate(con)
         yield con
         con.commit()
     finally:
         con.close()
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(users)")}
+    if "name" not in cols:
+        con.execute("ALTER TABLE users ADD COLUMN name TEXT")
 
 
 def _sid(cookie_value: str) -> str:
@@ -91,7 +110,52 @@ def profile(email: str) -> dict[str, Any] | None:
         if not row:
             return None
         tickers = [r["ticker"] for r in con.execute("SELECT ticker FROM watchlist WHERE email = ? ORDER BY position", (email,))]
-        return {"email": email, "created": row["created"], "last_login": row["last_login"], "accepted_disclaimer_at": row["accepted_disclaimer_at"], "tickers": tickers}
+        return {"email": email, "name": row["name"], "created": row["created"], "last_login": row["last_login"],
+                "accepted_disclaimer_at": row["accepted_disclaimer_at"], "tickers": tickers}
+
+
+def set_name(email: str, name: str) -> None:
+    with connect() as con:
+        con.execute("UPDATE users SET name = ? WHERE email = ?", (name[:60], email))
+
+
+# ---- traffic + activity (admin dashboard) ---------------------------------------
+def count_request(is_page: bool) -> None:
+    minute = int(time.time() // 60)
+    with connect() as con:
+        con.execute("INSERT INTO traffic(minute, requests, pages) VALUES (?, 1, ?) ON CONFLICT(minute) DO UPDATE SET requests = requests + 1, pages = pages + ?",
+                    (minute, 1 if is_page else 0, 1 if is_page else 0))
+        if minute % 60 == 0:
+            con.execute("DELETE FROM traffic WHERE minute < ?", (minute - 7 * 24 * 60,))
+
+
+def log_activity(email: str | None, action: str, detail: str | None = None) -> None:
+    with connect() as con:
+        con.execute("INSERT INTO activity(at, email, action, detail) VALUES (?, ?, ?, ?)", (time.time(), email, action, (detail or "")[:200]))
+        con.execute("DELETE FROM activity WHERE id < (SELECT MAX(id) FROM activity) - 5000")
+
+
+def admin_overview() -> dict[str, Any]:
+    now = time.time()
+    minute = int(now // 60)
+    with connect() as con:
+        live = [dict(r) for r in con.execute(
+            "SELECT s.email, u.name, MAX(s.last_seen) AS last_seen, MIN(s.created) AS since, COUNT(*) AS sessions, MAX(s.user_agent) AS user_agent "
+            "FROM sessions s LEFT JOIN users u ON u.email = s.email WHERE s.logged_in = 1 AND s.expires > ? GROUP BY s.email ORDER BY last_seen DESC", (now,))]
+        active_sessions = con.execute("SELECT COUNT(*) FROM sessions WHERE logged_in = 1 AND expires > ?", (now,)).fetchone()[0]
+        users = [dict(r) for r in con.execute("SELECT email, name, created, last_login, accepted_disclaimer_at FROM users ORDER BY last_login DESC NULLS LAST")]
+        wl = {r["email"]: r["n"] for r in con.execute("SELECT email, COUNT(*) AS n FROM watchlist GROUP BY email")}
+        for u in users:
+            u["tickers"] = wl.get(u["email"], 0)
+            u["online"] = any(l["email"] == u["email"] for l in live)
+        traffic = {r["minute"]: (r["requests"], r["pages"]) for r in con.execute("SELECT * FROM traffic WHERE minute > ?", (minute - 180,))}
+        series = [{"minute": m, "requests": traffic.get(m, (0, 0))[0], "pages": traffic.get(m, (0, 0))[1]} for m in range(minute - 119, minute + 1)]
+        day = con.execute("SELECT COALESCE(SUM(requests), 0), COALESCE(SUM(pages), 0) FROM traffic WHERE minute > ?", (minute - 1440,)).fetchone()
+        recent = [dict(r) for r in con.execute("SELECT at, email, action, detail FROM activity ORDER BY id DESC LIMIT 40")]
+        logins_24h = con.execute("SELECT COUNT(*) FROM activity WHERE action = 'login' AND at > ?", (now - 86400,)).fetchone()[0]
+    return {"as_of": now, "online": live, "active_sessions": active_sessions, "users": users, "users_total": len(users),
+            "traffic": {"series": series, "requests_24h": day[0], "pages_24h": day[1], "requests_last_hour": sum(x["requests"] for x in series[-60:]),
+                        "logins_24h": logins_24h}, "recent": recent}
 
 
 # ---- sign-in tokens ------------------------------------------------------------

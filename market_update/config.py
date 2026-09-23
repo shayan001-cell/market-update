@@ -195,10 +195,12 @@ def save_dynamic_watchlist(tickers: list[str]) -> list[str]:
     return clean
 
 # ---- intraday scanner: runs automatically on every build (no manual input) ----
-SCAN_INTERVAL = "30m"                 # base bars; 1h and 2h are built from these
-SCAN_LOOKBACK = "15d"
-SCAN_TIMEFRAMES = {"30m": 1, "1h": 2, "2h": 4}      # in 30-minute bars
-SCAN_TF_WEIGHTS = {"30m": 0.40, "1h": 0.35, "2h": 0.25}
+SCAN_INTERVAL = "15m"                 # base bars; 30m, 1h and 2h are built from these
+SCAN_LOOKBACK = "10d"
+SCAN_TIMEFRAMES = {"15m": 1, "30m": 2, "1h": 4, "2h": 8}      # in 15-minute bars
+SCAN_TF_WEIGHTS = {"15m": 0.30, "30m": 0.30, "1h": 0.25, "2h": 0.15}
+SCAN_LIVE_SECONDS = 60                # server mode: the scanner re-runs this often while the market is pre/open/post
+SCAN_LIVE_SECONDS_OFF = 600
 SCAN_MIN_PRICE = 2.0
 SCAN_MIN_SESSION_VOLUME = 300_000     # shares so far this session (or last session when closed)
 SCAN_MIN_RVOL = 1.5                   # volume so far vs the same time of day over the prior 10 sessions
@@ -213,3 +215,6 @@ LOW_FLOAT_MIN_VOLUME = 500_000
 LOW_FLOAT_MAX_CANDIDATES = 60
 LOW_FLOAT_ROWS = 20
 LOW_FLOAT_MAX_JUDGED = 10
+
+# ---- accounts ----
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("MU_ADMIN_EMAILS", "shayan001@live.ca,shayan001@live.cs").split(",") if e.strip()}

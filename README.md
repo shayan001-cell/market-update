@@ -51,15 +51,19 @@ round). The server remembers every ticker added from the page, so scheduled buil
 analyse them fully from then on. On the public GitHub Pages copy there is no server:
 quote cards still work for the build's names, and full analysis follows `watchlist.txt`.
 
-**Volume scanner (view 2, top half).** Runs by itself on every build, no input needed.
-Regular-session 30-minute bars for the whole scan universe (plus the low-float names)
-are rolled up into 1-hour and 2-hour candles. Per name: relative volume by time of day
+**Volume scanner (SCAN › Volume scanner).** Runs by itself, no input needed. In server
+mode it re-runs every minute while the market is pre, open or after hours (every ten
+minutes overnight) and the table updates in place with a live stamp and a countdown; the
+hourly build adds the model reads. Regular-session 15-minute bars for the whole scan
+universe (plus the low-float names) are rolled up into 30-minute, 1-hour and 2-hour
+candles; the 15m and 30m columns are the day-trading view, 1h and 2h the context.
+Clicking a row opens that name's page (chart, verdict, smart money). Per name: relative volume by time of day
 (volume so far versus the same clock time over the prior ten sessions), session VWAP and
 position in the day's range; per timeframe: the last three bars' volume against the
 20-bar norm, how many bars in a row volume has grown, the bar's range against that
 timeframe's ATR, the three-bar move, RSI, and whether price broke the 20-bar range. Each
 timeframe scores 0–100 (volume build 40, rising bars 15, range 15, move 15, confirmation
-15); the overall score weights 30m/1h/2h at 40/35/25. Filters: price ≥ $2, session volume
+15); the overall score weights 15m/30m/1h/2h at 30/30/25/15. Filters: price ≥ $2, session volume
 ≥ 300k, RVOL ≥ 1.5× or a three-bar volume ratio ≥ 2× on any timeframe. TypeSafe reads the
 top twelve: the kind of move (breakout on volume, building, climax, selling, pullback,
 noise), the odds it continues over the next one to two hours, and the sensible play.
@@ -154,8 +158,15 @@ expiry; `GET /api/auth/status` answers "logged in or not" for the calling browse
 `/api/me` renews the row on every visit. Sign-out flips the row to 0 and clears the
 cookie. An older `users.json` is imported into the database on first start.
 
-Sign-in is optional and the page never blocks on it: the dashboard opens straight away
-with a one-time "not financial advice" banner. The left column starts with **Create My
+The page opens on the sign-in card; after the emailed link (valid 10 minutes, auto-resent
+if it has run out) the user is asked once for a display name and lands on the dashboard.
+The name shows in the menu footer with the email and next to the SIGN OUT button.
+`MU_ADMIN_EMAILS` (default `shayan001@live.ca,shayan001@live.cs`) lists admin accounts;
+everyone else is a regular user. Admins get an **Admin** entry in the left menu: users
+signed in now, active sessions, requests per minute for the last two hours, page loads,
+logins, every account with its status, and the recent activity log (logins, logouts, link
+requests, watchlist changes, on-demand analyses). Traffic and activity are recorded in
+the `traffic` and `activity` tables. The left column starts with **Create My
 Watchlist**: type a ticker or company, press Enter, and the name gets a card on the home
 page (verdict, a "right now" strip for the current session, lean, plan, checklist, who is
 buying), a row in the left column with live price and change, a line in the final
@@ -201,8 +212,8 @@ picks in the browser only and says so; real emailed links need the hosted server
 
 The page never scrolls on desktop. A collapsible menu on the left holds the logo and six
 views with lit icons and sub-menus: HOME (mood, verdicts, the active list, a fixed live
-news feed on the right), SCAN (volume scanner, low float), STOCKS, THEMES, SMART MONEY
-(insiders and institutions, options flow), MACRO (big picture, weekly indexes with
+news feed on the right), SCAN (volume scanner, low float), STOCKS (All, Day trade, Swing trade, Large cap, Small cap, Gapping, Watchlist as
+sub-menu items), THEMES, SMART MONEY (insiders and institutions, options flow), MACRO (big picture, weekly indexes with
 support and resistance, rates, money flows). Keys 1–6 switch views; the hash keeps the
 current one. The slim top bar holds the ADD TICKER search, the market state and the
 refresh button. Dense tables scroll inside their own
@@ -312,3 +323,9 @@ not modelled; ForexFactory rate-limits, so its feed is cached for an hour.
 
 A full build is about 290 TypeSafe calls and 400k input tokens, and takes 60–90 seconds.
 Nothing here is investment advice.
+
+## Market bell
+
+The page watches the New York clock: at 9:30 ET it flashes MARKET OPEN across the screen
+for a few seconds (and MARKET CLOSED at 4:00), and the state badge in the top bar follows
+the clock between builds.

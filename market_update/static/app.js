@@ -13,7 +13,7 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "HOME", "1"], ["scan", "SCAN", "2"], ["stock", "STOCKS", "3"], ["theme", "THEMES", "4"], ["smart", "SMART MONEY", "5"], ["macro", "MACRO", "6"]];
+  const VIEWS = [["home", "HOME", "1"], ["scan", "SCAN", "2"], ["stock", "STOCKS", "3"], ["theme", "THEMES", "4"], ["smart", "SMART MONEY", "5"], ["macro", "MACRO", "6"], ["admin", "ADMIN", "7"]];
   const ICONS = {
     home: '<svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M10 20v-5h4v5"/></svg>',
     scan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 3v9l6.5 4"/></svg>',
@@ -21,11 +21,13 @@
     theme: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
     smart: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.1c0 2.9 6 1.6 6 4.6 0 1.4-1.4 2.3-3 2.3s-3-.9-3-2.3"/></svg>',
     macro: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>',
+    admin: '<svg viewBox="0 0 24 24"><path d="M12 3 4 6.5v5c0 4.6 3.4 8.4 8 9.5 4.6-1.1 8-4.9 8-9.5v-5z"/><path d="m9 12 2 2 4-4"/></svg>',
   };
-  const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
-  const NAV_GROUPS = [["Workspace", ["home", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]]];
-  let subTab = { scan: "scanner", smart: "money", macro: "picture" };
-  let gateOpen = false;                  // the sign-in card is optional now: opened from the menu footer only
+  const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
+  const NAV_GROUPS = [["Workspace", ["home", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]], ["Admin", ["admin"]]];
+  let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
+  let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
+  let gateOpen = true;                   // the sign-in card shows first; the dashboard follows a successful login
   let nextRefreshAt = 0;
   let tickerSel = (location.hash.match(/[&#]t=([A-Z0-9.\-^=]+)/i) || [])[1] || null;
   let mailStatus = null;
@@ -777,10 +779,13 @@
   // ---------------------------------------------------------------- stocks
   function stockRows(r) {
     let list = r.stocks.slice();
-    if (stockTab === "day") list = list.filter((s) => s.tags.includes("day"));
-    if (stockTab === "swing") list = list.filter((s) => s.tags.includes("swing"));
-    if (stockTab === "gappers") list = list.filter((s) => s.is_gapper);
-    if (stockTab === "watchlist") list = list.filter((s) => isWatched(s.ticker));
+    const tab = subTab.stock || stockTab;
+    if (tab === "day") list = list.filter((s) => s.tags.includes("day"));
+    if (tab === "swing") list = list.filter((s) => s.tags.includes("swing"));
+    if (tab === "large") list = list.filter((s) => isNum((s.fundamentals || {}).market_cap) && s.fundamentals.market_cap >= 10e9);
+    if (tab === "small") list = list.filter((s) => isNum((s.fundamentals || {}).market_cap) && s.fundamentals.market_cap < 2e9);
+    if (tab === "gappers") list = list.filter((s) => s.is_gapper);
+    if (tab === "watchlist") list = list.filter((s) => isWatched(s.ticker));
     const keyf = { score: (s) => Math.max(s.scores.day, s.scores.swing), day: (s) => s.scores.day, swing: (s) => s.scores.swing, atr: (s) => s.technicals.atr_pct || 0, chg: (s) => Math.abs(s.chg_pct || 0), rvol: (s) => s.rel_volume || 0 }[sortKey];
     list.sort((a, b) => keyf(b) - keyf(a));
     return list;
@@ -792,8 +797,7 @@
   }
 
   function secStocks(r) {
-    const tabs = [["all", "All"], ["day", "Day trade"], ["swing", "Swing"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]]
-      .map(([k, l]) => `<button class="tab ${stockTab === k ? "active" : ""}" data-tab="${k}">${l}</button>`).join("");
+    const tabs = "";
     const th = (k, l) => `<th class="sortable ${sortKey === k ? "active" : ""}" data-sort="${k}">${l}${sortKey === k ? " ▾" : ""}</th>`;
     const rows = stockRows(r).map((s) => {
       const a = s.ai || {}, t = s.technicals, c = cls(s.chg_pct);
@@ -810,8 +814,8 @@
         <td>${s.tags.map(tagHtml).join("")}</td></tr>`;
     }).join("") || `<tr><td colspan="9" class="muted">Nothing in this filter.</td></tr>`;
     const sel = r.stocks.find((s) => s.ticker === selectedTicker);
-    return `<section><h2>Stocks worth watching <span class="muted">${r.stocks.length} most volatile and gapping names out of ${r.stocks_scanned} liquid stocks · ranked by ${term("day", "day-trade")} / ${term("swing", "swing")} score · click a row for the full breakdown</span></h2>
-      <div class="tabs">${tabs}</div>
+    const tabName = (SUBTABS.stock.find(([k]) => k === (subTab.stock || "all")) || ["", "All names"])[1];
+    return `<section><h2>Stocks · ${esc(tabName)} <span class="muted">${stockRows(r).length} of ${r.stocks.length} analysed names (${r.stocks_scanned} liquid stocks scanned) · pick a group in the left menu · click a row for the full breakdown</span></h2>
       <div class="tbl-wrap"><table class="tbl" id="stocks-tbl"><thead><tr><th>Stock</th>${th("chg", "Price / change")}${th("atr", `Daily range`)}${th("rvol", "Volume vs normal")}<th>Verdict</th><th>Setup</th>${th("day", "Day score")}${th("swing", "Swing score")}<th>Flags</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div id="stock-detail" class="detail">${sel ? stockDetail(sel, r) : '<div class="card muted">Select a stock to see its chart, levels, fundamentals, news and model judgments.</div>'}</div></section>`;
   }
@@ -926,6 +930,7 @@
   }
   function openTicker(t) {
     tickerSel = t; currentView = "ticker"; try { history.replaceState(null, "", "#view=ticker&t=" + encodeURIComponent(t)); } catch (e) {}
+    if (report && !stockFor(t) && !STATIC_MODE) requestAnalysis(t);
     if (report) renderAll();
     const m = $("main"); if (m) m.scrollTop = 0;
   }
@@ -1057,30 +1062,44 @@
     playCls: { long_momentum: "up", wait_for_pullback: "up2", short_the_fade: "down", avoid: "down" },
   };
   const sessionLabel = (r, S) => (S.market_state === "open" ? "live · bars to " + (S.last_bar || "").slice(11, 16) + " ET" : `last session ${S.as_of || ""} · ${S.market_state === "pre" ? "pre-market, waiting for the open" : "market closed"}`);
+  async function pollLiveScan() {
+    if (STATIC_MODE || !report) return;
+    try {
+      const res = await fetch("/api/scan/live", { cache: "no-store" });
+      if (res.status === 202) return;
+      const j = await res.json(); liveScan = j; liveScan.received = Date.now();
+      if (currentView === "scan" && subTab.scan === "scanner") { const sec = $(".sc-section"); if (sec) { const tmp = document.createElement("div"); tmp.innerHTML = secScan(report); sec.replaceWith(tmp.firstElementChild); wireStocks(); } }
+    } catch (e) { /* server restarting */ }
+  }
+  function liveCountdown() {
+    const el = $("#sc-next"); if (!el || !liveScan) return;
+    const left = Math.max(0, Math.round((liveScan.next_in_s || 60) - (Date.now() - liveScan.received) / 1000));
+    el.textContent = `next scan in ${left}s`;
+  }
   function secScan(r) {
-    const S = r.scan; if (!S) return `<section><h2>Volume scanner</h2><div class="muted">No scan this build.</div></section>`;
-    const tfs = S.settings.timeframes || ["30m", "1h", "2h"];
+    const live = !STATIC_MODE && liveScan && liveScan.rows;
+    const S = live ? liveScan : r.scan; if (!S) return `<section class="sc-section"><h2>Volume scanner</h2><div class="muted">No scan this build.</div></section>`;
+    const tfs = ["15m", "30m", "1h", "2h"].filter((k) => (S.rows[0] && S.rows[0].timeframes && S.rows[0].timeframes[k]) || (S.settings && (S.settings.timeframes || []).includes(k)));
     let rows = S.rows.slice();
     if (scanTf !== "lead") rows.sort((a, b) => ((b.timeframes[scanTf] || {}).score || 0) - ((a.timeframes[scanTf] || {}).score || 0));
-    const tfCell = (x, k) => { const v = x.timeframes[k]; if (!v) return `<td class="muted">–</td>`; return `<td><div class="tfc ${x.lead_timeframe === k ? "lead" : ""}"><span class="bar"><span class="bar-fill ${v.direction}" style="width:${v.score}%"></span></span><span class="mono">${v.score.toFixed(0)}</span><div class="meta2">${v.vol_ratio_3bar}× vol · ${v.building_bars} rising · <span class="${cls(v.chg_3bar_pct)}">${fpct(v.chg_3bar_pct, 1)}</span>${v.breakout ? " · <span class=\"up\">break ↑</span>" : v.breakdown ? " · <span class=\"down\">break ↓</span>" : ""}</div></div></td>`; };
-    const body = rows.map((x) => { const a = x.ai || {}, ses = x.session || {}, rd = a.read ? SC.read[a.read.choice] : null, open = scanOpen === x.ticker;
-      const why = rd ? `${rd[2]} Odds the move continues: <b>${SC.cont[Math.round(a.continuation.score)]}</b> (${a.continuation.score.toFixed(1)}/3). Play: <b>${pretty(a.play.choice)}</b>, ${SC.play[a.play.choice]} ${conf(a.read.confidence)}` : "Not in the model's top set this build; numbers only.";
-      const facts = `Volume so far is ${isNum(ses.rvol_time_of_day) ? ses.rvol_time_of_day.toFixed(1) + "×" : "n/a"} the usual for this time of day, price is ${ses.above_vwap == null ? "–" : ses.above_vwap ? "above" : "below"} VWAP and sits at ${isNum(ses.range_pos) ? (ses.range_pos * 100).toFixed(0) + "%" : "–"} of the day's range. Leading timeframe: ${x.lead_timeframe}.`;
-      return `<tr class="clickable sc-row ${open ? "selected" : ""}" data-scan="${esc(x.ticker)}">
-        <td class="sym"><b>${esc(x.ticker)}</b><div class="meta2">${esc(x.name || "")}</div></td>
+    const lead = (x) => x.lead || x.lead_timeframe;
+    const tfCell = (x, k) => { const v = x.timeframes[k]; if (!v) return `<td class="tf"><span class="muted">–</span></td>`;
+      const sc = v.score || 0, dir = v.direction || x.direction; return `<td class="tf ${lead(x) === k ? "lead" : ""}"><div class="tf-score ${dir === "up" ? "up" : dir === "down" ? "down" : ""}">${sc.toFixed(0)}</div><div class="tf-bar"><i class="${dir}" style="width:${sc}%"></i></div><div class="tf-meta">${v.vol_ratio_3bar}× <span class="muted">vol</span> · ${v.building_bars}<span class="muted">↑</span> · <span class="${cls(v.chg_3bar_pct)}">${fpct(v.chg_3bar_pct, 1)}</span>${v.breakout ? ' <span class="up">▲brk</span>' : v.breakdown ? ' <span class="down">▼brk</span>' : ""}</div></td>`; };
+    const body = rows.slice(0, 30).map((x) => { const a = x.ai || {}, ses = x.session || {}, rd = a.read ? SC.read[a.read.choice] : null, t = x.ticker;
+      const vw = x.above_vwap != null ? x.above_vwap : ses.above_vwap, rp = isNum(x.range_pos) ? x.range_pos : ses.range_pos, rv = isNum(x.rvol_tod) ? x.rvol_tod : ses.rvol_time_of_day;
+      return `<tr class="clickable sc-row ${x.qualifies === false ? "dim" : ""}" data-ticker-page="${esc(t)}" title="Open ${esc(t)}: chart, verdict, smart money">
+        <td class="sym"><b>${esc(t)}</b><div class="meta2">${esc(x.name || "")}</div></td>
         <td class="num">${fnum(x.price)}<div class="delta ${cls(x.chg_pct)}">${arrow(x.chg_pct)} ${fpct(x.chg_pct)}</div></td>
-        <td class="num"><b>${isNum(ses.rvol_time_of_day) ? ses.rvol_time_of_day.toFixed(1) + "×" : "–"}</b><div class="meta2">${fvol(ses.session_volume)} vs ${fvol(ses.avg_session_volume)} full day</div></td>
+        <td class="num rv"><b class="${isNum(rv) && rv >= 2 ? "up" : ""}">${isNum(rv) ? rv.toFixed(1) + "×" : "–"}</b><div class="meta2">${fvol(ses.session_volume)} today</div></td>
         ${tfs.map((k) => tfCell(x, k)).join("")}
-        <td><span class="${ses.above_vwap ? "up" : "down"}">${ses.above_vwap == null ? "–" : ses.above_vwap ? "above VWAP" : "below VWAP"}</span><div class="meta2">${isNum(ses.range_pos) ? (ses.range_pos * 100).toFixed(0) + "% of day range" : ""} · from open <span class="${cls(ses.chg_from_open_pct)}">${fpct(ses.chg_from_open_pct, 1)}</span></div></td>
-        <td class="num"><b class="${x.direction === "up" ? "up" : x.direction === "down" ? "down" : ""}">${x.score.toFixed(0)}</b><div class="meta2">${x.direction}</div></td>
-        <td>${rd ? `<span class="pill ${rd[1]}">${rd[0]}</span><div class="meta2">continues: ${SC.cont[Math.round(a.continuation.score)]} · <span class="pill ${SC.playCls[a.play.choice]}" style="font-size:10px">${pretty(a.play.choice)}</span></div>` : '<span class="muted">numbers only</span>'}</td></tr>
-        ${open ? `<tr class="sc-why"><td colspan="${6 + tfs.length}">${why} ${facts}</td></tr>` : ""}`; }).join("") || `<tr><td colspan="${6 + tfs.length}" class="muted">Nothing passed the filters this session.</td></tr>`;
+        <td class="ses"><span class="${vw ? "up" : "down"}">${vw == null ? "–" : vw ? "above VWAP" : "below VWAP"}</span><div class="meta2">${isNum(rp) ? (rp * 100).toFixed(0) + "% of range" : ""}${isNum(ses.chg_from_open_pct) ? ` · open <span class="${cls(ses.chg_from_open_pct)}">${fpct(ses.chg_from_open_pct, 1)}</span>` : ""}</div></td>
+        <td class="num total"><b class="${x.direction === "up" ? "up" : x.direction === "down" ? "down" : ""}">${(x.score || 0).toFixed(0)}</b><div class="meta2">${lead(x)} · ${x.direction}</div></td>
+        <td class="read">${rd ? `<span class="pill ${rd[1]}">${rd[0]}</span><div class="meta2">${SC.cont[Math.round(a.continuation.score)]} odds · ${pretty(a.play.choice)}</div>` : '<span class="muted">numbers only</span>'}</td></tr>`; }).join("") || `<tr><td colspan="${6 + tfs.length}" class="muted">Nothing passed the filters this session.</td></tr>`;
     const tabs = [["lead", "Best timeframe"], ...tfs.map((k) => [k, k])].map(([k, l]) => `<button class="tab ${scanTf === k ? "active" : ""}" data-scan-tf="${k}">${l}</button>`).join("");
-    return `<section class="sc-section"><h2>Volume scanner <span class="muted">runs by itself on every refresh · ${S.scanned} names scanned, ${S.qualified} qualify · ${sessionLabel(r, S)}</span></h2>
-      <div class="chips"><span class="chip">price ≥ $${S.settings.min_price}</span><span class="chip">volume ≥ ${fvol(S.settings.min_session_volume)}</span><span class="chip">RVOL by time of day ≥ ${S.settings.min_rvol}× or 3-bar volume ≥ 2×</span><span class="chip">30m · 1h · 2h</span><span class="chip">score = volume build 40 · rising bars 15 · range 15 · move 15 · confirmation 15</span></div>
-      ${explain("RVOL by time of day compares volume so far with the same clock time over the prior ten sessions, so a name can qualify at 10:15 without waiting for a full day. Each timeframe scores the last three bars against the 20-bar norm, how many bars in a row volume has grown, the bar's range versus that timeframe's ATR, the three-bar move, and whether price confirms (above VWAP, breaking the 20-bar range). The model then reads the top names: what kind of move it is, the odds it continues over the next hour or two, and the sensible play. Click a row for the plain-language read.")}
-      <div class="tabs">${tabs}</div>
-      <div class="tbl-wrap"><table class="tbl sc-tbl"><thead><tr><th>Stock</th><th>Price</th><th>${term("relvol", "RVOL now")}</th>${tfs.map((k) => `<th>${k} volume build</th>`).join("")}<th>Session</th><th>Score</th><th>Model read</th></tr></thead><tbody>${body}</tbody></table></div>
+    const stamp = live ? `<span class="live-dot"></span> live · scanned ${new Date(S.as_of * 1000).toTimeString().slice(0, 8)} · <span id="sc-next">next scan in ${S.next_in_s}s</span>` : `${STATIC_MODE ? "hourly build · the minute-by-minute scan runs on the app server" : "warming up the live scan…"} · ${sessionLabel(r, S)}`;
+    return `<section class="sc-section"><div class="sc-head"><h2>Volume scanner <span class="muted">${S.scanned} names · ${S.qualified} qualify</span></h2><div class="sc-stamp">${stamp}</div></div>
+      <div class="sc-bar"><div class="tabs">${tabs}</div><div class="chips"><span class="chip">15m · 30m · 1h · 2h</span><span class="chip">RVOL ≥ ${(S.settings || {}).min_rvol || 1.5}× by time of day</span><span class="chip">price ≥ $${(S.settings || {}).min_price || 2}</span><span class="chip">click a name for chart, verdict and smart money</span></div></div>
+      <div class="tbl-wrap"><table class="tbl sc-tbl"><thead><tr><th>Stock</th><th>Price</th><th>${term("relvol", "RVOL")}</th>${tfs.map((k) => `<th>${k}</th>`).join("")}<th>Session</th><th>Score</th><th>Model read</th></tr></thead><tbody>${body}</tbody></table></div>
     </section>`;
   }
   function secLowFloat(r) {
@@ -1108,13 +1127,14 @@
   // ---------------------------------------------------------------- left menu
   function renderNav() {
     const label = (k) => VIEWS.find((v) => v[0] === k);
-    $("#nav").innerHTML = NAV_GROUPS.map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
+    const isAdmin = user && user.role === "admin";
+    $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
       return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
     const foot = $("#side-foot");
-    if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}"><span class="st-dot up"></span>${esc(user.email)}</div><div class="side-links">${STATIC_MODE ? "watchlist kept in this browser" : "signed in · watchlist saved to your account"} · <button class="lnk" data-signout>Sign out</button></div>`
+    if (foot) foot.innerHTML = user ? `<div class="side-user"><span class="st-dot up"></span><b>${esc(user.name || user.email.split("@")[0])}</b>${user.role === "admin" ? ' <span class="tag acc">admin</span>' : ""}</div><div class="side-mail" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links">watchlist saved to your account · <button class="lnk" data-signout>Sign out</button></div>`
       : `<div class="side-links">Watchlist kept in this browser · <button class="lnk" data-signin>${STATIC_MODE ? "Sign in / sign up on the app" : "Sign in or sign up"}</button></div>`;
     const si = foot && foot.querySelector("[data-signin]"); if (si) si.addEventListener("click", () => { gateOpen = true; renderGate(); });
     const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
@@ -1124,6 +1144,24 @@
     const rows = activeList().map((t) => { const s = stockFor(t); const q = s || (report.lite || {})[t] || {}; const px = q.last_price, ch = q.chg_pct; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
       return `<div class="side-tick ${currentView === "ticker" && tickerSel === t ? "active" : ""}"><button class="st-open" data-ticker-page="${esc(t)}" title="Open ${esc(t)}'s page"><span class="st-dot ${st ? ST.cls[st] : "none"}"></span><b>${esc(t)}</b><span class="st-px">${isNum(px) ? fnum(px) : "–"}</span><span class="delta ${cls(ch)}">${isNum(ch) ? fpct(ch, 1) : ""}</span></button><button class="st-x" data-remove="${esc(t)}" title="Remove ${esc(t)}">×</button></div>`; }).join("");
     return rows ? rows + `<div class="side-count">${activeList().length} ${activeList().length === 1 ? "name" : "names"} · analysed every hour</div>` : `<div class="side-empty">No names yet. Add your first ticker above and its card appears on the home page.</div>`;
+  }
+  function marketStateNow() {
+    const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, weekday: "short", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date());
+    const get = (k) => (p.find((x) => x.type === k) || {}).value; const wd = get("weekday"), m = parseInt(get("hour"), 10) * 60 + parseInt(get("minute"), 10);
+    if (["Sat", "Sun"].includes(wd)) return "closed";
+    return m >= 570 && m < 960 ? "open" : m >= 240 && m < 570 ? "pre" : m >= 960 && m < 1200 ? "post" : "closed";
+  }
+  function flash(text, sub) {
+    let f = $("#flash"); if (!f) { f = document.createElement("div"); f.id = "flash"; document.body.appendChild(f); }
+    f.innerHTML = `<div class="flash-in"><div class="flash-word">${text}</div><div class="flash-sub">${sub || ""}</div></div>`; f.classList.add("on");
+    clearTimeout(flash._t); flash._t = setTimeout(() => f.classList.remove("on"), 9000);
+  }
+  function marketWatch() {
+    const st = marketStateNow();
+    if (lastMarketState && lastMarketState !== "open" && st === "open") flash("MARKET OPEN", "9:30 ET · regular session under way");
+    if (lastMarketState === "open" && st === "post") flash("MARKET CLOSED", "4:00 ET · after-hours session");
+    lastMarketState = st;
+    const ms = $("#market-state"); if (ms && report && report.market_state !== st) { ms.textContent = { pre: "pre-market", open: "market open", post: "after hours", closed: "closed" }[st]; ms.className = "badge " + st; }
   }
   function scheduleHourly() {
     const now = new Date(); nextRefreshAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 5).getTime();
@@ -1154,7 +1192,17 @@
       if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
     }
   }
-  const gateNeeded = () => gateOpen && !user;
+  const gateNeeded = () => (STATIC_MODE ? gateOpen : (!user || !user.name));
+  function nameHtml() {
+    return `<div class="g-shell reveal"><div class="g-core">
+      ${gateBrand()}
+      ${hexSteps(1)}
+      <span class="eyebrow">Welcome</span>
+      <h1>What should we call you?</h1>
+      <p>Signed in as <b>${esc(user.email)}</b>. Your name is shown in the menu and next to the sign-out button.</p>
+      <form id="name-form" class="gate-form"><div class="field"><input id="name-input" placeholder="Your name" maxlength="60" autocomplete="name" autofocus value="${esc(user.email.split("@")[0])}"></div>${pillBtn("Go to my dashboard", 'type="submit"')}</form>
+    </div></div>`;
+  }
   const hexSteps = (n) => { const steps = ["Sign in", "Confirm", "Watchlist"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
   const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
   const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
@@ -1172,8 +1220,8 @@
         <span class="eyebrow">Sign in or sign up</span>
         <h1>Accounts live on the app server</h1>
         <p>This address is the free public preview: it has no server behind it, so it cannot email a sign-in link or keep an account. Your watchlist here stays in this browser.</p>
-        ${APP_URL ? `<p>Sign in or create your account on the live app. One email link does both, no password.</p><div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Open the live app</span><i aria-hidden="true">↗</i></a></div>`
-          : `<p class="fine">The live app with email sign-in has not been published yet. Once it is running (Render blueprint in the repository), its address goes into the <code>MU_APP_URL</code> setting and this button opens it.</p>`}
+        ${APP_URL ? `<p>Sign in or create your account on the live app. One email link does both, no password.</p><div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Open the live app</span><i aria-hidden="true">↗</i></a><button class="lnk" data-gate-close>Continue as a guest</button></div>`
+          : `<p class="fine">The live app with email sign-in has not been published yet. Once it is running (Render blueprint in the repository), its address goes into the <code>MU_APP_URL</code> setting and this button opens it.</p><div class="gate-actions"><button class="pill-btn" data-gate-close><span>Continue as a guest</span><i aria-hidden="true">↗</i></button></div>`}
       </div></div>`;
     }
     return `<div class="g-shell reveal"><div class="g-core">
@@ -1181,7 +1229,7 @@
       ${hexSteps(0)}
       <span class="eyebrow">Sign in or sign up · no password</span>
       <h1>Sign in to your desk</h1>
-      <p>Enter your email and we send a one-time link. New here? The same link creates your account. It works for 57 minutes and signs you in on the device you open it on; your session then stays active until you sign out.</p>
+      <p>Enter your email and we send a one-time link. New here? The same link creates your account. It works for 10 minutes and signs you in on the device you open it on; if it runs out, opening it sends a fresh one. Your session then stays active until you sign out.</p>
       <form id="login-form" class="gate-form"><div class="field"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus></div>${pillBtn("Email me a sign-in link", 'type="submit"')}</form>
       <div id="login-status" class="gate-status"></div>
       ${mailLine()}
@@ -1207,11 +1255,13 @@
   }
   function renderGate() {
     const g = $("#gate"); if (!g) return;
-    const lb = $("#logout-btn"); if (lb) lb.hidden = !user;
+    const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) lb.textContent = `SIGN OUT · ${(user.name || user.email.split("@")[0]).toUpperCase().slice(0, 14)}`; }
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
-    g.hidden = false; g.innerHTML = loginHtml().replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Close">×</button>');
+    const html = !user ? loginHtml() : nameHtml();
+    g.hidden = false; g.innerHTML = STATIC_MODE ? html.replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Continue as a guest">×</button>') : html;
     wireGate();
-    const gc = $("[data-gate-close]"); if (gc) gc.addEventListener("click", () => { gateOpen = false; renderGate(); });
+    document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; renderGate(); }));
+    const nf = $("#name-form"); if (nf) nf.addEventListener("submit", async (e) => { e.preventDefault(); const name = $("#name-input").value.trim(); if (!name) return; try { const res = await fetch("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const j = await res.json(); if (res.ok) { user.name = j.name; renderGate(); renderAll(); } } catch (err) {} });
     if (!user && !STATIC_MODE && !mailStatus) fetch("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
   }
   function wireGate() {
@@ -1225,7 +1275,7 @@
         const res = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
         if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not send the link."; return; }
-        st.innerHTML = j.status === "sent" ? `<b>Check your email.</b> We sent a sign-in link to ${esc(email)}. It works for ${j.expires_in_min || 57} minutes; open it on this device and you will land on your dashboard. If it runs out, opening it sends you a fresh one automatically.`
+        st.innerHTML = j.status === "sent" ? `<b>Check your email.</b> We sent a sign-in link to ${esc(email)}. It works for ${j.expires_in_min || 10} minutes; open it on this device and you will land on your dashboard. If it runs out, opening it sends you a fresh one automatically.`
           : `<b>No mail server is configured on this machine</b>, so the link could not be emailed.${j.dev_link ? ` For local use, here it is: <a class="devlink" href="${esc(j.dev_link)}">Open my sign-in link</a>` : " Ask the site owner to set MU_SMTP_* on the server."}`;
       } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
     });
@@ -1302,6 +1352,7 @@
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secBoard(r)}</div>${secToday(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
+      case "admin": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one admin-view">${secAdmin()}</div>`;
       case "scan": return `<div class="view sub">${subTabs("scan")}<div class="subview">${subTab.scan === "lowfloat" ? secLowFloat(r) : secScan(r)}</div></div>`;
       case "stock": return `<div class="view stock">${secStocks(r)}</div>`;
       case "theme": return `<div class="view one">${secTheme(r)}</div>`;
@@ -1328,9 +1379,32 @@
     else body = `<div class="card muted">${STATIC_MODE ? "This ticker is not in the public build's data." : analyzing.has(t) ? "Analysing…" : analyzeError[t] ? "Analysis failed: " + esc(analyzeError[t]) : "Not analysed yet."}</div>`;
     return `<section class="tk-page">${hero}${body}</section>`;
   }
+  async function pollAdmin() {
+    if (STATIC_MODE || !user || user.role !== "admin") return;
+    try { const res = await fetch("/api/admin/overview", { cache: "no-store" }); if (res.ok) { adminData = await res.json(); if (currentView === "admin") renderAll(); } } catch (e) {}
+  }
+  const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() / 1000) - t); return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  function secAdmin() {
+    const A = adminData; if (!A) return `<section><h2>Admin</h2><div class="muted">Loading the overview…</div></section>`;
+    const T = A.traffic, mx = Math.max(1, ...T.series.map((x) => x.requests));
+    const bars = T.series.map((x, i) => `<rect x="${i * 6}" y="${60 - (x.requests / mx) * 58}" width="5" height="${(x.requests / mx) * 58}" class="${x.pages ? "pg" : ""}"><title>${new Date(x.minute * 60000).toTimeString().slice(0, 5)}: ${x.requests} requests, ${x.pages} page loads</title></rect>`).join("");
+    const tile = (l, v, sub) => `<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${sub || ""}</div></div>`;
+    const online = A.online.map((u) => `<tr><td class="sym"><b>${esc(u.name || u.email.split("@")[0])}</b><div class="meta2">${esc(u.email)}</div></td><td>${ago(u.last_seen)}</td><td>${ago(u.since)}</td><td class="num">${u.sessions}</td><td class="hl small">${esc((u.user_agent || "").slice(0, 70))}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">Nobody is signed in right now.</td></tr>';
+    const users = A.users.map((u) => `<tr><td class="sym"><span class="st-dot ${u.online ? "up" : "none"}"></span> <b>${esc(u.name || u.email.split("@")[0])}</b><div class="meta2">${esc(u.email)}</div></td><td>${u.online ? '<span class="up">online</span>' : "offline"}</td><td>${ago(u.last_login)}</td><td class="num">${u.tickers}</td><td>${u.accepted_disclaimer_at ? "yes" : "no"}</td><td>${ago(u.created)}</td></tr>`).join("");
+    const recent = A.recent.map((x) => `<tr><td class="num">${new Date(x.at * 1000).toTimeString().slice(0, 8)}</td><td>${esc(x.email || "–")}</td><td><span class="tag ${{ login: "ok", logout: "", link_requested: "acc", watchlist: "acc", analyzed: "warn" }[x.action] || ""}">${pretty(x.action)}</span></td><td class="hl small">${esc(x.detail || "")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No activity yet.</td></tr>';
+    return `<section class="admin"><h2>Admin dashboard <span class="muted">${esc(A.admin)} · refreshed ${new Date(A.as_of * 1000).toTimeString().slice(0, 8)} · sessions table in market_update.db</span></h2>
+      <div class="grid c6" style="margin-bottom:12px">${tile("Signed in now", A.online.length, "distinct users")}${tile("Active sessions", A.active_sessions, "browsers with a live login")}${tile("Requests, last hour", T.requests_last_hour, `${T.requests_24h} in 24 h`)}${tile("Page loads, 24 h", T.pages_24h, "")}${tile("Logins, 24 h", T.logins_24h, "")}${tile("Accounts", A.users_total, `build ${A.build.build_id || "–"}${A.build.building ? " · building" : ""}`)}</div>
+      <div class="card" style="margin-bottom:12px"><h3>Traffic flow <span class="muted">requests per minute, last two hours · lighter bars include page loads</span></h3><svg class="traffic" viewBox="0 0 ${T.series.length * 6} 62" preserveAspectRatio="none">${bars}</svg></div>
+      <div class="admin-grid">
+        <div class="card"><h3>Logged-in users</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>User</th><th>Last seen</th><th>Signed in</th><th>Sessions</th><th>Browser</th></tr></thead><tbody>${online}</tbody></table></div></div>
+        <div class="card"><h3>Recent activity</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Time</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead><tbody>${recent}</tbody></table></div></div>
+        <div class="card wide"><h3>All accounts</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>User</th><th>Status</th><th>Last login</th><th>Tickers</th><th>Disclaimer</th><th>Created</th></tr></thead><tbody>${users}</tbody></table></div></div>
+      </div></section>`;
+  }
   function subTabs(v) { return `<div class="tabs subtabs">${SUBTABS[v].map(([k, l]) => `<button class="tab ${subTab[v] === k ? "active" : ""}" data-sub="${v}:${k}">${l}</button>`).join("")}</div>`; }
   function switchView(k) {
     if (!VIEWS.some((v) => v[0] === k)) return;
+    if (k === "admin" && !(user && user.role === "admin")) return;
     currentView = k; try { history.replaceState(null, "", "#view=" + k); } catch (e) {}
     if (report) renderAll();
   }
@@ -1393,7 +1467,7 @@
     const dl = $("[data-deletelist]"); if (dl) dl.addEventListener("click", deleteList);
     document.querySelectorAll("[data-sub]").forEach((b) => b.addEventListener("click", () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }));
     document.querySelectorAll("[data-scan-tf]").forEach((b) => b.addEventListener("click", () => { scanTf = b.getAttribute("data-scan-tf"); renderAll(); }));
-    document.querySelectorAll("tr.sc-row").forEach((tr) => tr.addEventListener("click", () => { const t = tr.getAttribute("data-scan"); scanOpen = scanOpen === t ? null : t; renderAll(); }));
+
     document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => { stockTab = b.getAttribute("data-tab"); rerenderStocks(); }));
     document.querySelectorAll("th.sortable").forEach((h) => h.addEventListener("click", () => { sortKey = h.getAttribute("data-sort"); rerenderStocks(); }));
     document.querySelectorAll("tr.clickable").forEach((tr) => tr.addEventListener("click", () => {
@@ -1479,6 +1553,8 @@
     initTheme();
     addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; const gt = $("#gate"); if (gt && !gt.hidden) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
     wireSearch(); initSide(); scheduleHourly(); setInterval(hourlyTick, 1000); hourlyTick();
+    lastMarketState = marketStateNow(); setInterval(marketWatch, 5000); setInterval(liveCountdown, 1000);
+    if (lastMarketState === "open") { const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" }).formatToParts(new Date()); const m = parseInt((p.find((x) => x.type === "hour") || {}).value, 10) * 60 + parseInt((p.find((x) => x.type === "minute") || {}).value, 10); if (m - 570 < 3) setTimeout(() => flash("MARKET OPEN", "9:30 ET · regular session under way"), 800); }
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
     if (/[?&]signin=1/.test(location.search)) { gateOpen = true; }
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
@@ -1515,6 +1591,10 @@
     poll();
     setInterval(pollNews, 60000);
     setTimeout(pollNews, 1500);
+    setInterval(pollLiveScan, 60000);
+    setTimeout(pollLiveScan, 2500);
+    setInterval(pollAdmin, 30000);
+    setTimeout(pollAdmin, 3000);
   }
 
   document.addEventListener("DOMContentLoaded", init);
