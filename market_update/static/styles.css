@@ -837,3 +837,29 @@ a:hover { border-bottom-color: var(--accent); }
 .login-stage { min-height: 100dvh; height: auto; }
 .env path { stroke-dasharray: 100; stroke-dashoffset: 100; }
 .lg-foot { margin-top: 8px; }
+
+/* ---- disclaimer-only stage and the dissolve into the dashboard ---- */
+.disc-stage { grid-template-rows: minmax(0, 1fr) auto; }
+.disc-wrap { position: relative; display: grid; place-items: center; padding: 40px 24px; }
+.disc-card { width: min(760px, 100%); }
+.disc-card .g-core { padding: 36px 40px 30px; }
+.disc-h { font-size: clamp(30px, 3.6vw, 44px) !important; letter-spacing: -0.035em !important; line-height: 1.02 !important; }
+.disc-h::after { content: ""; display: block; width: 84px; height: 3px; margin-top: 14px; border-radius: 2px; background: linear-gradient(90deg, #FFE38A, #B8860B); }
+.disc-core .disc-body { max-height: 38vh; overflow: auto; }
+.disc-core .disc-body p { animation: gate-in .9s cubic-bezier(.32,.72,0,1) both; }
+.disc-core .disc-body p:nth-child(1) { animation-delay: .25s; } .disc-core .disc-body p:nth-child(2) { animation-delay: .4s; } .disc-core .disc-body p:nth-child(3) { animation-delay: .55s; }
+.disc-core .ck, .disc-core .gate-actions, .disc-core .field { animation: gate-in .9s .7s cubic-bezier(.32,.72,0,1) both; }
+.gate { transition: opacity .6s cubic-bezier(.32,.72,0,1), transform .6s cubic-bezier(.32,.72,0,1), filter .6s; }
+.gate.leaving { opacity: 0; transform: scale(1.03); filter: blur(6px); pointer-events: none; }
+body.dash-enter .side { animation: slide-in-l .9s cubic-bezier(.32,.72,0,1) both; }
+body.dash-enter .hud-bar { animation: slide-in-t .9s .1s cubic-bezier(.32,.72,0,1) both; }
+body.dash-enter .home-top > * { animation: rise .9s cubic-bezier(.32,.72,0,1) both; } body.dash-enter .home-top > :nth-child(2) { animation-delay: .12s; }
+body.dash-enter .board .wcard { animation: rise .8s cubic-bezier(.32,.72,0,1) both; }
+body.dash-enter .board .wcard:nth-child(1) { animation-delay: .25s; } body.dash-enter .board .wcard:nth-child(2) { animation-delay: .32s; } body.dash-enter .board .wcard:nth-child(3) { animation-delay: .39s; }
+body.dash-enter .board .wcard:nth-child(4) { animation-delay: .46s; } body.dash-enter .board .wcard:nth-child(5) { animation-delay: .53s; } body.dash-enter .board .wcard:nth-child(6) { animation-delay: .6s; } body.dash-enter .board .wcard:nth-child(n+7) { animation-delay: .67s; }
+body.dash-enter .today { animation: slide-in-r .9s .2s cubic-bezier(.32,.72,0,1) both; }
+@keyframes slide-in-l { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+@keyframes slide-in-r { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes slide-in-t { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(18px); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@media (prefers-reduced-motion: reduce) { .gate, .gate.leaving { transition: none; } body.dash-enter * { animation: none !important; } }

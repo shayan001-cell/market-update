@@ -1195,11 +1195,11 @@
   const gateNeeded = () => (STATIC_MODE ? (gateOpen || !discAgreed()) : (!user || !(user.profile && user.profile.accepted_disclaimer_at) || !user.name));
   function disclaimerHtml() {
     const needName = !STATIC_MODE && !(user && user.name);
-    return `<div class="g-shell wide reveal"><div class="g-core disc-core">
+    return `<div class="login-stage disc-stage"><canvas id="login-bg" aria-hidden="true"></canvas><div class="disc-wrap"><div class="g-shell wide disc-card reveal" id="lg-card"><div class="g-core disc-core">
       ${gateBrand()}${user ? `<span class="who">${esc(user.email)}</span>` : ""}
       ${hexSteps(1)}
       <span class="eyebrow warn">Read before you continue</span>
-      <h1>This is not financial advice.</h1>
+      <h1 class="disc-h">This is not financial advice.</h1>
       <div class="disc-body">
         <p>Webex Market Update is an information tool. It shows market data, arithmetic over that data (levels, ranges, volume, scores) and model reads produced by typed questions. None of it is investment, legal or tax advice, and nothing here is a recommendation or solicitation to buy, sell or hold any security, option or other instrument.</p>
         <p>Markets move fast and against you. Low-float names halt and gap. Data from public sources can be late or wrong, and model reads are probabilities, not predictions. Past patterns do not guarantee future results. You alone decide what to trade, and you alone carry the risk of loss, which can exceed your original stake with leverage or options.</p>
@@ -1208,7 +1208,16 @@
       ${needName ? `<div class="field"><input id="name-input" placeholder="Your name (shown in the menu)" maxlength="60" autocomplete="name" value="${esc(user.email.split("@")[0])}"></div>` : ""}
       <label class="ck"><input type="checkbox" id="disc-ok"><span>I have read this. I understand that nothing on Webex Market Update is financial advice and that I trade at my own risk.</span></label>
       <div class="gate-actions">${pillBtn("I agree, take me to my dashboard", 'id="disc-go" disabled')}<span id="disc-status" class="gate-status"></span></div>
-    </div></div>`;
+    </div></div></div><div class="lg-foot">© Webex Market Update · information, not advice</div></div>`;
+  }
+  function leaveGate(then) {
+    const g = $("#gate"); if (!g || g.hidden) { then(); return; }
+    g.classList.add("leaving");
+    setTimeout(() => { g.classList.remove("leaving"); then(); enterDashboard(); }, 620);
+  }
+  function enterDashboard() {
+    document.body.classList.add("dash-enter");
+    setTimeout(() => document.body.classList.remove("dash-enter"), 2200);
   }
   function nameHtml() {
     return `<div class="g-shell reveal"><div class="g-core">
@@ -1336,7 +1345,7 @@
     const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
     g.hidden = false; g.innerHTML = STATIC_MODE ? html.replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Continue as a guest">×</button>') : html;
     wireGate(); startLoginFx();
-    document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; renderGate(); }));
+    document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; if (gateNeeded()) renderGate(); else leaveGate(() => renderGate()); }));
     const dgo = $("#disc-go"); if (dgo) {
       const ok = $("#disc-ok"); ok.addEventListener("change", () => { dgo.disabled = !ok.checked; });
       dgo.addEventListener("click", async () => {
@@ -1352,7 +1361,7 @@
           } catch (e) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; return; }
           lists = null; ensureLists(report);
         }
-        renderGate(); renderAll(); if (!STATIC_MODE && lists) refreshAdhoc();
+        leaveGate(() => { renderGate(); renderAll(); if (!STATIC_MODE && lists) refreshAdhoc(); });
       });
     }
     const nf = $("#name-form"); if (nf) nf.addEventListener("submit", async (e) => { e.preventDefault(); const name = $("#name-input").value.trim(); if (!name) return; try { const res = await fetch("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const j = await res.json(); if (res.ok) { user.name = j.name; renderGate(); renderAll(); } } catch (err) {} });
