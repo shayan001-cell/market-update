@@ -1229,29 +1229,88 @@
     return mailStatus.configured ? `<div class="mail-line ok">Links are emailed by <b>${esc(mailStatus.from_name)}</b> (${esc(mailStatus.transport)}). Check your spam folder the first time.</div>`
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
+  function loginHero(r) {
+    const tape = ((r && r.macro) || []).slice(0, 8).map((m) => `<span class="lt-item"><b>${esc(m.label || m.symbol)}</b> <span class="mono">${fnum(m.last, m.last < 10 ? 3 : 2)}</span> <span class="delta ${cls(m.chg_pct)}">${fpct(m.chg_pct)}</span></span>`).join("");
+    return `<div class="lg-hero">
+      <div class="lg-mark"><img src="static/logo.svg" alt="" width="120" height="120"><i class="ring"></i><i class="ring r2"></i></div>
+      <div class="lg-brand"><small>WEBEX</small><b>MARKET UPDATE</b></div>
+      <h2 class="lg-h">Your market desk,<br>read in one glance.</h2>
+      <p class="lg-p">Verdicts per stock, a scanner that runs every minute, smart money, options flow and the macro picture, in plain language, refreshed every hour.</p>
+      <ul class="lg-feats">
+        <li><span class="lg-ic" style="--vc:#F5C542">${ICONS.home}</span><div><b>A verdict for every name</b><span>Buy, buy the dip, wait, hold, avoid, with the reason.</span></div></li>
+        <li><span class="lg-ic" style="--vc:#2EE59D">${ICONS.scan}</span><div><b>Volume scanner, every minute</b><span>15m and 30m bars, RVOL by time of day, VWAP.</span></div></li>
+        <li><span class="lg-ic" style="--vc:#4FE3C1">${ICONS.smart}</span><div><b>Who is buying</b><span>Insiders, institutions, Congress and options flow.</span></div></li>
+      </ul>
+      ${tape ? `<div class="lg-tape"><div class="lt-track">${tape}${tape}</div></div>` : ""}
+    </div>`;
+  }
   function loginHtml() {
-    if (STATIC_MODE) {
-      return `<div class="g-shell reveal"><div class="g-core">
-        ${gateBrand()}
-        ${hexSteps(0)}
-        <span class="eyebrow">Sign in or sign up</span>
-        <h1>Accounts live on the app server</h1>
+    const r = report || {};
+    const card = STATIC_MODE
+      ? `<div class="g-core"><span class="eyebrow">Sign in or sign up</span><h1>Accounts live on the app server</h1>
         <p>This address is the free public preview: it has no server behind it, so it cannot email a sign-in link or keep an account. Your watchlist here stays in this browser.</p>
-        ${APP_URL ? `<p>Sign in or create your account on the live app. One email link does both, no password.</p><div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Open the live app</span><i aria-hidden="true">↗</i></a><button class="lnk" data-gate-close>Continue as a guest</button></div>`
-          : `<p class="fine">The live app with email sign-in has not been published yet. Once it is running (Render blueprint in the repository), its address goes into the <code>MU_APP_URL</code> setting and this button opens it.</p><div class="gate-actions"><button class="pill-btn" data-gate-close><span>Continue as a guest</span><i aria-hidden="true">↗</i></button></div>`}
-      </div></div>`;
+        ${APP_URL ? `<div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Open the live app</span><i aria-hidden="true">↗</i></a><button class="lnk" data-gate-close>Continue as a guest</button></div>`
+          : `<p class="fine">The live app with email sign-in has not been published yet.</p><div class="gate-actions"><button class="pill-btn" data-gate-close><span>Continue as a guest</span><i aria-hidden="true">↗</i></button></div>`}</div>`
+      : `<div class="g-core" id="login-core">
+        ${hexSteps(0)}
+        <span class="eyebrow">Sign in or sign up · no password</span>
+        <h1>Welcome to the desk</h1>
+        <p>Enter your email and we send a one-time link. New here? The same link creates your account. It works for 10 minutes and signs you in on the device you open it on.</p>
+        <form id="login-form" class="gate-form stack"><div class="field float"><input type="email" id="login-email" placeholder=" " required autocomplete="email" autofocus><label for="login-email">Email address</label></div>${pillBtn("Email me a sign-in link", 'type="submit"')}</form>
+        <div id="login-status" class="gate-status"></div>
+        ${mailLine()}
+        <p class="fine">Market data, model reads and scans here are information, not advice.</p>
+      </div>`;
+    return `<div class="login-stage"><canvas id="login-bg" aria-hidden="true"></canvas>
+      <div class="login-split">${loginHero(r)}<div class="g-shell lg-card reveal" id="lg-card">${card}</div></div>
+      <div class="lg-foot">© Webex Market Update · gold means information, not advice</div></div>`;
+  }
+  function sentHtml(email, j) {
+    const mins = j.expires_in_min || 10;
+    return `${hexSteps(0)}
+      <div class="sent"><svg class="env" viewBox="0 0 64 48" aria-hidden="true"><path class="e1" pathLength="100" d="M4 8h56v32H4z"/><path class="e2" pathLength="100" d="M4 8l28 20L60 8"/><path class="e3" pathLength="100" d="M4 40l20-16M60 40 40 24"/></svg>
+        <span class="eyebrow">${j.status === "sent" ? "Link sent" : "Link ready"}</span>
+        <h1>${j.status === "sent" ? "Check your inbox" : "Here is your link"}</h1>
+        <p>${j.status === "sent" ? `We emailed a one-time link to <b>${esc(email)}</b>. Open it on this device and you land on your dashboard.` : `No mail service is connected on this machine, so here is the link for local use.`}</p>
+        ${j.dev_link ? `<div class="gate-actions"><a class="pill-btn" href="${esc(j.dev_link)}"><span>Open my sign-in link</span><i aria-hidden="true">↗</i></a></div>` : ""}
+        <div class="sent-timer"><span class="st-ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="16"/><circle class="prog" cx="18" cy="18" r="16" id="sent-prog" pathLength="100"/></svg></span><div><b id="sent-count">${mins}:00</b><span>valid for ${mins} minutes · opening an expired link sends a fresh one</span></div></div>
+        <p class="fine">Nothing in your inbox? Check spam once, then <button class="lnk" data-resend>send again</button> (available after a minute).</p>
+      </div>`;
+  }
+  let sentTimer = null;
+  function startSentTimer(total) {
+    clearInterval(sentTimer); const t0 = Date.now();
+    sentTimer = setInterval(() => { const el = $("#sent-count"), pr = $("#sent-prog"); if (!el) { clearInterval(sentTimer); return; }
+      const left = Math.max(0, total - Math.floor((Date.now() - t0) / 1000)); el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+      if (pr) pr.style.strokeDashoffset = String(100 - (left / total) * 100);
+      if (!left) { clearInterval(sentTimer); el.textContent = "expired"; } }, 1000);
+  }
+  let bgAnim = null;
+  function startLoginFx() {
+    const cv = $("#login-bg"); if (!cv) return;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const ctx = cv.getContext("2d"); let W, H, pts = [];
+    const size = () => { W = cv.width = cv.clientWidth * devicePixelRatio; H = cv.height = cv.clientHeight * devicePixelRatio; };
+    size(); addEventListener("resize", size);
+    const N = reduce ? 0 : Math.min(90, Math.floor((cv.clientWidth * cv.clientHeight) / 14000));
+    for (let i = 0; i < N; i++) pts.push({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - .5) * .25 * devicePixelRatio, vy: (Math.random() - .5) * .25 * devicePixelRatio, r: (Math.random() * 1.6 + .6) * devicePixelRatio, a: Math.random() * Math.PI * 2 });
+    const draw = () => {
+      if (!document.body.contains(cv)) { cancelAnimationFrame(bgAnim); return; }
+      ctx.clearRect(0, 0, W, H);
+      for (const p of pts) { p.x += p.vx; p.y += p.vy; p.a += .01; if (p.x < 0 || p.x > W) p.vx *= -1; if (p.y < 0 || p.y > H) p.vy *= -1; }
+      ctx.lineWidth = devicePixelRatio * .6;
+      for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) { const a = pts[i], b = pts[j], d = Math.hypot(a.x - b.x, a.y - b.y), lim = 150 * devicePixelRatio; if (d < lim) { ctx.strokeStyle = `rgba(245,197,66,${(1 - d / lim) * .18})`; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); } }
+      for (const p of pts) { const g = .55 + Math.sin(p.a) * .35; ctx.fillStyle = `rgba(255,227,138,${g})`; ctx.shadowColor = "rgba(245,197,66,.9)"; ctx.shadowBlur = 8 * devicePixelRatio; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
+      ctx.shadowBlur = 0;
+      bgAnim = requestAnimationFrame(draw);
+    };
+    cancelAnimationFrame(bgAnim); if (N) draw();
+    const card = $("#lg-card");
+    if (card && !reduce && matchMedia("(pointer:fine)").matches) {
+      const stage = $(".login-stage");
+      stage.addEventListener("mousemove", (e) => { const b = card.getBoundingClientRect(); const dx = (e.clientX - (b.left + b.width / 2)) / b.width, dy = (e.clientY - (b.top + b.height / 2)) / b.height; card.style.transform = `perspective(1200px) rotateY(${dx * 5}deg) rotateX(${-dy * 5}deg)`; });
+      stage.addEventListener("mouseleave", () => { card.style.transform = ""; });
     }
-    return `<div class="g-shell reveal"><div class="g-core">
-      ${gateBrand()}
-      ${hexSteps(0)}
-      <span class="eyebrow">Sign in or sign up · no password</span>
-      <h1>Sign in to your desk</h1>
-      <p>Enter your email and we send a one-time link. New here? The same link creates your account. It works for 10 minutes and signs you in on the device you open it on; if it runs out, opening it sends a fresh one. Your session then stays active until you sign out.</p>
-      <form id="login-form" class="gate-form"><div class="field"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus></div>${pillBtn("Email me a sign-in link", 'type="submit"')}</form>
-      <div id="login-status" class="gate-status"></div>
-      ${mailLine()}
-      <p class="fine">Market data, model reads and scans here are information, not advice.</p>
-    </div></div>`;
   }
   function onboardingHtml() {
     const have = (user.profile && user.profile.tickers) || [];
@@ -1276,7 +1335,7 @@
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
     const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
     g.hidden = false; g.innerHTML = STATIC_MODE ? html.replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Continue as a guest">×</button>') : html;
-    wireGate();
+    wireGate(); startLoginFx();
     document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; renderGate(); }));
     const dgo = $("#disc-go"); if (dgo) {
       const ok = $("#disc-ok"); ok.addEventListener("change", () => { dgo.disabled = !ok.checked; });
@@ -1310,8 +1369,8 @@
         const res = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
         if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not send the link."; return; }
-        st.innerHTML = j.status === "sent" ? `<b>Check your email.</b> We sent a sign-in link to ${esc(email)}. It works for ${j.expires_in_min || 10} minutes; open it on this device and you will land on your dashboard. If it runs out, opening it sends you a fresh one automatically.`
-          : `<b>No mail server is configured on this machine</b>, so the link could not be emailed.${j.dev_link ? ` For local use, here it is: <a class="devlink" href="${esc(j.dev_link)}">Open my sign-in link</a>` : " Ask the site owner to set MU_SMTP_* on the server."}`;
+        const core = $("#login-core"); if (core) { core.innerHTML = sentHtml(email, j); startSentTimer(j.expires_in_s || 600);
+          const rs = core.querySelector("[data-resend]"); if (rs) rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); }
       } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
     });
     const go = $("#picks-go"); if (!go) return;
