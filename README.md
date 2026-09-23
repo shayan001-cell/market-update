@@ -51,6 +51,20 @@ round). The server remembers every ticker added from the page, so scheduled buil
 analyse them fully from then on. On the public GitHub Pages copy there is no server:
 quote cards still work for the build's names, and full analysis follows `watchlist.txt`.
 
+**Home.** Mood and final verdicts, "What today's numbers mean", then three action panels:
+**Around the world** (twelve major indices with a one-line read of Asia and Europe),
+**What is moving** (sector ETFs ranked by today's move with the five-day change, and the
+data-center theme groups by one-month return with the model's stage and next leg) and
+**Where the action is** (only names with a real signal now: scanner rows that qualify with a
+read, low-float names that have rotated their float, and analysed names moving more than
+3% with a verdict, each with a plain signal and a "+ Watch" button). The watchlist itself
+lives on its own page.
+
+**Sign-in and the disclaimer.** The sign-in card shows first; the disclaimer shows on every
+login with an "I agree" button and an "I do not agree, sign out" link. The public preview
+requires sign-in and has no guest mode. The menu footer has "Invite friends on WhatsApp",
+which opens a ready-made message with the link and what the desk does.
+
 **Watchlist page (view 2).** One card per name with three perspectives side by side, each
 from the same TypeSafe stock read: **Day trade** (the intraday playbook, day score, daily
 range, volume versus normal, yesterday's range, the live volume-build score), **Swing**
