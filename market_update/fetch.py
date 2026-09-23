@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 Chrome/124 Safari/537.36",
       "Accept": "application/json, text/plain, */*"}
 
-CACHE_DIR = config.OUTPUT_DIR / ".cache"
+CACHE_DIR = config.CACHE_DIR
 
 
 def _cache_get(name: str, ttl_s: int) -> Any | None:

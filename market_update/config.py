@@ -11,9 +11,12 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = PROJECT_ROOT / "output"
+# When the package is pip-installed (GitHub Actions, Docker) PROJECT_ROOT is inside
+# site-packages, so data paths can be pointed elsewhere with env vars.
+OUTPUT_DIR = Path(os.environ.get("MU_DATA_DIR", PROJECT_ROOT / "output"))
+CACHE_DIR = Path(os.environ.get("MU_CACHE_DIR", OUTPUT_DIR / ".cache"))
 STATIC_DIR = PROJECT_ROOT / "market_update" / "static"
-WATCHLIST_FILE = PROJECT_ROOT / "watchlist.txt"
+WATCHLIST_FILE = Path(os.environ.get("MU_WATCHLIST", PROJECT_ROOT / "watchlist.txt"))
 
 # ---------------------------------------------------------------------------
 # Macro tape (yahoo symbol, display label, kind)
@@ -134,10 +137,12 @@ INTERVAL_OFF_S = int(os.environ.get("MU_INTERVAL_OFF", "3600"))         # nights
 
 
 def load_watchlist() -> list[str]:
-    if not WATCHLIST_FILE.exists():
+    """Read watchlist.txt from MU_WATCHLIST, the project root, or the current directory."""
+    path = next((p for p in (WATCHLIST_FILE, Path.cwd() / "watchlist.txt") if p.exists()), None)
+    if path is None:
         return []
     out: list[str] = []
-    for line in WATCHLIST_FILE.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.split("#", 1)[0].strip().upper()
         if line:
             out.append(line)

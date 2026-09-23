@@ -152,7 +152,7 @@ Actions minutes a month; this schedule uses roughly 500.
 ```bash
 gh auth login                                   # once
 gh repo create market-update --public --source . --push
-gh secret set TYPESAFE_API_KEY                  # paste the key when prompted
+gh secret set TYPESAFE_API_KEY                  # paste the key when prompted (Actions reads watchlist.txt from the repo)
 gh api -X POST repos/{owner}/market-update/pages -f build_type=workflow
 gh workflow run build.yml
 ```
