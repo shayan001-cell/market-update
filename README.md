@@ -51,6 +51,16 @@ round). The server remembers every ticker added from the page, so scheduled buil
 analyse them fully from then on. On the public GitHub Pages copy there is no server:
 quote cards still work for the build's names, and full analysis follows `watchlist.txt`.
 
+**Watchlist page (view 2).** One card per name with three perspectives side by side, each
+from the same TypeSafe stock read: **Day trade** (the intraday playbook, day score, daily
+range, volume versus normal, yesterday's range, the live volume-build score), **Swing**
+(the stance, swing score, lean, setup, the ten-point checklist and the plan with stop,
+target and reward-to-risk) and **Long term** (a three-to-twelve-month posture: accumulate,
+hold, trim, avoid or no view, plus a 0–3 quality score, judged from valuation, revenue
+and EPS growth, margins, analyst consensus and the 3, 6 and 12-month trend). The add box
+and the chips at the top of the page add and remove names; the home page shows the same
+list as compact cards whose blocks line up across the row.
+
 **Volume scanner (SCAN › Volume scanner).** Runs by itself, no input needed. In server
 mode it re-runs every minute while the market is pre, open or after hours (every ten
 minutes overnight) and the table updates in place with a live stamp and a countdown; the

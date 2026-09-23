@@ -13,7 +13,7 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "HOME", "1"], ["scan", "SCAN", "2"], ["stock", "STOCKS", "3"], ["theme", "THEMES", "4"], ["smart", "SMART MONEY", "5"], ["macro", "MACRO", "6"], ["admin", "ADMIN", "7"]];
+  const VIEWS = [["home", "HOME", "1"], ["watch", "WATCHLIST", "2"], ["scan", "SCAN", "3"], ["stock", "STOCKS", "4"], ["theme", "THEMES", "5"], ["smart", "SMART MONEY", "6"], ["macro", "MACRO", "7"], ["admin", "ADMIN", "8"]];
   const ICONS = {
     home: '<svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M10 20v-5h4v5"/></svg>',
     scan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 3v9l6.5 4"/></svg>',
@@ -21,10 +21,11 @@
     theme: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
     smart: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.1c0 2.9 6 1.6 6 4.6 0 1.4-1.4 2.3-3 2.3s-3-.9-3-2.3"/></svg>',
     macro: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>',
+    watch: '<svg viewBox="0 0 24 24"><path d="M12 3.5 14.6 9l6 .6-4.5 4 1.4 5.9L12 16.4 6.5 19.5 7.9 13.6l-4.5-4 6-.6z"/></svg>',
     admin: '<svg viewBox="0 0 24 24"><path d="M12 3 4 6.5v5c0 4.6 3.4 8.4 8 9.5 4.6-1.1 8-4.9 8-9.5v-5z"/><path d="m9 12 2 2 4-4"/></svg>',
   };
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
-  const NAV_GROUPS = [["Workspace", ["home", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]], ["Admin", ["admin"]]];
+  const NAV_GROUPS = [["Workspace", ["home", "watch", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]], ["Admin", ["admin"]]];
   let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
   let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
   let gateOpen = true;                   // the sign-in card shows first; the dashboard follows a successful login
@@ -288,20 +289,20 @@
     const earn = s.fundamentals && isNum(s.fundamentals.days_to_earnings) && s.fundamentals.days_to_earnings >= 0 && s.fundamentals.days_to_earnings <= 10 ? `<span class="tag warn">earnings in ${s.fundamentals.days_to_earnings}d</span>` : "";
     const st = a.stance ? a.stance.choice : null;
     const it = a.intraday ? ST.intraday[a.intraday.choice] : null;
-    const verdict = st ? `<div class="verdict ${ST.cls[st]}"><div class="verdict-word">${ST.stance[st][0]}</div><div class="verdict-why">${ST.stance[st][1]} ${a.main_reason ? "Mainly " + ST.reason[a.main_reason.choice] + "." : ""} ${a.stance.confidence < 0.45 ? '<span class="tag lowconf">low confidence</span>' : `<span class="muted">${(a.stance.confidence * 100).toFixed(0)}% sure</span>`}</div>${it ? `<div class="verdict-intra"><span class="pill ${it[2]}">Intraday: ${it[0]}</span> <span class="muted">${it[1]}${a.intraday.confidence < 0.45 ? " Low confidence." : ""}</span></div>` : ""}</div>` : "";
-    return `<article class="wcard ${leanCls}" data-ticker="${esc(s.ticker)}">
-      <div class="wc-head"><div><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}" title="Open ${esc(s.ticker)}'s page">${esc(s.ticker)}</button><span class="wc-name">${esc(s.name)}</span></div><div class="wc-price"><span class="px">${fnum(s.last_price)}</span> <span class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</span>${compact ? "" : `<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from this list">×</button>`}</div></div>
+    const stCls = st ? ST.cls[st] : "none";
+    const verdict = st ? `<div class="verdict ${stCls}"><div class="verdict-word">${ST.stance[st][0]}</div><div class="verdict-why">${ST.stance[st][1]} ${a.main_reason ? "Mainly " + ST.reason[a.main_reason.choice] + "." : ""}</div><div class="verdict-meta">${a.stance.confidence < 0.45 ? '<span class="tag lowconf">low confidence</span>' : `<span class="mono">${(a.stance.confidence * 100).toFixed(0)}% sure</span>`}${it ? `<span class="pill ${it[2]}">Intraday · ${it[0]}</span>` : ""}</div></div>`
+      : `<div class="verdict none"><div class="verdict-word">${analyzing.has(s.ticker) ? "ANALYSING" : "NO VERDICT"}</div><div class="verdict-why">${analyzing.has(s.ticker) ? "The model is reading this name now." : "The model returned no stance for this build."}</div><div class="verdict-meta"></div></div>`;
+    const who = whoHtml(s);
+    return `<article class="wcard ${leanCls} st-${stCls}" data-ticker="${esc(s.ticker)}">
+      <div class="wc-head"><div class="wc-id"><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}" title="Open ${esc(s.ticker)}'s page">${esc(s.ticker)}</button><span class="wc-name" title="${esc(s.name)}">${esc(s.name)}</span></div><div class="wc-price"><span class="px">${fnum(s.last_price)}</span><span class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</span>${compact ? "" : `<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from this list">×</button>`}</div></div>
       ${verdict}
       ${nowStrip(s, r)}
       <div class="wc-lean"><span class="lean ${leanCls}">${lean.toUpperCase()}</span><span class="wc-leansub">${a.bias ? `${(a.bias.confidence * 100).toFixed(0)}% sure` : "no model read"} · ${a.setup ? pretty(a.setup.choice) : "–"}</span></div>
-      <div class="wc-scores"><span title="Swing setup quality, 0–100">Swing setup: <b>${words(s.scores.swing, 1.0001, SCORE_WORDS)}</b> <span class="muted">${(s.scores.swing * 100).toFixed(0)}</span></span><span title="Day-trade fit, 0–100">Day trade: <b>${words(s.scores.day, 1.0001, SCORE_WORDS)}</b> <span class="muted">${(s.scores.day * 100).toFixed(0)}</span></span><span title="Average daily move">Moves ${fpct(t.atr_pct, 1, false)} a day</span></div>
-      ${compact ? "" : `<div class="wc-who"><div class="wc-who-h">Who is buying</div>${whoHtml(s)}</div>`}
-      ${a.price_action ? `<div class="wc-pa">${PA.control[a.price_action.choice] || ""} ${PA.structure[pa.structure] || ""} Last candle: ${pretty(pa.pattern || "ordinary")}.</div>` : ""}
-      ${pl ? `<div class="wc-plan ${pl.lean}">${pl.text}</div>` : '<div class="wc-plan">Model read unavailable for this build.</div>'}
+      <div class="wc-scores"><span title="Swing setup quality, 0–100"><i>Swing</i><b>${words(s.scores.swing, 1.0001, SCORE_WORDS)}</b><em class="mono">${(s.scores.swing * 100).toFixed(0)}</em></span><span title="Day-trade fit, 0–100"><i>Day trade</i><b>${words(s.scores.day, 1.0001, SCORE_WORDS)}</b><em class="mono">${(s.scores.day * 100).toFixed(0)}</em></span><span title="Average daily move"><i>Moves</i><b class="mono">${fpct(t.atr_pct, 1, false)}</b><em>a day</em></span></div>
+      <div class="wc-who"><div class="wc-who-h">Who is buying</div>${who || '<ul class="who"><li class="na">No smart-money data for this name.</li></ul>'}</div>
+      <div class="wc-read">${a.price_action ? `<div class="wc-pa">${PA.control[a.price_action.choice] || ""} ${PA.structure[pa.structure] || ""} Last candle: ${pretty(pa.pattern || "ordinary")}.</div>` : '<div class="wc-pa muted">No price-action read.</div>'}${pl ? `<div class="wc-plan ${pl.lean}">${pl.text}</div>` : '<div class="wc-plan">No plan: the model has no lean here.</div>'}</div>
       ${checklistHtml(checklist(s, r || report))}
-      ${flags || earn || smBadge(s) || opBadge(s) ? `<div class="wc-flags">${earn}${flags}${smBadge(s)}${opBadge(s)}</div>` : ""}
-      ${compact ? "" : ""}
-      <div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Open chart</a></div>
+      <div class="wc-foot"><div class="wc-flags">${earn}${flags}${smBadge(s)}${opBadge(s)}</div><div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
 
@@ -364,6 +365,44 @@
     </section>`;
   }
 
+  const LT = {
+    stance: { accumulate: ["ACCUMULATE", "Growing business, defensible price, primary trend up or basing. Build it over time, buying weakness.", "up"],
+              hold: ["HOLD", "Sound holding but fully priced or extended. Keep it, add only on real pullbacks.", "up2"],
+              trim: ["TRIM", "The run is stretched and expectations are high. Take some off into strength.", "flat"],
+              avoid: ["AVOID", "Growth is fading, the price is stretched, or the primary trend is down. Not a long-term holding.", "down"],
+              no_view: ["NO VIEW", "Too little fundamental information to judge.", "none"] },
+    quality: ["weak", "mixed", "solid", "outstanding"],
+  };
+  function perspectiveCard(s, r) {
+    const a = s.ai || {}, t = s.technicals || {}, f = s.fundamentals || {}, c = cls(s.chg_pct);
+    const st = a.stance ? a.stance.choice : null, it = a.intraday ? a.intraday.choice : null, lt = a.long_term ? a.long_term.choice : null;
+    const pl = plan(s), ck = checklist(s, r);
+    const dayCol = `<div class="pcol day"><div class="pcol-h"><span>Day trade</span><em>today</em></div>
+      ${it ? `<div class="pverdict ${ST.intraday[it][2]}">${ST.intraday[it][0]}</div><p>${ST.intraday[it][1]}</p>` : `<div class="pverdict none">${analyzing.has(s.ticker) ? "ANALYSING" : "NO READ"}</div><p>${analyzing.has(s.ticker) ? "Reading the tape now." : "No intraday read this build."}</p>`}
+      <dl class="pkv"><dt>Day score</dt><dd><b>${words(s.scores.day, 1.0001, SCORE_WORDS)}</b> <span class="mono muted">${(s.scores.day * 100).toFixed(0)}</span></dd><dt>Moves a day</dt><dd class="mono">${fpct(t.atr_pct, 1, false)}</dd><dt>Volume vs normal</dt><dd class="mono">${isNum(s.rel_volume) ? s.rel_volume.toFixed(1) + "×" : "n/a"}</dd><dt>Yesterday</dt><dd class="mono">${fnum(t.prev_low)} – ${fnum(t.prev_high)}</dd>${s.scan ? `<dt>Volume build</dt><dd class="mono ${s.scan.direction === "up" ? "up" : s.scan.direction === "down" ? "down" : ""}">${s.scan.score.toFixed(0)}/100 · ${s.scan.lead}</dd>` : ""}</dl></div>`;
+    const swingCol = `<div class="pcol swing"><div class="pcol-h"><span>Swing trade</span><em>1–10 sessions</em></div>
+      ${st ? `<div class="pverdict ${ST.cls[st]}">${ST.stance[st][0]}</div><p>${ST.stance[st][1]}${a.main_reason ? " Mainly " + ST.reason[a.main_reason.choice] + "." : ""}</p>` : `<div class="pverdict none">${analyzing.has(s.ticker) ? "ANALYSING" : "NO VERDICT"}</div><p>No stance this build.</p>`}
+      <dl class="pkv"><dt>Swing score</dt><dd><b>${words(s.scores.swing, 1.0001, SCORE_WORDS)}</b> <span class="mono muted">${(s.scores.swing * 100).toFixed(0)}</span></dd><dt>Lean</dt><dd>${a.bias ? `<span class="${{ long: "up", short: "down" }[a.bias.choice] || "flat"}">${a.bias.choice}</span> <span class="mono muted">${(a.bias.confidence * 100).toFixed(0)}%</span>` : "–"}</dd><dt>Setup</dt><dd>${a.setup ? pretty(a.setup.choice) : "–"}</dd><dt>Checklist</dt><dd>${ck ? `<b class="${ck.passed >= 8 ? "up" : ck.passed >= 6 ? "warn" : "down"}">${ck.passed}/${ck.total}</b>` : "–"}</dd></dl>
+      ${pl && pl.stop ? `<div class="pplan">Entry ~${fnum(s.last_price)} · stop <b>${fnum(pl.stop)}</b> · target <b>${fnum(pl.target)}</b> · <b>${pl.rr.toFixed(1)}×</b> reward to risk</div>` : `<div class="pplan muted">${pl ? pl.text : "No plan without a lean."}</div>`}</div>`;
+    const ltv = lt ? LT.stance[lt] : null; const q = a.long_term_quality ? Math.round(a.long_term_quality.score) : null;
+    const longCol = `<div class="pcol long"><div class="pcol-h"><span>Long term</span><em>3–12 months</em></div>
+      ${ltv ? `<div class="pverdict ${ltv[2]}">${ltv[0]}</div><p>${ltv[1]}${q != null ? ` Quality: <b>${LT.quality[q]}</b> (${a.long_term_quality.score.toFixed(1)}/3).` : ""}</p>` : `<div class="pverdict none">${analyzing.has(s.ticker) ? "ANALYSING" : "NO VIEW"}</div><p>${analyzing.has(s.ticker) ? "Reading the fundamentals now." : "The long-term read arrives with the next build of this name."}</p>`}
+      <dl class="pkv"><dt>3m / 6m / 12m</dt><dd><span class="${cls(t.ret_3m)}">${fpct(t.ret_3m, 0)}</span> / <span class="${cls(t.ret_6m)}">${fpct(t.ret_6m, 0)}</span> / <span class="${cls(t.ret_12m)}">${fpct(t.ret_12m, 0)}</span></dd><dt>From 52w high</dt><dd class="mono ${cls(t.pct_from_hi52)}">${fpct(t.pct_from_hi52, 0)}</dd><dt>P/E fwd · P/S</dt><dd class="mono">${fnum(f.forward_pe, 0)} · ${fnum(f.ps, 1)}</dd><dt>Revenue growth</dt><dd class="mono ${cls(f.rev_growth)}">${isNum(f.rev_growth) ? fpct(f.rev_growth * 100, 0) : "–"}</dd><dt>Analysts</dt><dd>${pretty(f.analyst) || "–"}${isNum(f.target) ? ` <span class="mono muted">→ ${fnum(f.target, 0)}</span>` : ""}</dd><dt>Above 200-day</dt><dd>${t.above_sma200 == null ? "–" : t.above_sma200 ? '<span class="up">yes</span>' : '<span class="down">no</span>'}</dd></dl></div>`;
+    return `<article class="pcard st-${st ? ST.cls[st] : "none"}" data-ticker="${esc(s.ticker)}">
+      <div class="pcard-h"><div class="wc-id"><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}">${esc(s.ticker)}</button><span class="wc-name" title="${esc(s.name)}">${esc(s.name)}${s.sector ? " · " + esc(s.sector) : ""}</span></div><div class="wc-price"><span class="px">${fnum(s.last_price)}</span><span class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</span><button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from your watchlist">×</button></div></div>
+      <div class="pgrid">${dayCol}${swingCol}${longCol}</div>
+      <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
+    </article>`;
+  }
+  function secWatchPage(r) {
+    const tickers = activeList();
+    const cards = tickers.map((t) => { const s = stockFor(t); if (s) return perspectiveCard(s, r); const q = r.lite && r.lite[t]; return q ? liteCard(t, q, r) : pendingCard(t); });
+    return `<section class="watch-page">
+      ${watchStrip(r)}
+      ${explain("Every name you add is read three ways by the model: today's tape for a day trade, the next one to ten sessions for a swing, and the business plus the primary trend for the next three to twelve months. Verdicts are the model's stance from typed questions, not advice.")}
+      ${cards.length ? `<div class="pboard">${cards.join("")}</div>` : '<div class="empty">Your watchlist is empty. Add a ticker or company above; stocks, ETFs and crypto all work.</div>'}
+    </section>`;
+  }
   function watchStrip(r) {
     const tickers = activeList();
     const chips = tickers.map((t) => { const s = stockFor(t); const q = s || (r.lite || {})[t] || {}; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
@@ -862,7 +901,7 @@
     const l = lists.lists[lists.active];
     if (!l.includes(t)) { l.push(t); saveLists(); }
     if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t);
-    closeSearch(); if (currentView !== "home") switchView("home"); else renderAll();
+    closeSearch(); if (currentView !== "home" && currentView !== "watch") switchView("watch"); else renderAll();
   }
   function removeTicker(t) {
     const l = lists.lists[lists.active]; const i = l.indexOf(t); if (i < 0) return;
@@ -1371,6 +1410,7 @@
   function viewHtml(r) {
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secMeaning(r)}${secBoard(r)}</div>${secToday(r)}</div>`;
+      case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
       case "admin": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one admin-view">${secAdmin()}</div>`;
       case "scan": return `<div class="view sub">${subTabs("scan")}<div class="subview">${subTab.scan === "lowfloat" ? secLowFloat(r) : secScan(r)}</div></div>`;
@@ -1602,7 +1642,7 @@
     }
     await loadUser();
     try { report = await fetchReport(); (report.headlines || []).forEach((h) => newsSeen.add(h.id)); renderAll(); refreshAdhoc(); }
-    catch (e) { $("#app").innerHTML = '<div class="loading">First build in progress… this page will fill in automatically.</div>'; }
+    catch (e) { console.error("render failed", e); $("#app").innerHTML = `<div class="loading">${report ? "Render error: " + esc(e && e.message) : "First build in progress… this page will fill in automatically."}</div>`; }
     renderGate(); disclaimerBanner();
     setInterval(poll, 15000);
     poll();

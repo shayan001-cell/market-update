@@ -204,6 +204,31 @@ STOCK_QUESTIONS = {
             "indecision": "Small bodies, inside bars, overlapping ranges; neither side has pressed an advantage",
         },
     ),
+    "long_term": Choice(
+        instructions=(
+            "Looking three to twelve months out for `ticker`, weighing `fundamentals` (valuation via forward and trailing "
+            "P/E and price-to-sales, revenue and EPS growth, margins, the analyst consensus and target), the longer `trend` "
+            "fields (`ret_3m`, `ret_6m`, `ret_12m`, `pct_from_52w_high`, `above_sma200`) and any structural news in "
+            "`headlines`, what is the sensible long-term posture? Ignore this week's noise; this is about the business and "
+            "the primary trend. For an ETF, judge the index or theme it tracks; for a cryptocurrency, judge adoption and the primary trend."
+        ),
+        criteria={
+            "accumulate": "Business or theme is growing, valuation is defensible and the primary trend is up or basing: build a position over time, buying weakness",
+            "hold": "Sound holding but fully priced or already extended over 6-12 months: keep it, add only on real pullbacks",
+            "trim": "Primary trend intact but the run is stretched and expectations are high: take some off into strength",
+            "avoid": "Deteriorating growth, stretched valuation with slowing fundamentals, or a primary downtrend below the 200-day: not a long-term holding",
+            "no_view": "Too little fundamental information to judge (thin data, shell company, or no coverage)",
+        },
+    ),
+    "long_term_quality": Score(
+        instructions="How strong is `ticker` as a three-to-twelve-month holding on fundamentals and primary trend together?",
+        criteria=[
+            "Weak: shrinking or unprofitable with no clear turn, or a broken primary trend",
+            "Mixed: growth or trend present but valuation, margins or momentum argue against it",
+            "Solid: growing, profitable or clearly on the way, primary trend up, valuation reasonable for its growth",
+            "Outstanding: durable growth, expanding margins, leadership in its theme and a steady primary uptrend",
+        ],
+    ),
     "entry_quality": Score(
         instructions=(
             "How clean is an entry in `ticker` right now, in the direction the technicals favour, judging from "
