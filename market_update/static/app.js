@@ -22,8 +22,11 @@
     smart: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.1c0 2.9 6 1.6 6 4.6 0 1.4-1.4 2.3-3 2.3s-3-.9-3-2.3"/></svg>',
     macro: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>',
   };
-  const SUBTABS = { smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
-  let subTab = { smart: "money", macro: "picture" };
+  const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
+  const NAV_GROUPS = [["Workspace", ["home", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]]];
+  let subTab = { scan: "scanner", smart: "money", macro: "picture" };
+  const USER_KEY = "mu-user";
+  let user = null;                       // { email, profile: { accepted_disclaimer_at, kind, tickers } }
   let newsItems = [], newsSeen = new Set();
   // Watchlists live in this browser (several named lists); the server also keeps the union so scheduled builds analyse them fully.
   const LISTS_KEY = "mu-lists";
@@ -1057,6 +1060,126 @@
     </section>`;
   }
 
+
+  // ---------------------------------------------------------------- left menu
+  function renderNav() {
+    const label = (k) => VIEWS.find((v) => v[0] === k);
+    $("#nav").innerHTML = NAV_GROUPS.map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
+      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}</span><kbd>${n}</kbd></button>` +
+        (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("");
+    const foot = $("#side-foot");
+    if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links"><button class="lnk" data-picks>Change picks</button> · <button class="lnk" data-signout>Sign out</button></div>${STATIC_MODE ? '<div class="meta2">profile kept in this browser</div>' : ""}`
+      : `<div class="meta2">Not signed in</div>`;
+    const pk = foot && foot.querySelector("[data-picks]"); if (pk) pk.addEventListener("click", () => { if (user) { user.profile = Object.assign({}, user.profile, { accepted_disclaimer_at: null }); renderGate(); } });
+    const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
+  }
+  function initSide() {
+    const shell = $("#shell"), tg = $("#side-toggle"); if (!shell || !tg) return;
+    let c = false; try { c = localStorage.getItem("mu-side") === "collapsed"; } catch (e) {}
+    shell.classList.toggle("collapsed", c); tg.textContent = c ? "›" : "‹";
+    tg.addEventListener("click", () => { const now = !shell.classList.contains("collapsed"); shell.classList.toggle("collapsed", now); tg.textContent = now ? "›" : "‹"; try { localStorage.setItem("mu-side", now ? "collapsed" : "open"); } catch (e) {} window.dispatchEvent(new Event("resize")); });
+  }
+
+  // ---------------------------------------------------------------- sign-in gate + onboarding
+  async function loadUser() {
+    if (STATIC_MODE) { try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; } return; }
+    try { const res = await fetch("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; }
+  }
+  const gateNeeded = () => !user || !(user.profile && user.profile.accepted_disclaimer_at);
+  const CRYPTO_PICKS = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "DOT-USD", "LTC-USD", "TRX-USD"];
+  function loginHtml() {
+    return `<div class="gate-card">
+      <div class="gate-brand">${$(".side-brand .logo") ? $(".side-brand .logo").outerHTML : ""}<span>MARKET <b>UPDATE</b></span></div>
+      <h1>Sign in</h1>
+      <p>${STATIC_MODE ? "Enter your email to open your personal dashboard. This public copy has no mail server, so nothing is sent: your email and picks stay in this browser only. The hosted server version emails a one-time sign-in link."
+        : "Enter your email and we will send a one-time sign-in link. No password to remember."}</p>
+      <form id="login-form" class="gate-form"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus><button class="btn big" type="submit">${STATIC_MODE ? "Continue" : "Send sign-in link"}</button></form>
+      <div id="login-status" class="gate-status"></div>
+      <p class="meta2">Market data, model reads and scans on this site are information, not advice. You will be asked to confirm this after signing in.</p>
+    </div>`;
+  }
+  function onboardingHtml() {
+    const kind = (user.profile && user.profile.kind) || "stocks";
+    const have = (user.profile && user.profile.tickers) || [];
+    return `<div class="gate-card wide">
+      <div class="gate-brand">${$(".side-brand .logo") ? $(".side-brand .logo").outerHTML : ""}<span>MARKET <b>UPDATE</b></span><span class="muted" style="margin-left:auto">${esc(user.email)}</span></div>
+      <div class="disc"><h2>This is not financial advice.</h2><p>Market Update shows market data, arithmetic over that data, and model reads produced by typed questions. None of it is a recommendation to buy or sell anything. Markets can move against you fast; low-float names can halt; you alone are responsible for any trade you make. If you need advice, talk to a licensed adviser.</p>
+        <label class="ck"><input type="checkbox" id="disc-ok"> I understand that nothing on this site is financial advice and that I trade at my own risk.</label></div>
+      <div class="picks-block"><h1>Build your dashboard</h1><p>Tell us what you follow. We will analyse each name and put it on your home page.</p>
+        <div class="picks-kind"><button class="tab ${kind === "stocks" ? "active" : ""}" data-kind="stocks">Top 5 stocks</button><button class="tab ${kind === "crypto" ? "active" : ""}" data-kind="crypto">Top 2 cryptocurrencies</button></div>
+        <div class="picks" id="picks">${picksInputs(kind, have)}</div>
+        <datalist id="sym-list"></datalist>
+        <div class="gate-actions"><button class="btn big" id="picks-go" disabled>Build my dashboard</button><span id="picks-status" class="gate-status"></span></div></div>
+    </div>`;
+  }
+  function picksInputs(kind, have) {
+    const n = kind === "crypto" ? 2 : 5;
+    const ph = kind === "crypto" ? ["BTC-USD", "ETH-USD"] : ["NVDA", "AAPL", "TSLA", "SPY", "AMD"];
+    return Array.from({ length: n }, (_, i) => `<input class="pick" list="sym-list" placeholder="${ph[i]}" value="${esc((have[i] || "").toUpperCase())}" data-kind="${kind}" maxlength="12" autocomplete="off">`).join("");
+  }
+  function renderGate() {
+    const g = $("#gate"); if (!g) return;
+    if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
+    g.hidden = false; g.innerHTML = user ? onboardingHtml() : loginHtml();
+    wireGate();
+  }
+  function wireGate() {
+    const lf = $("#login-form");
+    if (lf) lf.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = $("#login-email").value.trim().toLowerCase(), st = $("#login-status"); st.className = "gate-status";
+      if (STATIC_MODE) { user = { email, profile: {} }; try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (err) {} renderGate(); return; }
+      st.textContent = "Sending…";
+      try {
+        const res = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        const j = await res.json();
+        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not send the link."; return; }
+        st.innerHTML = j.status === "sent" ? `<b>Check your email.</b> We sent a sign-in link to ${esc(email)}. It is valid for 20 minutes; open it on this device.`
+          : `<b>No mail server is configured on this machine</b>, so the link could not be emailed.${j.dev_link ? ` For local use, here it is: <a class="devlink" href="${esc(j.dev_link)}">Open my sign-in link</a>` : " Ask the site owner to set MU_SMTP_* on the server."}`;
+      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
+    });
+    const go = $("#picks-go"); if (!go) return;
+    const state = () => { const ok = $("#disc-ok").checked; const vals = [...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean); go.disabled = !(ok && vals.length); return vals; };
+    $("#disc-ok").addEventListener("change", state);
+    document.querySelectorAll("[data-kind]").forEach((b) => b.tagName === "BUTTON" && b.addEventListener("click", () => { document.querySelectorAll(".picks-kind .tab").forEach((x) => x.classList.toggle("active", x === b)); $("#picks").innerHTML = picksInputs(b.getAttribute("data-kind"), []); wirePicks(); state(); }));
+    function wirePicks() {
+      document.querySelectorAll("#picks .pick").forEach((inp) => inp.addEventListener("input", () => {
+        state();
+        const kind = inp.getAttribute("data-kind"); const q = inp.value.trim().toUpperCase(); const dl = $("#sym-list"); if (!dl) return;
+        loadSymbols();
+        const rows = kind === "crypto" ? CRYPTO_PICKS.filter((c) => c.startsWith(q)).map((c) => [c, ""]) : searchSymbols(q).filter((r) => r[2] !== "Crypto").slice(0, 8);
+        dl.innerHTML = rows.map((r) => `<option value="${esc(r[0])}">${esc(r[1] || "")}</option>`).join("");
+      }));
+    }
+    wirePicks();
+    go.addEventListener("click", async () => {
+      const vals = state(); if (!vals.length) return;
+      const kind = ($(".picks-kind .tab.active") || {}).getAttribute ? $(".picks-kind .tab.active").getAttribute("data-kind") : "stocks";
+      const st = $("#picks-status"); st.className = "gate-status"; st.textContent = "Saving…";
+      const profile = { accepted_disclaimer_at: new Date().toISOString(), kind, tickers: vals.slice(0, kind === "crypto" ? 2 : 5) };
+      if (STATIC_MODE) { user.profile = profile; try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
+      else {
+        try {
+          const res = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, kind, tickers: profile.tickers }) });
+          const j = await res.json(); if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not save."; return; }
+          user.profile = j.profile;
+        } catch (e) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; return; }
+      }
+      applyProfile();
+    });
+  }
+  function applyProfile() {
+    const picks = (user.profile && user.profile.tickers) || [];
+    ensureLists(report);
+    if (picks.length) { lists.lists["My picks"] = picks.slice(); lists.active = "My picks"; saveLists(); picks.forEach((t) => { if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t); }); }
+    renderGate(); if (currentView !== "home") currentView = "home"; renderAll();
+  }
+  async function signOut() {
+    if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
+    else { try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) {} }
+    user = null; renderGate();
+  }
+
   function renderAll() {
     const r = report;
     ensureLists(r);
@@ -1065,7 +1188,7 @@
     const ms = $("#market-state"); ms.textContent = { pre: "pre-market", open: "market open", post: "after hours", closed: "closed" }[r.market_state] || r.market_state; ms.className = "badge " + r.market_state;
     $("#generated-line").textContent = `UPD ${r.generated_at.slice(11, 16)} ET · ${r.elapsed_s}S`;
     const app = $("#app");
-    $("#nav").innerHTML = VIEWS.map(([k, l, n]) => `<button class="nav-btn v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span>${l}<kbd>${n}</kbd></button>`).join("");
+    renderNav();
     app.innerHTML = viewHtml(r);
     firstRender = false;
     const st = r.ai_stats;
@@ -1078,7 +1201,7 @@
   function viewHtml(r) {
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secBoard(r)}</div>${secToday(r)}</div>`;
-      case "scan": return `<div class="view scan">${secScan(r)}${secLowFloat(r)}</div>`;
+      case "scan": return `<div class="view sub">${subTabs("scan")}<div class="subview">${subTab.scan === "lowfloat" ? secLowFloat(r) : secScan(r)}</div></div>`;
       case "stock": return `<div class="view stock">${secStocks(r)}</div>`;
       case "theme": return `<div class="view one">${secTheme(r)}</div>`;
       case "smart": return `<div class="view sub">${subTabs("smart")}<div class="subview">${subTab.smart === "options" ? secOptions(r) : secSmart(r)}</div></div>`;
@@ -1128,7 +1251,7 @@
   function wireStocks() {
     document.querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", (e) => e.stopPropagation()));
     document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async (e) => { e.preventDefault(); const src = b.closest(".share").querySelector(".share-src"); try { await navigator.clipboard.writeText(src.value); b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy text"), 1500); } catch (err) { src.hidden = false; src.select(); } }));
-    document.querySelectorAll(".nav-btn").forEach((b) => b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
+    document.querySelectorAll(".nav-btn, .side-item").forEach((b) => b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
     document.querySelectorAll("[data-theme-group]").forEach((b) => b.addEventListener("click", () => {
       themeGroup = b.getAttribute("data-theme-group");
       const sec = document.querySelector(".th-section"); const tmp = document.createElement("div"); tmp.innerHTML = secTheme(report); sec.replaceWith(tmp.firstElementChild); wireStocks();
@@ -1231,8 +1354,9 @@
 
   async function init() {
     initTheme();
-    addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
-    wireSearch();
+    addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; const gt = $("#gate"); if (gt && !gt.hidden) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
+    wireSearch(); initSide();
+    if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
     addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
     $("#refresh-btn").addEventListener("click", onRefresh);
     if (STATIC_MODE) {
@@ -1240,6 +1364,7 @@
       const rb = $("#refresh-btn"); rb.hidden = false; rb.textContent = "REFRESH";
       rb.onclick = async () => { rb.disabled = true; rb.textContent = "CHECKING…"; try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); notice(`Updated to the ${fresh.generated_at.slice(11, 16)} ET build.`); } else notice("You already have the latest build. Forced rebuilds run from the project's Actions page.", true); } } catch (e) { notice("Static snapshot: nothing newer is reachable from here.", true); } rb.disabled = false; rb.textContent = "REFRESH"; };
       renderAll();
+      await loadUser(); renderGate();
       // Hosted statically (e.g. GitHub Pages): a scheduled job republishes report.json; pick it up without a reload.
       setInterval(async () => {
         try {
@@ -1256,8 +1381,10 @@
       }, 120000);
       return;
     }
+    await loadUser();
     try { report = await fetchReport(); (report.headlines || []).forEach((h) => newsSeen.add(h.id)); renderAll(); refreshAdhoc(); }
     catch (e) { $("#app").innerHTML = '<div class="loading">First build in progress… this page will fill in automatically.</div>'; }
+    renderGate();
     setInterval(poll, 15000);
     poll();
     setInterval(pollNews, 60000);

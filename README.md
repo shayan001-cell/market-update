@@ -145,14 +145,36 @@ least 1.5× risk), no event inside five sessions, RSI below 70, clean entry (mod
 at least 2). Short leans mirror these. Eight or more is "Ready", six or seven "Almost",
 fewer "Not yet". Every line shows why it passed or failed.
 
-## Layout: one screen, ten views
+## Sign-in, disclaimer and picks
 
-The page never scrolls on desktop. A HUD bar at the top holds the brand, the view menu,
-the ticker search box and the status readouts. Views switch from the menu or with keys
-1–9 and 0 and are kept in the URL hash: HOME (mood, verdicts, the active watchlist,
-today's sheet), SCAN (volume scanner and low float), STOCK (candidate list beside the
-full analysis), THEME, SMART $, MACRO (mood detail and the 1/3/6/12-month picture),
-MARKET (tape, indexes, rates), FLOWS, NEWS, OPTIONS. Dense tables scroll inside their own
+The page opens on a sign-in card. In server mode the flow is passwordless: enter an email,
+`POST /api/auth/request` stores a one-time token (20 minutes, single use) and emails a
+link; opening `/auth/verify?token=…` sets a signed, HttpOnly session cookie (30 days,
+HMAC with `MU_SECRET`, generated into the data directory if unset). Email goes out over
+SMTP when `MU_SMTP_HOST`, `MU_SMTP_PORT`, `MU_SMTP_USER`, `MU_SMTP_PASS` and `MU_SMTP_FROM`
+are set; without a mail server the link is written to the server log and, unless
+`MU_DEV_LINKS=0`, handed back to the page so local use still works. `MU_PUBLIC_URL`
+fixes the base URL in links behind a proxy.
+
+Right after the first sign-in the user must accept a one-page disclaimer ("This is not
+financial advice.") and enter their top five stock tickers or top two cryptocurrencies
+(`POST /api/profile`, saved in `users.json`, added to the server's watchlist). Those
+names become the "My picks" list on the home page and are analysed on the spot. "Change
+picks" in the menu footer reopens the step; "Sign out" clears the cookie.
+
+The public GitHub Pages copy has no server, so there the same card keeps the email and
+picks in the browser only and says so; real emailed links need the hosted server
+(Docker / Render files are included).
+
+## Layout: left menu, one screen
+
+The page never scrolls on desktop. A collapsible menu on the left holds the logo and six
+views with lit icons and sub-menus: HOME (mood, verdicts, the active list, a fixed live
+news feed on the right), SCAN (volume scanner, low float), STOCKS, THEMES, SMART MONEY
+(insiders and institutions, options flow), MACRO (big picture, weekly indexes with
+support and resistance, rates, money flows). Keys 1–6 switch views; the hash keeps the
+current one. The slim top bar holds the ADD TICKER search, the market state and the
+refresh button. Dense tables scroll inside their own
 compartment. Below 900px the shell falls back to a single scrolling column.
 
 ## Design

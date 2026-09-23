@@ -5,6 +5,10 @@ exposes a rate-limited refresh endpoint.
 
 Environment:
     TYPESAFE_API_KEY       required unless MU_NO_AI=1
+    MU_SECRET              signs session cookies (generated once into MU_DATA_DIR/.secret if unset)
+    MU_PUBLIC_URL          base URL used in sign-in links (default: the request's origin)
+    MU_SMTP_HOST/PORT/USER/PASS/FROM   send sign-in links by email; without them the link is
+                           logged and, unless MU_DEV_LINKS=0, returned to the page for local use
     MU_NO_AI=1             build without TypeSafe judgments
     MU_REFRESH_COOLDOWN    seconds between manual refreshes (default 120)
     MU_INTERVAL_MARKET     rebuild interval during pre-market/regular session (default 300)
@@ -19,12 +23,14 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import config, fetch
@@ -248,3 +254,184 @@ async def api_news() -> JSONResponse:
                 it["ai"] = judged[it["id"]]
         _news_cache.update(at=now, items=items[:60])
     return JSONResponse({"items": _news_cache["items"], "as_of": _news_cache["at"]}, headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------------------
+# Sign-in: email -> one-time link -> signed session cookie; then disclaimer + picks
+# ---------------------------------------------------------------------------
+import base64
+import hashlib
+import hmac
+import re
+import secrets
+import smtplib
+from email.message import EmailMessage
+
+USERS_PATH = DATA_DIR / "users.json"
+TOKENS_PATH = DATA_DIR / "auth_tokens.json"
+SESSION_COOKIE = "mu_session"
+SESSION_DAYS = 30
+LINK_MINUTES = 20
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _secret() -> bytes:
+    env = os.environ.get("MU_SECRET")
+    if env:
+        return env.encode()
+    path = DATA_DIR / ".secret"
+    if not path.exists():
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(secrets.token_urlsafe(48))
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    return path.read_text().strip().encode()
+
+
+def _load(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save(path: Path, data: dict[str, Any]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=1))
+
+
+def _sign(payload: str) -> str:
+    mac = hmac.new(_secret(), payload.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=") + "." + base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def _unsign(value: str | None) -> str | None:
+    if not value or "." not in value:
+        return None
+    body, sig = value.rsplit(".", 1)
+    try:
+        payload = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)).decode()
+    except Exception:  # noqa: BLE001
+        return None
+    expect = _sign(payload).rsplit(".", 1)[1]
+    return payload if hmac.compare_digest(expect, sig) else None
+
+
+def _session_email(request: Request) -> str | None:
+    payload = _unsign(request.cookies.get(SESSION_COOKIE))
+    if not payload:
+        return None
+    email, _, exp = payload.partition("|")
+    try:
+        return email if float(exp) > time.time() else None
+    except ValueError:
+        return None
+
+
+def _public_url(request: Request) -> str:
+    env = os.environ.get("MU_PUBLIC_URL")
+    if env:
+        return env.rstrip("/")
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost:8000"))
+    return f"{proto}://{host}"
+
+
+def _send_link(email: str, link: str) -> bool:
+    host = os.environ.get("MU_SMTP_HOST")
+    if not host:
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = "Your Market Update sign-in link"
+    msg["From"] = os.environ.get("MU_SMTP_FROM", os.environ.get("MU_SMTP_USER", "market-update@localhost"))
+    msg["To"] = email
+    msg.set_content(f"Click to sign in to Market Update (valid {LINK_MINUTES} minutes):\n\n{link}\n\nIf you did not request this, ignore this email.")
+    with smtplib.SMTP(host, int(os.environ.get("MU_SMTP_PORT", "587")), timeout=20) as smtp:
+        smtp.starttls()
+        if os.environ.get("MU_SMTP_USER"):
+            smtp.login(os.environ["MU_SMTP_USER"], os.environ.get("MU_SMTP_PASS", ""))
+        smtp.send_message(msg)
+    return True
+
+
+@app.post("/api/auth/request")
+async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    email = str(payload.get("email", "")).strip().lower()
+    if not _EMAIL_RE.match(email) or len(email) > 120:
+        raise HTTPException(status_code=400, detail="enter a valid email address")
+    tokens = _load(TOKENS_PATH)
+    now = time.time()
+    tokens = {t: v for t, v in tokens.items() if v.get("exp", 0) > now}
+    if any(v["email"] == email and now - v.get("at", 0) < 60 for v in tokens.values()):
+        raise HTTPException(status_code=429, detail="a link was sent less than a minute ago; check your inbox")
+    token = secrets.token_urlsafe(32)
+    tokens[token] = {"email": email, "exp": now + LINK_MINUTES * 60, "at": now}
+    _save(TOKENS_PATH, tokens)
+    link = f"{_public_url(request)}/auth/verify?token={token}"
+    sent = False
+    try:
+        sent = await asyncio.to_thread(_send_link, email, link)
+    except Exception as e:  # noqa: BLE001
+        log.warning("email delivery failed for %s: %s", email, e)
+    out: dict[str, Any] = {"status": "sent" if sent else "not_sent", "email": email, "expires_in_s": LINK_MINUTES * 60}
+    if not sent:
+        log.info("SIGN-IN LINK for %s: %s", email, link)
+        if os.environ.get("MU_DEV_LINKS", "1") not in ("0", "false", "no"):
+            out["dev_link"] = link          # no mail server configured: hand the link to the page (local use)
+    return JSONResponse(out)
+
+
+@app.get("/auth/verify")
+async def auth_verify(token: str = "") -> Response:
+    tokens = _load(TOKENS_PATH)
+    rec = tokens.pop(token, None)
+    _save(TOKENS_PATH, tokens)
+    if not rec or rec.get("exp", 0) < time.time():
+        return HTMLResponse("<p style='font:15px system-ui;padding:40px'>This sign-in link is invalid or has expired. <a href='/'>Request a new one</a>.</p>", status_code=400)
+    email = rec["email"]
+    users = _load(USERS_PATH)
+    users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat(), "accepted_disclaimer_at": None, "kind": None, "tickers": []})
+    users[email]["last_login"] = datetime.now(tz=config.ET).isoformat()
+    _save(USERS_PATH, users)
+    resp = RedirectResponse("/?signed_in=1", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}"), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/api/me")
+async def api_me(request: Request) -> JSONResponse:
+    email = _session_email(request)
+    if not email:
+        return JSONResponse({"status": "anonymous"}, status_code=401, headers={"Cache-Control": "no-store"})
+    profile = _load(USERS_PATH).get(email) or {}
+    return JSONResponse({"status": "ok", "email": email, "profile": {k: profile.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/profile")
+async def api_profile(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    email = _session_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="sign in first")
+    if not payload.get("accepted"):
+        raise HTTPException(status_code=400, detail="the disclaimer must be accepted")
+    kind = payload.get("kind")
+    tickers = [str(t).upper().strip() for t in (payload.get("tickers") or []) if str(t).strip()]
+    limit = {"stocks": 5, "crypto": 2}.get(kind)
+    if limit is None or not tickers or len(tickers) > limit or any(len(t) > 12 for t in tickers):
+        raise HTTPException(status_code=400, detail="pick up to five stocks or two cryptocurrencies")
+    users = _load(USERS_PATH)
+    u = users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat()})
+    u.update(accepted_disclaimer_at=datetime.now(tz=config.ET).isoformat(), kind=kind, tickers=tickers)
+    _save(USERS_PATH, users)
+    config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
+    return JSONResponse({"status": "ok", "profile": {k: u.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}})
+
+
+@app.post("/api/auth/logout")
+async def auth_logout() -> JSONResponse:
+    resp = JSONResponse({"status": "ok"})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp

@@ -844,9 +844,16 @@ def fetch_symbol_index() -> list[list[Any]]:
             continue
         name = re.sub(r"\s{2,}", " ", _NAME_NOISE.sub("", name)).strip(" -")
         out.append([sym.replace(".", "-"), name[:60], "ETF" if etf else "Stock", _EXCHANGES.get(ex, ex)])
+    out.extend([[sym, name, "Crypto", "Crypto"] for sym, name in CRYPTO])
     if out:
         _cache_put("symbols", out)
     return out
+
+
+CRYPTO = [("BTC-USD", "Bitcoin"), ("ETH-USD", "Ethereum"), ("SOL-USD", "Solana"), ("XRP-USD", "XRP"), ("BNB-USD", "BNB"), ("DOGE-USD", "Dogecoin"),
+          ("ADA-USD", "Cardano"), ("TRX-USD", "TRON"), ("AVAX-USD", "Avalanche"), ("LINK-USD", "Chainlink"), ("DOT-USD", "Polkadot"), ("LTC-USD", "Litecoin"),
+          ("SHIB-USD", "Shiba Inu"), ("BCH-USD", "Bitcoin Cash"), ("UNI-USD", "Uniswap"), ("XLM-USD", "Stellar"), ("HBAR-USD", "Hedera"), ("SUI-USD", "Sui"),
+          ("NEAR-USD", "NEAR Protocol"), ("APT-USD", "Aptos"), ("PEPE-USD", "Pepe"), ("AAVE-USD", "Aave"), ("ETC-USD", "Ethereum Classic"), ("ARB-USD", "Arbitrum")]
 
 
 def fetch_intraday(tickers: list[str], period: str = config.SCAN_LOOKBACK, interval: str = config.SCAN_INTERVAL) -> pd.DataFrame:
