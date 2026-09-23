@@ -277,6 +277,7 @@
       if (isNum(sc.range_pos)) bits.push(`<span>${(sc.range_pos * 100).toFixed(0)}% of day range</span>`);
       bits.push(`<span>volume build <b>${sc.score.toFixed(0)}</b>/100 on ${sc.lead}</span>`); }
     else if (isNum(s.rel_volume)) bits.push(`<span><b>${s.rel_volume.toFixed(1)}×</b> normal volume</span>`);
+    else bits.push(`<span class="muted">no intraday volume read for this name</span>`);
     bits.push(`<span>vs yesterday: ${isNum(t.prev_high) && isNum(s.last_price) ? (s.last_price > t.prev_high ? '<b class="up">above the high</b>' : s.last_price < t.prev_low ? '<b class="down">below the low</b>' : "inside the range") : "–"}</span>`);
     return `<div class="wc-now"><span class="wc-now-k">${when}</span>${bits.join('<i class="sep"></i>')}</div>`;
   }

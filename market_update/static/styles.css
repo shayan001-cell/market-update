@@ -960,3 +960,10 @@ body.dash-enter .today { animation: slide-in-r .9s .2s cubic-bezier(.32,.72,0,1)
 .pwho .who { display: flex; flex-wrap: wrap; gap: 4px 14px; } .pwho .who li { font-size: 11.5px; }
 .side-item.v-watch { --vc: #F5C542; }
 @media (max-width: 1100px) { .pgrid { grid-template-columns: 1fr; } .pcol { min-height: 0; } .pfoot { grid-template-columns: 1fr; } }
+/* narrow cards: header wraps instead of overlapping; the now-strip wraps its facts */
+.wc-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 4px 10px; }
+.wc-id { flex: 1 1 120px; } .wc-price { flex: 0 0 auto; }
+.wc-now { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); min-height: 56px; }
+.wc-now > span { white-space: normal; overflow: visible; line-height: 1.3; }
+.wc-now > span:only-of-type, .wc-now > span:nth-of-type(1):nth-last-of-type(2) { grid-column: span 2; }
+@media (max-width: 1250px) { .wc-now { grid-template-columns: auto minmax(0, 1fr); } .wc-now .wc-now-k { grid-row: 1 / span 4; } .wc-now > span { grid-column: auto !important; } }
