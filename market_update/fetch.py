@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import logging
 import warnings
 from datetime import date, datetime, time, timedelta
@@ -810,3 +811,137 @@ def fetch_cboe_daily() -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             log.warning("cboe daily failed for %s: %s", day, e)
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Symbol directory (search index), intraday bars, low float
+# ---------------------------------------------------------------------------
+_EXCHANGES = {"N": "NYSE", "Q": "Nasdaq", "P": "NYSE Arca", "Z": "Cboe BZX", "A": "NYSE American", "V": "IEX", "M": "Nasdaq"}
+_NAME_NOISE = re.compile(r"\s*-?\s*(Common Stock|Common Shares|Ordinary Shares|Class [A-C] (Common Stock|Ordinary Shares)|"
+                         r"American Depositary Shares.*|Depositary Shares.*|Shares of Beneficial Interest|New Common Stock)\s*$", re.I)
+
+
+def fetch_symbol_index() -> list[list[Any]]:
+    """Every US-listed stock and ETF from Nasdaq Trader's daily symbol directory as
+    [symbol, name, kind, exchange]; Yahoo-style symbols (BRK-B). Cached 24h."""
+    cached = _cache_get("symbols", 24 * 3600)
+    if cached:
+        return cached
+    try:
+        r = requests.get("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt", headers=UA, timeout=25)
+        r.raise_for_status()
+        lines = r.text.splitlines()
+    except Exception as e:  # noqa: BLE001
+        log.warning("symbol directory unavailable: %s", e)
+        return _cache_get("symbols", -1) or []
+    out: list[list[Any]] = []
+    for line in lines[1:]:
+        p = line.split("|")
+        if len(p) < 8 or p[0] != "Y" or p[7] == "Y":
+            continue
+        sym, name, ex, etf = p[1].strip(), p[2].strip(), p[3].strip(), p[5].strip() == "Y"
+        if not sym or "$" in sym or "+" in sym or "=" in sym or sym.endswith((".W", ".U", ".R", ".V")):
+            continue
+        name = re.sub(r"\s{2,}", " ", _NAME_NOISE.sub("", name)).strip(" -")
+        out.append([sym.replace(".", "-"), name[:60], "ETF" if etf else "Stock", _EXCHANGES.get(ex, ex)])
+    if out:
+        _cache_put("symbols", out)
+    return out
+
+
+def fetch_intraday(tickers: list[str], period: str = config.SCAN_LOOKBACK, interval: str = config.SCAN_INTERVAL) -> pd.DataFrame:
+    """Regular-session bars (Yahoo reports no extended-hours volume, so those bars only add noise)."""
+    try:
+        return download(tickers, period=period, interval=interval, prepost=False)
+    except Exception as e:  # noqa: BLE001
+        log.warning("intraday download failed: %s", e)
+        return pd.DataFrame()
+
+
+def _float_stats(t: str) -> dict[str, Any]:
+    """Float and ownership from the quote summary; changes rarely, so cached 24h per ticker."""
+    key = f"float_{t}"
+    cached = _cache_get(key, 24 * 3600)
+    if cached is not None:
+        return cached
+    try:
+        info = yf.Ticker(t).info or {}
+    except Exception as e:  # noqa: BLE001
+        log.warning("float lookup failed for %s: %s", t, e)
+        info = {}
+    out = {"float": info.get("floatShares"), "shares_outstanding": info.get("sharesOutstanding"),
+           "short_pct_float": info.get("shortPercentOfFloat"), "days_to_cover": info.get("shortRatio"),
+           "insiders_pct": info.get("heldPercentInsiders"), "institutions_pct": info.get("heldPercentInstitutions"),
+           "name": info.get("shortName") or info.get("longName"), "sector": info.get("sector"), "industry": info.get("industry"),
+           "hi52": info.get("fiftyTwoWeekHigh"), "lo52": info.get("fiftyTwoWeekLow")}
+    if info:
+        _cache_put(key, out)
+    return out
+
+
+def fetch_low_float(max_candidates: int = config.LOW_FLOAT_MAX_CANDIDATES) -> dict[str, Any]:
+    """Low-float movers. Candidates come from Yahoo's screener (a custom small-cap
+    movers query plus the gainers / small-cap / most-active lists); float, short
+    interest and ownership come from each candidate's quote summary."""
+    from yfinance import EquityQuery as Q
+    lo, hi = config.LOW_FLOAT_PRICE
+    cands: dict[str, dict[str, Any]] = {}
+    status = "ok"
+
+    def take(quotes: list[dict[str, Any]]) -> None:
+        for q in quotes or []:
+            s = q.get("symbol")
+            if not s or q.get("quoteType") != "EQUITY" or q.get("region", "US") != "US" or "." in s or "^" in s:
+                continue
+            px, vol, so = q.get("regularMarketPrice"), q.get("regularMarketVolume"), q.get("sharesOutstanding")
+            if not px or not (lo <= px <= hi) or not vol or vol < config.LOW_FLOAT_MIN_VOLUME:
+                continue
+            if so and so > config.LOW_FLOAT_MAX * 3:      # float cannot exceed shares outstanding
+                continue
+            cands.setdefault(s, q)
+    try:
+        base = [Q("eq", ["region", "us"]), Q("btwn", ["intradayprice", lo, hi]), Q("btwn", ["intradaymarketcap", 10_000_000, 2_000_000_000]),
+                Q("gt", ["dayvolume", config.LOW_FLOAT_MIN_VOLUME])]
+        take(yf.screen(Q("and", base + [Q("gt", ["percentchange", 3])]), sortField="percentchange", sortAsc=False, size=100).get("quotes", []))
+        take(yf.screen(Q("and", base + [Q("gt", ["percentchange", 0])]), sortField="dayvolume", sortAsc=False, size=100).get("quotes", []))
+        take(yf.screen(Q("and", base + [Q("lt", ["percentchange", -3])]), sortField="percentchange", sortAsc=True, size=40).get("quotes", []))
+        for name in ("small_cap_gainers", "aggressive_small_caps", "day_gainers", "most_actives"):
+            try:
+                take(yf.screen(name, size=50).get("quotes", []))
+            except Exception as e:  # noqa: BLE001
+                log.warning("screen %s failed: %s", name, e)
+    except Exception as e:  # noqa: BLE001
+        log.warning("low-float screens failed: %s", e)
+        status = f"screens unavailable: {type(e).__name__}"
+    # most active first: turnover of shares outstanding, then percent move
+    ordered = sorted(cands.values(), key=lambda q: -((q.get("regularMarketVolume") or 0) / max(q.get("sharesOutstanding") or 1e9, 1)))
+    rows: list[dict[str, Any]] = []
+    for q in ordered[:max_candidates]:
+        t = q["symbol"]
+        fs = _float_stats(t)
+        flt = fs.get("float")
+        if not flt or flt > config.LOW_FLOAT_MAX:
+            continue
+        vol = q.get("regularMarketVolume") or 0
+        avg = q.get("averageDailyVolume3Month") or q.get("averageDailyVolume10Day")
+        px, dh, dl = q.get("regularMarketPrice"), q.get("regularMarketDayHigh"), q.get("regularMarketDayLow")
+        hi52, lo52 = q.get("fiftyTwoWeekHigh") or fs.get("hi52"), q.get("fiftyTwoWeekLow") or fs.get("lo52")
+        rows.append({
+            "ticker": t, "name": q.get("shortName") or fs.get("name") or t, "exchange": q.get("fullExchangeName"),
+            "sector": fs.get("sector"), "industry": fs.get("industry"),
+            "price": px, "chg_pct": q.get("regularMarketChangePercent"), "volume": vol, "avg_volume": avg,
+            "rel_volume": round(vol / avg, 2) if avg else None,
+            "float": flt, "shares_outstanding": fs.get("shares_outstanding") or q.get("sharesOutstanding"),
+            "float_turnover": round(vol / flt, 2) if flt else None,
+            "short_pct_float": fs.get("short_pct_float"), "days_to_cover": fs.get("days_to_cover"),
+            "insiders_pct": fs.get("insiders_pct"), "institutions_pct": fs.get("institutions_pct"),
+            "market_cap": q.get("marketCap"), "day_high": dh, "day_low": dl,
+            "range_pos": round((px - dl) / (dh - dl), 2) if px and dh and dl and dh > dl else None,
+            "hi52": hi52, "lo52": lo52, "pct_from_hi52": round((px / hi52 - 1) * 100, 1) if px and hi52 else None,
+            "micro": flt < config.LOW_FLOAT_MICRO, "market_state": q.get("marketState"),
+        })
+    rows.sort(key=lambda r: -(r["float_turnover"] or 0))
+    return {"rows": rows[: config.LOW_FLOAT_ROWS], "candidates": len(cands), "checked": min(len(ordered), max_candidates),
+            "status": status, "as_of": now_et().isoformat(),
+            "settings": {"max_float": config.LOW_FLOAT_MAX, "micro_float": config.LOW_FLOAT_MICRO, "price": list(config.LOW_FLOAT_PRICE),
+                         "min_volume": config.LOW_FLOAT_MIN_VOLUME}}

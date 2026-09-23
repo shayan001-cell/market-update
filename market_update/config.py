@@ -17,6 +17,7 @@ OUTPUT_DIR = Path(os.environ.get("MU_DATA_DIR", PROJECT_ROOT / "output"))
 CACHE_DIR = Path(os.environ.get("MU_CACHE_DIR", OUTPUT_DIR / ".cache"))
 STATIC_DIR = PROJECT_ROOT / "market_update" / "static"
 WATCHLIST_FILE = Path(os.environ.get("MU_WATCHLIST", PROJECT_ROOT / "watchlist.txt"))
+WATCHLIST_STORE = OUTPUT_DIR / "watchlist_dynamic.json"   # tickers added from the page (server mode)
 
 # ---------------------------------------------------------------------------
 # Macro tape (yahoo symbol, display label, kind)
@@ -137,13 +138,52 @@ INTERVAL_OFF_S = int(os.environ.get("MU_INTERVAL_OFF", "3600"))         # nights
 
 
 def load_watchlist() -> list[str]:
-    """Read watchlist.txt from MU_WATCHLIST, the project root, or the current directory."""
+    """watchlist.txt (MU_WATCHLIST, project root, or cwd) plus tickers added from the page in server mode."""
     path = next((p for p in (WATCHLIST_FILE, Path.cwd() / "watchlist.txt") if p.exists()), None)
-    if path is None:
-        return []
     out: list[str] = []
-    for line in path.read_text().splitlines():
-        line = line.split("#", 1)[0].strip().upper()
-        if line:
-            out.append(line)
+    if path is not None:
+        for line in path.read_text().splitlines():
+            line = line.split("#", 1)[0].strip().upper()
+            if line:
+                out.append(line)
+    for t in load_dynamic_watchlist():
+        if t not in out:
+            out.append(t)
     return out
+
+
+def load_dynamic_watchlist() -> list[str]:
+    try:
+        import json
+        data = json.loads(WATCHLIST_STORE.read_text())
+        return [str(t).upper() for t in data.get("tickers", []) if t][:200]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def save_dynamic_watchlist(tickers: list[str]) -> list[str]:
+    import json
+    clean = list(dict.fromkeys(str(t).upper().strip() for t in tickers if t and len(str(t)) <= 10))[:200]
+    WATCHLIST_STORE.parent.mkdir(parents=True, exist_ok=True)
+    WATCHLIST_STORE.write_text(json.dumps({"tickers": clean}))
+    return clean
+
+# ---- intraday scanner: runs automatically on every build (no manual input) ----
+SCAN_INTERVAL = "30m"                 # base bars; 1h and 2h are built from these
+SCAN_LOOKBACK = "15d"
+SCAN_TIMEFRAMES = {"30m": 1, "1h": 2, "2h": 4}      # in 30-minute bars
+SCAN_TF_WEIGHTS = {"30m": 0.40, "1h": 0.35, "2h": 0.25}
+SCAN_MIN_PRICE = 2.0
+SCAN_MIN_SESSION_VOLUME = 300_000     # shares so far this session (or last session when closed)
+SCAN_MIN_RVOL = 1.5                   # volume so far vs the same time of day over the prior 10 sessions
+SCAN_ROWS = 20
+SCAN_MAX_JUDGED = 12
+
+# ---- low float: candidates from Yahoo screens, float from the quote summary ----
+LOW_FLOAT_MAX = 30_000_000
+LOW_FLOAT_MICRO = 10_000_000
+LOW_FLOAT_PRICE = (1.0, 50.0)
+LOW_FLOAT_MIN_VOLUME = 500_000
+LOW_FLOAT_MAX_CANDIDATES = 60
+LOW_FLOAT_ROWS = 20
+LOW_FLOAT_MAX_JUDGED = 10

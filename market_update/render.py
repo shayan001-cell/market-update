@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import config
+from . import config, fetch
 
 
 def render_html(report: dict[str, Any]) -> str:
@@ -14,6 +14,8 @@ def render_html(report: dict[str, Any]) -> str:
     js = (config.STATIC_DIR / "app.js").read_text()
     data = json.dumps(report, default=str).replace("</", "<\\/")
     html = html.replace('<link rel="stylesheet" href="/static/styles.css">', f"<style>\n{css}\n</style>")
+    symbols = json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")).replace("</", "<\\/")
     html = html.replace('<script src="/static/app.js"></script>',
-                        f'<script id="report-data" type="application/json">{data}</script>\n<script>\n{js}\n</script>')
+                        f'<script id="report-data" type="application/json">{data}</script>\n'
+                        f'<script id="symbols-data" type="application/json">{symbols}</script>\n<script>\n{js}\n</script>')
     return html

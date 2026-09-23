@@ -22,13 +22,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, fetch
-from .analyze import build_report
+from .analyze import analyze_ticker, build_report
 
 log = logging.getLogger("market_update.server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -58,6 +58,8 @@ state: dict[str, Any] = {
     "last_error": None,
     "last_manual_refresh": 0.0,
     "builds": 0,
+    "adhoc": {},          # ticker -> record analysed on demand from the page
+    "adhoc_inflight": set(),
 }
 _lock = asyncio.Lock()
 
@@ -174,3 +176,75 @@ async def api_refresh() -> JSONResponse:
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
     return {"ok": True, "has_report": state["report"] is not None}
+
+
+@app.get("/symbols.json")
+async def symbols() -> JSONResponse:
+    """Search index: every US-listed stock and ETF as [symbol, name, kind, exchange]."""
+    rows = await asyncio.to_thread(fetch.fetch_symbol_index)
+    return JSONResponse(rows, headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/api/stock/{ticker}")
+async def api_stock(ticker: str) -> JSONResponse:
+    """Full analysis for one ticker on demand (a name added to a watchlist on the page).
+    Cached for the life of the current report; re-analysed after the next build."""
+    t = ticker.upper().strip()
+    if not t.isascii() or len(t) > 10 or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-." for ch in t):
+        raise HTTPException(status_code=400, detail="bad ticker")
+    r = state["report"]
+    if r:
+        for s in r["stocks"]:
+            if s["ticker"] == t:
+                return JSONResponse({"status": "ok", "source": "report", "stock": s}, headers={"Cache-Control": "no-store"})
+    cached = state["adhoc"].get(t)
+    if cached and cached.get("build_id") == (r or {}).get("build_id"):
+        return JSONResponse({"status": "ok", "source": "adhoc", "stock": cached["stock"]}, headers={"Cache-Control": "no-store"})
+    if t in state["adhoc_inflight"]:
+        return JSONResponse({"status": "building"}, status_code=202)
+    state["adhoc_inflight"].add(t)
+    try:
+        tone = (((r or {}).get("regime") or {}).get("tone") or {}).get("choice", "mixed")
+        rec = await asyncio.to_thread(lambda: asyncio.run(analyze_ticker(t, tone, USE_AI)))
+    except Exception as e:  # noqa: BLE001
+        log.exception("adhoc analysis failed for %s", t)
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+    finally:
+        state["adhoc_inflight"].discard(t)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"no price history for {t}")
+    state["adhoc"][t] = {"build_id": (r or {}).get("build_id"), "stock": rec}
+    return JSONResponse({"status": "ok", "source": "adhoc", "stock": rec}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/watchlist")
+async def api_watchlist(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """The page sends every ticker across its lists; scheduled builds then analyse them fully."""
+    tickers = payload.get("tickers") or []
+    if not isinstance(tickers, list):
+        raise HTTPException(status_code=400, detail="tickers must be a list")
+    saved = config.save_dynamic_watchlist([str(t) for t in tickers])
+    return {"status": "ok", "tickers": saved}
+
+
+_news_cache: dict[str, Any] = {"at": 0.0, "items": []}
+
+
+@app.get("/api/news")
+async def api_news() -> JSONResponse:
+    """Live headline feed for the home page: market seeds plus every watchlist ticker, refreshed at most once a minute."""
+    now = time.time()
+    if now - _news_cache["at"] > 60:
+        symbols = list(dict.fromkeys(config.NEWS_SEED_SYMBOLS + config.load_watchlist()))[:40]
+        try:
+            items = await asyncio.to_thread(fetch.fetch_news, symbols, 6, 24)
+        except Exception as e:  # noqa: BLE001
+            log.warning("news feed failed: %s", e)
+            items = _news_cache["items"]
+        r = state["report"] or {}
+        judged = {h.get("id"): h.get("ai") for h in r.get("headlines", []) if h.get("id")}
+        for it in items:
+            if it["id"] in judged:
+                it["ai"] = judged[it["id"]]
+        _news_cache.update(at=now, items=items[:60])
+    return JSONResponse({"items": _news_cache["items"], "as_of": _news_cache["at"]}, headers={"Cache-Control": "no-store"})

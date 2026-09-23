@@ -17,6 +17,7 @@ import webbrowser
 from pathlib import Path
 
 from . import config
+from . import fetch
 from .analyze import build_report
 from .render import render_html
 
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "report.json").write_text(json.dumps(report, indent=1, default=str))
+    (out_dir / "symbols.json").write_text(json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")))
     html_path = out_dir / "index.html"
     html_path.write_text(render_html(report))
 

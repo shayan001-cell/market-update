@@ -574,6 +574,94 @@ OPTIONS_QUESTIONS = {
 }
 
 # ---------------------------------------------------------------------------
+# 3j. Intraday volume scanner rows. State: {ticker, name, price, chg_pct, market_state, session:{rvol_time_of_day, above_vwap,
+#     range_pos, chg_from_open_pct, session_volume, avg_session_volume}, timeframes:{"30m"/"1h"/"2h": {vol_ratio_last,
+#     vol_ratio_3bar, building_bars, range_vs_atr, chg_3bar_pct, rsi14, breakout, breakdown, close_location, direction, score}},
+#     daily:{trend, atr_pct, rsi14, dist_sma20_pct}, score, lead_timeframe}
+# ---------------------------------------------------------------------------
+SCAN_QUESTIONS = {
+    "read": Choice(
+        instructions=(
+            "Volume is building in `ticker` on the intraday timeframes shown. Using `session` (volume so far versus the same "
+            "clock time on prior days, VWAP, position in the day's range) and `timeframes` (last-bar and three-bar volume "
+            "versus the 20-bar norm, consecutive rising-volume bars, range versus ATR, the three-bar move, breakout or "
+            "breakdown of the 20-bar range), what kind of move is this? If `market_state` is closed or post, read the last "
+            "session's tape as the setup for the next open."
+        ),
+        criteria={
+            "breakout_with_volume": "Price is clearing the recent range on rising volume, closing near the highs of its bars: buyers pressing",
+            "building_toward_breakout": "Volume rising bar over bar while price holds near the highs or above VWAP without a clean break yet",
+            "climax_or_exhaustion": "A huge volume spike after a large move with the bar closing well off its extreme, or RSI stretched: the move may be ending",
+            "selling_with_volume": "Range breaking down on heavy volume, price below VWAP and closing near the lows: sellers in control",
+            "pullback_on_lighter_volume": "Price easing back toward VWAP or the range on volume lighter than the impulse bars: constructive if the trend is up",
+            "noise": "Volume up but price going nowhere, mixed bars, no confirmation from VWAP or the range",
+        },
+    ),
+    "continuation": Score(
+        instructions="Odds that the current intraday move continues in its direction over the next one to two hours, given the volume build, the range and where price sits in the day.",
+        criteria=[
+            "Poor: no confirmation, or signs of exhaustion",
+            "Below even: some volume support but price is not confirming",
+            "Decent: volume and price agree on the leading timeframe",
+            "Strong: volume building across timeframes, price above VWAP near the highs with a fresh breakout, nothing stretched",
+        ],
+    ),
+    "play": Choice(
+        instructions="The most sensible day-trade approach right now, or no trade. Never choose a long play when the read is selling_with_volume, nor a short play when it is breakout_with_volume.",
+        criteria={
+            "long_breakout": "Buy strength through the range high with a stop under the breakout bar",
+            "buy_pullback_to_vwap": "Wait for a dip to VWAP or the prior range top and buy the hold",
+            "short_pop": "Fade a spike into resistance after an exhaustion bar, stop above the high",
+            "short_breakdown": "Short the break of the range low with a stop above the breakdown bar",
+            "no_trade": "Nothing clean: volume without direction, or the move is done",
+        },
+    ),
+}
+
+# ---------------------------------------------------------------------------
+# 3k. Low-float names. State: {ticker, name, sector, price, chg_pct, volume, avg_volume, rel_volume, float, shares_outstanding,
+#     float_turnover, short_pct_float, days_to_cover, insiders_pct, institutions_pct, market_cap, range_pos, pct_from_hi52,
+#     intraday:{rvol_time_of_day, above_vwap, timeframes:{...}}, market_state}
+# ---------------------------------------------------------------------------
+LOW_FLOAT_QUESTIONS = {
+    "state": Choice(
+        instructions=(
+            "`ticker` has a float of `float` shares (`float_turnover` is today's volume divided by the float; above 1 means the "
+            "whole float traded). Using the move, the volume relative to normal, short interest and days to cover, ownership, "
+            "where price sits in the day's range, and the intraday volume picture, what is happening?"
+        ),
+        criteria={
+            "squeeze_in_progress": "Heavy short interest or days to cover, float rotating, price ripping and holding near highs: shorts being forced out",
+            "momentum_run": "Float turning over on a large up move with volume still rising, but short interest is not the main driver",
+            "fading_after_spike": "Big volume already spent, price well off the high of day or below VWAP: the run is being sold",
+            "selling_pressure": "Down hard on heavy volume, near the low of the day: distribution or dilution being absorbed",
+            "quiet_low_float": "Volume elevated but the move is modest; a name to watch, not a move yet",
+        },
+    ),
+    "risk": Score(
+        instructions="Risk of a violent reversal, halt, or dilution in `ticker` over the next session. Tiny floats with gains of several hundred percent are the most dangerous.",
+        criteria=[
+            "Ordinary for a small cap",
+            "Elevated: extended move or float already rotated several times",
+            "High: parabolic move, micro float, price far above its recent range; halts and offerings are common here",
+            "Extreme: multi-hundred-percent move on a float under ten million; treat as untradeable for most accounts",
+        ],
+    ),
+    "play": Choice(
+        instructions="The most sensible approach for a day trader, if any. Prefer avoid when risk is high and the move is already large.",
+        criteria={
+            "long_momentum": "Buy the next hold of VWAP or a consolidation break while volume keeps rising",
+            "wait_for_pullback": "Let it pull back and base; buy only if it holds a higher low with volume returning",
+            "short_the_fade": "Short a failed retest of the high after the volume climax, with a hard stop",
+            "avoid": "Too extended, too thin, or too likely to halt",
+        },
+    ),
+}
+
+SCAN_STRONG_MIN = 2.0           # continuation Score >= this is highlighted on the scan
+LOW_FLOAT_RISK_FLAG = 2.0       # risk Score >= this earns a warning badge
+
+# ---------------------------------------------------------------------------
 # 3i. Options, market-wide. State: {cboe:{as_of, ratios:{...}}, scanned:{n, aggregate_call_volume, aggregate_put_volume, aggregate_put_call},
 #     leaders:[{ticker, group, total_notional, call_share, read, intensity}], market_tone}
 # ---------------------------------------------------------------------------

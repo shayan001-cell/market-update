@@ -36,6 +36,46 @@ stance. Caveat: Yahoo posts open interest overnight and its after-hours implied
 volatility is unreliable, so new listings are not counted as unusual and IV shows as
 unavailable outside market hours.
 
+**Dynamic watchlists (search box in the menu bar).** Type a ticker or a company name
+(press `/` to jump to the box); every US-listed stock and ETF is in the index, which
+comes from Nasdaq Trader's daily symbol directory (`symbols.json`, refreshed daily).
+Pick a result to add it to the active list. Lists live in your browser: create, rename
+and delete named lists from the bar above the cards, remove a name with the × on its
+card. What a card shows depends on what the build knows: a full card (verdict, plan,
+checklist, who is buying) when the name was analysed, a quote card (price, change,
+trend, RSI, daily range, distance from the 20-day average, 1/3-month returns, volume
+vs normal, the volume-scan score) for the ~250 names every build quotes, and in server
+mode any other ticker is analysed on demand in about 20 seconds (`/api/stock/{ticker}`:
+technicals, price action, news, smart money, options, the stock read and the stance
+round). The server remembers every ticker added from the page, so scheduled builds
+analyse them fully from then on. On the public GitHub Pages copy there is no server:
+quote cards still work for the build's names, and full analysis follows `watchlist.txt`.
+
+**Volume scanner (view 2, top half).** Runs by itself on every build, no input needed.
+Regular-session 30-minute bars for the whole scan universe (plus the low-float names)
+are rolled up into 1-hour and 2-hour candles. Per name: relative volume by time of day
+(volume so far versus the same clock time over the prior ten sessions), session VWAP and
+position in the day's range; per timeframe: the last three bars' volume against the
+20-bar norm, how many bars in a row volume has grown, the bar's range against that
+timeframe's ATR, the three-bar move, RSI, and whether price broke the 20-bar range. Each
+timeframe scores 0–100 (volume build 40, rising bars 15, range 15, move 15, confirmation
+15); the overall score weights 30m/1h/2h at 40/35/25. Filters: price ≥ $2, session volume
+≥ 300k, RVOL ≥ 1.5× or a three-bar volume ratio ≥ 2× on any timeframe. TypeSafe reads the
+top twelve: the kind of move (breakout on volume, building, climax, selling, pullback,
+noise), the odds it continues over the next one to two hours, and the sensible play.
+When the market is closed the scan shows the last session's tape. All settings are in
+`config.py` (`SCAN_*`) and the questions in `judgments.py`.
+
+**Low float (view 2, bottom half).** Candidates come from Yahoo's screener (a custom
+small-cap movers query plus the small-cap gainers, aggressive small caps, day gainers
+and most-active lists); float, shares outstanding, short % of float, days to cover and
+insider / institutional ownership come from each candidate's quote summary (cached a
+day). Names with a float under 30M shares are kept (under 10M is tagged micro), ranked by
+float turnover (today's volume ÷ float), with day-range position, distance from the
+52-week high, the intraday volume-scan score, and a TypeSafe read: state (squeeze in
+progress, momentum run, fading after spike, selling pressure, quiet), a 0–3 risk score
+for reversals, halts and dilution, and the play, which is often "avoid".
+
 **WhatsApp.** The green icon at the top right opens WhatsApp with a formatted brief:
 mood, insider buys, insider sales, congressional buys, heavy options buying and the
 watchlist verdicts. Nothing is drawn on the page.
@@ -105,13 +145,14 @@ least 1.5× risk), no event inside five sessions, RSI below 70, clean entry (mod
 at least 2). Short leans mirror these. Eight or more is "Ready", six or seven "Almost",
 fewer "Not yet". Every line shows why it passed or failed.
 
-## Layout: one screen, eight views
+## Layout: one screen, ten views
 
-The page never scrolls on desktop. A HUD bar at the top holds the brand, the view menu
-and the status readouts. Views switch from the menu or with keys 1–8 and are kept in the
-URL hash: HOME (mood, watchlist board, today's sheet), STOCK (candidate list beside the
+The page never scrolls on desktop. A HUD bar at the top holds the brand, the view menu,
+the ticker search box and the status readouts. Views switch from the menu or with keys
+1–9 and 0 and are kept in the URL hash: HOME (mood, verdicts, the active watchlist,
+today's sheet), SCAN (volume scanner and low float), STOCK (candidate list beside the
 full analysis), THEME, SMART $, MACRO (mood detail and the 1/3/6/12-month picture),
-MARKET (tape, indexes, rates), FLOWS, NEWS. Dense tables scroll inside their own
+MARKET (tape, indexes, rates), FLOWS, NEWS, OPTIONS. Dense tables scroll inside their own
 compartment. Below 900px the shell falls back to a single scrolling column.
 
 ## Design
@@ -179,17 +220,20 @@ Stamps the version, rebuilds the dashboard, and writes `dist/market-update-<v>-<
 - `market_update/judgments.py` — **every TypeSafe question, threshold and ranking weight.** Read and tune this one.
 - `market_update/static/app.js` — the page, including the plain-English explanations (`EX`) and glossary (`G`).
 - `market_update/config.py` — symbols, universe, gauges, filters, schedule.
-- `watchlist.txt` — your tickers; always analysed, exempt from the liquidity floor.
+- `watchlist.txt` — tickers analysed on every build (the page's own lists are added on top in server mode).
+- `market_update/scanner.py` — the intraday volume scanner (no AI; arithmetic over 30m/1h/2h bars).
 - `market_update/fetch.py`, `technicals.py`, `analyze.py`, `server.py`, `render.py`.
 
 ## Data sources (all keyless)
 
-Yahoo Finance (quotes, history, extended-hours bars, news, fundamentals), FRED (Treasury
-curve, one-day lag), ForexFactory (economic calendar), Nasdaq (earnings calendar).
+Yahoo Finance (quotes, history, extended-hours and 30-minute bars, news, fundamentals,
+screener, float and ownership), FRED (Treasury curve, one-day lag), ForexFactory
+(economic calendar), Nasdaq (earnings calendar, symbol directory), Quiver Quant
+(congressional trades), Cboe (daily options statistics).
 Caveats: Yahoo's minute feed does not report extended-hours volume; exchange holidays are
 not modelled; ForexFactory rate-limits, so its feed is cached for an hour.
 
 ## Cost
 
-A full build is about 80 TypeSafe calls and 130k input tokens, and takes 20–30 seconds.
+A full build is about 290 TypeSafe calls and 400k input tokens, and takes 60–90 seconds.
 Nothing here is investment advice.

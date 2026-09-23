@@ -11,13 +11,13 @@
 <body>
 <div class="hud">
   <header class="hud-bar">
-    <div class="hud-brand"><span class="br">[</span> MARKET UPDATE <span class="br">]</span><span class="rev">REV 2.0 · UNIT D-01</span></div>
+    <div class="hud-brand"><svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="hexg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B9CFF"/><stop offset="1" stop-color="#3DDC84"/></linearGradient></defs><path d="M20 2.5 35.2 11.2v17.6L20 37.5 4.8 28.8V11.2Z" fill="url(#hexg)"/><path d="M20 6.5 31.7 13.2v13.6L20 33.5 8.3 26.8V13.2Z" fill="#0F1115" opacity=".92"/><path d="M11 25.5 15.5 17l4.5 5.5 4.5-8 4.5 11" fill="none" stroke="url(#hexg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="brand-text">MARKET <b>UPDATE</b></span></div>
     <nav class="hud-nav" id="nav" aria-label="Views"></nav>
+    <div class="hud-search"><span class="add-label">＋ ADD TICKER</span><input id="search" type="search" placeholder="type a ticker or company · press /" autocomplete="off" spellcheck="false" aria-label="Search any stock or ETF"><div id="search-results" class="search-results" hidden></div></div>
     <div class="hud-status">
       <span class="readout" id="market-state">—</span>
       <span class="readout" id="session-line">LOADING</span>
       <span class="readout" id="generated-line"></span>
-      <a class="wa-icon" id="wa-btn" href="#" target="_blank" rel="noopener" title="Send today's insider brief on WhatsApp" aria-label="Send on WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-.9.9-.9 2.2s.9 2.6 1.1 2.8c.1.2 1.8 2.8 4.4 3.8 2.2.9 2.6.7 3.1.6.5 0 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.2-.2-.5-.3l-1.7-.8c-.2-.1-.4-.1-.6.1-.2.3-.7.8-.8 1-.2.2-.3.2-.6.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.5-1.5-1.8-.1-.3 0-.4.1-.5l.4-.5.3-.4c.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5z"/></svg></a>
       <button class="btn" id="refresh-btn" title="Rebuild the report now">REFRESH</button>
       <button class="btn ghost" id="theme-btn" hidden>THEME</button>
     </div>
