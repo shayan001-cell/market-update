@@ -25,6 +25,8 @@
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
   const NAV_GROUPS = [["Workspace", ["home", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]]];
   let subTab = { scan: "scanner", smart: "money", macro: "picture" };
+  let gateOpen = false;                  // the sign-in card is optional now: opened from the menu footer only
+  let nextRefreshAt = 0;
   let tickerSel = (location.hash.match(/[&#]t=([A-Z0-9.\-^=]+)/i) || [])[1] || null;
   let mailStatus = null;
   const USER_KEY = "mu-user";
@@ -262,6 +264,18 @@
       text: `${lean === "long" ? "Buy" : "Short"} near ${fnum(px)} · stop ${fnum(stop)} (${fpct((stop / px - 1) * 100, 1)}) · target ${fnum(target)} (${fpct((target / px - 1) * 100, 1)}) · reward ${rr.toFixed(1)}× the risk: ${verdict}` };
   }
 
+  function nowStrip(s, r) {
+    const sc = s.scan, t = s.technicals || {}, ms = (r || report || {}).market_state;
+    const when = { open: "live", pre: "pre-market", post: "after hours", closed: "last session" }[ms] || ms;
+    const bits = [];
+    if (sc) { bits.push(`<span>${isNum(sc.rvol_tod) ? `<b>${sc.rvol_tod.toFixed(1)}×</b> volume for this time of day` : "volume n/a"}</span>`);
+      if (sc.above_vwap != null) bits.push(`<span class="${sc.above_vwap ? "up" : "down"}">${sc.above_vwap ? "above" : "below"} VWAP</span>`);
+      if (isNum(sc.range_pos)) bits.push(`<span>${(sc.range_pos * 100).toFixed(0)}% of day range</span>`);
+      bits.push(`<span>volume build <b>${sc.score.toFixed(0)}</b>/100 on ${sc.lead}</span>`); }
+    else if (isNum(s.rel_volume)) bits.push(`<span><b>${s.rel_volume.toFixed(1)}×</b> normal volume</span>`);
+    bits.push(`<span>vs yesterday: ${isNum(t.prev_high) && isNum(s.last_price) ? (s.last_price > t.prev_high ? '<b class="up">above the high</b>' : s.last_price < t.prev_low ? '<b class="down">below the low</b>' : "inside the range") : "–"}</span>`);
+    return `<div class="wc-now"><span class="wc-now-k">${when}</span>${bits.join('<i class="sep"></i>')}</div>`;
+  }
   function watchCard(s, compact, r) {
     const a = s.ai || {}, t = s.technicals, c = cls(s.chg_pct), pa = s.price_action || {};
     const lean = a.bias ? a.bias.choice : "neutral";
@@ -275,6 +289,7 @@
     return `<article class="wcard ${leanCls}" data-ticker="${esc(s.ticker)}">
       <div class="wc-head"><div><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}" title="Open ${esc(s.ticker)}'s page">${esc(s.ticker)}</button><span class="wc-name">${esc(s.name)}</span></div><div class="wc-price"><span class="px">${fnum(s.last_price)}</span> <span class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</span>${compact ? "" : `<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from this list">×</button>`}</div></div>
       ${verdict}
+      ${nowStrip(s, r)}
       <div class="wc-lean"><span class="lean ${leanCls}">${lean.toUpperCase()}</span><span class="wc-leansub">${a.bias ? `${(a.bias.confidence * 100).toFixed(0)}% sure` : "no model read"} · ${a.setup ? pretty(a.setup.choice) : "–"}</span></div>
       <div class="wc-scores"><span title="Swing setup quality, 0–100">Swing setup: <b>${words(s.scores.swing, 1.0001, SCORE_WORDS)}</b> <span class="muted">${(s.scores.swing * 100).toFixed(0)}</span></span><span title="Day-trade fit, 0–100">Day trade: <b>${words(s.scores.day, 1.0001, SCORE_WORDS)}</b> <span class="muted">${(s.scores.day * 100).toFixed(0)}</span></span><span title="Average daily move">Moves ${fpct(t.atr_pct, 1, false)} a day</span></div>
       ${compact ? "" : `<div class="wc-who"><div class="wc-who-h">Who is buying</div>${whoHtml(s)}</div>`}
@@ -903,7 +918,6 @@
   }
   function removeTicker(t) {
     const l = lists.lists[lists.active]; const i = l.indexOf(t); if (i < 0) return;
-    if (l.length <= 1) { notice("Your watchlist keeps at least one ticker. Add another before removing this one.", true); return; }
     l.splice(i, 1); saveLists();
     if (currentView === "ticker" && tickerSel === t) { currentView = "home"; try { history.replaceState(null, "", "#view=home"); } catch (e) {} }
     renderAll();
@@ -1095,17 +1109,31 @@
     $("#nav").innerHTML = NAV_GROUPS.map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
       return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
-      + sideWatch();
+;
+    const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
     const foot = $("#side-foot");
-    if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links"><button class="lnk" data-signout>Sign out</button></div>${STATIC_MODE ? '<div class="meta2">profile kept in this browser</div>' : ""}`
-      : `<div class="meta2">Not signed in</div>`;
+    if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}"><span class="st-dot up"></span>${esc(user.email)}</div><div class="side-links">${STATIC_MODE ? "watchlist kept in this browser" : "signed in · watchlist saved to your account"} · <button class="lnk" data-signout>Sign out</button></div>`
+      : `<div class="side-links">Watchlist kept in this browser · <button class="lnk" data-signin>Sign in to sync it</button></div>`;
+    const si = foot && foot.querySelector("[data-signin]"); if (si) si.addEventListener("click", () => { gateOpen = true; renderGate(); });
     const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
   }
   function sideWatch() {
     if (!lists || !report) return "";
     const rows = activeList().map((t) => { const s = stockFor(t); const q = s || (report.lite || {})[t] || {}; const px = q.last_price, ch = q.chg_pct; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
-      return `<button class="side-tick ${currentView === "ticker" && tickerSel === t ? "active" : ""}" data-ticker-page="${esc(t)}" title="Open ${esc(t)}'s page"><span class="st-dot ${st ? ST.cls[st] : "none"}"></span><b>${esc(t)}</b><span class="st-px">${isNum(px) ? fnum(px) : "–"}</span><span class="delta ${cls(ch)}">${isNum(ch) ? fpct(ch, 1) : ""}</span></button>`; }).join("");
-    return `<div class="side-group">Watchlist <span class="cnt">${activeList().length}</span></div><div class="side-watch">${rows || '<div class="meta2" style="padding:4px 10px">Add a ticker at the top.</div>'}</div>`;
+      return `<div class="side-tick ${currentView === "ticker" && tickerSel === t ? "active" : ""}"><button class="st-open" data-ticker-page="${esc(t)}" title="Open ${esc(t)}'s page"><span class="st-dot ${st ? ST.cls[st] : "none"}"></span><b>${esc(t)}</b><span class="st-px">${isNum(px) ? fnum(px) : "–"}</span><span class="delta ${cls(ch)}">${isNum(ch) ? fpct(ch, 1) : ""}</span></button><button class="st-x" data-remove="${esc(t)}" title="Remove ${esc(t)}">×</button></div>`; }).join("");
+    return rows ? rows + `<div class="side-count">${activeList().length} ${activeList().length === 1 ? "name" : "names"} · analysed every hour</div>` : `<div class="side-empty">No names yet. Add your first ticker above and its card appears on the home page.</div>`;
+  }
+  function scheduleHourly() {
+    const now = new Date(); nextRefreshAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 5).getTime();
+  }
+  async function hourlyTick() {
+    const el = $("#refresh-count"); if (!nextRefreshAt) scheduleHourly();
+    const left = Math.max(0, nextRefreshAt - Date.now());
+    if (el) { const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000); el.textContent = `Auto-refresh in ${m}:${String(sec).padStart(2, "0")}`; el.classList.toggle("soon", left < 60000); }
+    if (left > 0) return;
+    scheduleHourly();
+    if (STATIC_MODE) { try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); } } } catch (e) {} }
+    else { try { await fetch("/api/refresh", { method: "POST" }); } catch (e) {} poll(); }
   }
   function initSide() {
     const shell = $("#shell"), tg = $("#side-toggle"); if (!shell || !tg) return;
@@ -1119,8 +1147,12 @@
     if (STATIC_MODE) { try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; } }
     else { try { const res = await fetch("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; } }
     lists = null;                                   // rebuild the watchlist from the account on every (re)load
+    if (user && user.profile && !(user.profile.tickers || []).length) {   // first sign-in from this browser: keep what was built here
+      const saved = loadLists(); const mine = saved && saved.lists[saved.active];
+      if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
+    }
   }
-  const gateNeeded = () => !user || !(user.profile && user.profile.accepted_disclaimer_at);
+  const gateNeeded = () => gateOpen && !user;
   const hexSteps = (n) => { const steps = ["Sign in", "Confirm", "Watchlist"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
   const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
   const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
@@ -1165,8 +1197,9 @@
     const g = $("#gate"); if (!g) return;
     const lb = $("#logout-btn"); if (lb) lb.hidden = !user;
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
-    g.hidden = false; g.innerHTML = user ? onboardingHtml() : loginHtml();
+    g.hidden = false; g.innerHTML = loginHtml().replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Close">×</button>');
     wireGate();
+    const gc = $("[data-gate-close]"); if (gc) gc.addEventListener("click", () => { gateOpen = false; renderGate(); });
     if (!user && !STATIC_MODE && !mailStatus) fetch("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
   }
   function wireGate() {
@@ -1212,6 +1245,11 @@
       applyProfile();
     });
   }
+  function disclaimerBanner() {
+    let seen = false; try { seen = localStorage.getItem("mu-disc") === "1"; } catch (e) {}
+    if (seen) return;
+    notice("This is not financial advice. Market Update shows data, arithmetic and model reads from typed questions; nothing here is a recommendation, and you trade at your own risk. ", true, "Got it", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} notice("", false); });
+  }
   function applyProfile() {
     const picks = (user.profile && user.profile.tickers) || [];
     lists = { active: "My watchlist", lists: { "My watchlist": picks.slice() } };
@@ -1223,7 +1261,9 @@
   async function signOut() {
     if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
     else { try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) {} }
-    user = null; lists = null; renderGate();
+    user = null; lists = null;
+    if (report) { ensureLists(report); renderAll(); }        // fall back to the browser copy of the list
+    renderGate();
   }
 
   function renderAll() {
@@ -1423,7 +1463,7 @@
   async function init() {
     initTheme();
     addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; const gt = $("#gate"); if (gt && !gt.hidden) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
-    wireSearch(); initSide();
+    wireSearch(); initSide(); scheduleHourly(); setInterval(hourlyTick, 1000); hourlyTick();
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
     addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; const t = (location.hash.match(/[&#]t=([A-Za-z0-9.\-^=]+)/) || [])[1];
@@ -1434,8 +1474,7 @@
       report = JSON.parse(EMBEDDED.textContent);
       const rb = $("#refresh-btn"); rb.hidden = false; rb.textContent = "REFRESH";
       rb.onclick = async () => { rb.disabled = true; rb.textContent = "CHECKING…"; try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); notice(`Updated to the ${fresh.generated_at.slice(11, 16)} ET build.`); } else notice("You already have the latest build. Forced rebuilds run from the project's Actions page.", true); } } catch (e) { notice("Static snapshot: nothing newer is reachable from here.", true); } rb.disabled = false; rb.textContent = "REFRESH"; };
-      renderAll();
-      await loadUser(); renderGate();
+      await loadUser(); renderAll(); renderGate(); disclaimerBanner();
       // Hosted statically (e.g. GitHub Pages): a scheduled job republishes report.json; pick it up without a reload.
       setInterval(async () => {
         try {
@@ -1455,7 +1494,7 @@
     await loadUser();
     try { report = await fetchReport(); (report.headlines || []).forEach((h) => newsSeen.add(h.id)); renderAll(); refreshAdhoc(); }
     catch (e) { $("#app").innerHTML = '<div class="loading">First build in progress… this page will fill in automatically.</div>'; }
-    renderGate();
+    renderGate(); disclaimerBanner();
     setInterval(poll, 15000);
     poll();
     setInterval(pollNews, 60000);

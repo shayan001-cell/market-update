@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import config, fetch, mail
+from . import config, db, fetch, mail
 from .analyze import analyze_ticker, build_report
 
 log = logging.getLogger("market_update.server")
@@ -129,6 +129,8 @@ async def _startup() -> None:
             log.info("loaded cached report from %s", REPORT_PATH)
         except Exception:  # noqa: BLE001
             log.exception("could not load cached report")
+    if USERS_PATH.exists():
+        log.info("imported %d accounts from users.json into %s", db.import_legacy_json(USERS_PATH), db.DB_PATH)
     asyncio.create_task(scheduler())
 
 
@@ -322,14 +324,19 @@ def _unsign(value: str | None) -> str | None:
 
 
 def _session_email(request: Request) -> str | None:
-    payload = _unsign(request.cookies.get(SESSION_COOKIE))
+    """Signed cookie AND a live, logged-in row in the sessions table."""
+    raw = request.cookies.get(SESSION_COOKIE)
+    payload = _unsign(raw)
     if not payload:
         return None
     email, _, exp = payload.partition("|")
     try:
-        return email if float(exp) > time.time() else None
+        if float(exp) <= time.time():
+            return None
     except ValueError:
         return None
+    sess = db.session(raw)
+    return email if sess and sess["email"] == email else None
 
 
 def _public_url(request: Request) -> str:
@@ -353,6 +360,26 @@ def _send_link(email: str, link: str) -> bool:
 async def auth_mail_status() -> dict[str, Any]:
     """What the sign-in card shows: which transport sends the links and from whom (never the credentials)."""
     return mail.status()
+
+
+async def _issue_link(request: Request, email: str) -> dict[str, Any]:
+    """Create a single-use token for `email`, email the link (or hand it back locally), rate-limited to one a minute."""
+    if db.recent_token_for(email, 60):
+        raise HTTPException(status_code=429, detail="a link was sent less than a minute ago; check your inbox")
+    token = secrets.token_urlsafe(32)
+    db.create_token(token, email, LINK_MINUTES * 60)
+    link = f"{_public_url(request)}/auth/verify?token={token}"
+    sent = False
+    try:
+        sent = await asyncio.to_thread(_send_link, email, link)
+    except Exception as e:  # noqa: BLE001
+        log.warning("email delivery failed for %s: %s", email, e)
+    out: dict[str, Any] = {"status": "sent" if sent else "not_sent", "email": email, "expires_in_s": LINK_MINUTES * 60, "expires_in_min": LINK_MINUTES}
+    if not sent:
+        log.info("SIGN-IN LINK for %s: %s", email, link)
+        if os.environ.get("MU_DEV_LINKS", "1") not in ("0", "false", "no"):
+            out["dev_link"] = link          # no mail server configured: hand the link to the page (local use)
+    return out
 
 
 @app.post("/api/auth/request")
@@ -379,10 +406,10 @@ a.pill:hover{{transform:translateY(-1px)}} a.pill i{{width:28px;height:28px;bord
 
 @app.get("/auth/verify")
 async def auth_verify(request: Request, token: str = "") -> Response:
-    tokens = _load(TOKENS_PATH)
-    rec = tokens.pop(token, None)
-    _save(TOKENS_PATH, tokens)
-    if rec and rec.get("exp", 0) < time.time():
+    rec = db.consume_token(token) if token else None
+    if rec and rec.get("used_at") and rec["used_at"] < time.time() - 2:
+        rec = None                                    # already used earlier
+    if rec and rec["expires"] < time.time():
         # Expired: send a fresh link to the same address on the spot, then say so.
         email = rec["email"]
         try:
@@ -399,12 +426,12 @@ async def auth_verify(request: Request, token: str = "") -> Response:
         return HTMLResponse(_PAGE.format(eyebrow="Link not valid", title="This link was already used", body="Each sign-in link works once. Request a new one from the sign-in page and open the latest email.",
                                          action='<a class="pill" href="/">Go to sign-in <i>↗</i></a>', foot=""), status_code=400)
     email = rec["email"]
-    users = _load(USERS_PATH)
-    users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat(), "accepted_disclaimer_at": None, "kind": None, "tickers": []})
-    users[email]["last_login"] = datetime.now(tz=config.ET).isoformat()
-    _save(USERS_PATH, users)
+    db.ensure_user(email)
+    db.touch_login(email)
+    cookie = _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}")
+    db.open_session(cookie, email, SESSION_DAYS * 86400, request.headers.get("user-agent"))
     resp = RedirectResponse("/?signed_in=1", status_code=303)
-    resp.set_cookie(SESSION_COOKIE, _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}"), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
+    resp.set_cookie(SESSION_COOKIE, cookie, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
     return resp
 
 
@@ -412,14 +439,25 @@ async def auth_verify(request: Request, token: str = "") -> Response:
 async def api_me(request: Request) -> JSONResponse:
     email = _session_email(request)
     if not email:
-        return JSONResponse({"status": "anonymous"}, status_code=401, headers={"Cache-Control": "no-store"})
-    profile = _load(USERS_PATH).get(email) or {}
-    resp = JSONResponse({"status": "ok", "email": email, "profile": {k: profile.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}},
+        return JSONResponse({"status": "anonymous", "logged_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
+    prof = db.profile(email) or {"tickers": [], "accepted_disclaimer_at": None, "created": None}
+    state_ = db.login_state(email)
+    resp = JSONResponse({"status": "ok", "logged_in": True, "email": email, "sessions": state_["active_sessions"],
+                         "profile": {"accepted_disclaimer_at": prof.get("accepted_disclaimer_at"), "tickers": prof.get("tickers", []), "created": prof.get("created")}},
                         headers={"Cache-Control": "no-store"})
-    # Sliding session: every visit renews the cookie, so the login stays active until the user signs out
-    # or stays away for SESSION_DAYS.
-    resp.set_cookie(SESSION_COOKIE, _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}"), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
+    # Sliding session: every visit renews the cookie and the session row, so the login stays active
+    # until the user signs out or stays away for SESSION_DAYS.
+    raw = request.cookies.get(SESSION_COOKIE) or ""
+    db.touch_session(raw, SESSION_DAYS * 86400)
+    resp.set_cookie(SESSION_COOKIE, raw, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
     return resp
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request) -> dict[str, Any]:
+    """Logged in or not, for this browser, from the sessions table."""
+    email = _session_email(request)
+    return {"logged_in": bool(email), "email": email, **(db.login_state(email) if email else {})}
 
 
 @app.post("/api/profile")
@@ -430,14 +468,12 @@ async def api_profile(request: Request, payload: dict[str, Any] = Body(...)) -> 
     if not payload.get("accepted"):
         raise HTTPException(status_code=400, detail="the disclaimer must be accepted")
     tickers = _clean_tickers(payload.get("tickers"))
-    if len(tickers) < 1 or len(tickers) > 4:
-        raise HTTPException(status_code=400, detail="enter three or four tickers")
-    users = _load(USERS_PATH)
-    u = users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat()})
-    u.update(accepted_disclaimer_at=datetime.now(tz=config.ET).isoformat(), kind="stocks", tickers=tickers)
-    _save(USERS_PATH, users)
-    config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
-    return JSONResponse({"status": "ok", "profile": {k: u.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}})
+    db.ensure_user(email)
+    db.accept_disclaimer(email)
+    if tickers:
+        db.set_watchlist(email, tickers[:40])
+        config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
+    return JSONResponse({"status": "ok", "profile": db.profile(email)})
 
 
 def _clean_tickers(raw: Any) -> list[str]:
@@ -456,18 +492,18 @@ async def api_profile_tickers(request: Request, payload: dict[str, Any] = Body(.
     if not email:
         raise HTTPException(status_code=401, detail="sign in first")
     tickers = _clean_tickers(payload.get("tickers"))
-    if not tickers or len(tickers) > 40:
-        raise HTTPException(status_code=400, detail="keep at least one ticker (and at most forty)")
-    users = _load(USERS_PATH)
-    u = users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat()})
-    u["tickers"] = tickers
-    _save(USERS_PATH, users)
-    config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
+    if len(tickers) > 40:
+        raise HTTPException(status_code=400, detail="at most forty tickers")
+    db.ensure_user(email)
+    db.set_watchlist(email, tickers)
+    if tickers:
+        config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
     return JSONResponse({"status": "ok", "tickers": tickers})
 
 
 @app.post("/api/auth/logout")
-async def auth_logout() -> JSONResponse:
-    resp = JSONResponse({"status": "ok"})
+async def auth_logout(request: Request) -> JSONResponse:
+    db.close_session(request.cookies.get(SESSION_COOKIE))     # the sessions row now says logged_in = 0
+    resp = JSONResponse({"status": "ok", "logged_in": False})
     resp.delete_cookie(SESSION_COOKIE)
     return resp

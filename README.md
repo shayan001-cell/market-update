@@ -145,9 +145,30 @@ least 1.5× risk), no event inside five sessions, RSI below 70, clean entry (mod
 at least 2). Short leans mirror these. Eight or more is "Ready", six or seven "Almost",
 fewer "Not yet". Every line shows why it passed or failed.
 
-## Sign-in, disclaimer and picks
+## Accounts, sessions and the database
 
-The page opens on a sign-in card. In server mode the flow is passwordless: enter an email,
+`market_update/db.py` keeps a SQLite file (`MU_DATA_DIR/market_update.db`) with four
+tables: `users`, `signin_tokens`, `sessions` and `watchlist`. The `sessions` table is the
+record of who is logged in: a row per browser with `logged_in` 1 or 0, `last_seen` and an
+expiry; `GET /api/auth/status` answers "logged in or not" for the calling browser and
+`/api/me` renews the row on every visit. Sign-out flips the row to 0 and clears the
+cookie. An older `users.json` is imported into the database on first start.
+
+Sign-in is optional and the page never blocks on it: the dashboard opens straight away
+with a one-time "not financial advice" banner. The left column starts with **Create My
+Watchlist**: type a ticker or company, press Enter, and the name gets a card on the home
+page (verdict, a "right now" strip for the current session, lean, plan, checklist, who is
+buying), a row in the left column with live price and change, a line in the final
+verdicts, and its own page. Names are removed one at a time from the row or the card. The
+list lives in the browser until the user signs in ("Sign in to sync it" in the menu
+footer), after which it is saved to the account and loads on any device.
+
+The page pulls fresh data at the top of every hour; the counter in the top bar shows the
+time to the next pull, and REFRESH forces one.
+
+## Sign-in flow
+
+Sign-in opens as a card from the menu footer. In server mode the flow is passwordless: enter an email,
 `POST /api/auth/request` stores a one-time token (57 minutes, single use) and emails a
 link; opening `/auth/verify?token=…` sets a signed, HttpOnly session cookie (30 days,
 HMAC with `MU_SECRET`, generated into the data directory if unset). The cookie is renewed
@@ -169,12 +190,6 @@ Check it with `market-update mail-test` (prints the transport) or
 `market-update mail-test you@example.com` (sends a test message). The sign-in card shows
 which transport and sender are active, and says so when none is connected.
 
-Right after the first sign-in the user must accept a one-page disclaimer ("This is not
-financial advice.") and enter three or four tickers (stocks or ETFs). That becomes their
-watchlist: saved to the account (`users.json`, `PUT /api/profile/tickers`), shown in the
-left menu with live price and change, on the home cards and in the final verdicts, and
-loaded again on every later login from any browser. Cards can be removed one at a time
-(the list always keeps at least one name); tickers are added from the ADD TICKER box.
 Clicking a ticker anywhere opens its own page: hero with price and verdict, chart with
 levels, plan, checklist, model reads, who is buying, stats and news.
 
