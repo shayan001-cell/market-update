@@ -1042,6 +1042,14 @@
       : `<div class="side-links">Watchlist kept in this browser · <button class="lnk" data-signin>${STATIC_MODE ? "Sign in / sign up on the app" : "Sign in or sign up"}</button></div>`;
     const si = foot && foot.querySelector("[data-signin]"); if (si) si.addEventListener("click", () => { gateOpen = true; renderGate(); });
     const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
+    wireNav();
+  }
+  function wireNav() {                       // the menu re-renders on its own, so it binds its own handlers (assignment, never duplicates)
+    const root = $("#side"); if (!root) return;
+    root.querySelectorAll(".side-item").forEach((b) => { b.onclick = () => switchView(b.getAttribute("data-view")); });
+    root.querySelectorAll("[data-sub]").forEach((b) => { b.onclick = () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }; });
+    root.querySelectorAll("[data-ticker-page]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }; });
+    root.querySelectorAll("[data-remove]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }; });
   }
   function sideWatch() {
     if (!lists || !report) return "";
@@ -1423,7 +1431,7 @@
 
   function wireStocks() {
     document.querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", (e) => e.stopPropagation()));
-    document.querySelectorAll(".nav-btn, .side-item").forEach((b) => b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
+    document.querySelectorAll("#app .nav-btn").forEach((b) => b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
     document.querySelectorAll("[data-theme-group]").forEach((b) => b.addEventListener("click", () => {
       themeGroup = b.getAttribute("data-theme-group");
       const sec = document.querySelector(".th-section"); const tmp = document.createElement("div"); tmp.innerHTML = secTheme(report); sec.replaceWith(tmp.firstElementChild); wireStocks();
@@ -1435,13 +1443,13 @@
     }));
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.getAttribute("data-open"))));
     const ag = $("[data-agree]"); if (ag) ag.addEventListener("click", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} if (user && !STATIC_MODE) fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: activeList() }) }).catch(() => {}); renderAll(); });
-    document.querySelectorAll("[data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
+    document.querySelectorAll("#app [data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
-    document.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
+    document.querySelectorAll("#app [data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
     document.querySelectorAll("[data-analyze]").forEach((b) => b.addEventListener("click", () => { requestAnalysis(b.getAttribute("data-analyze")); renderAll(); }));
     document.querySelectorAll("[data-list]").forEach((b) => b.addEventListener("click", () => { lists.active = b.getAttribute("data-list"); saveLists(); renderAll(); }));
-    document.querySelectorAll("[data-sub]").forEach((b) => b.addEventListener("click", () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }));
+    document.querySelectorAll("#app [data-sub]").forEach((b) => b.addEventListener("click", () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }));
     document.querySelectorAll("[data-scan-tf]").forEach((b) => b.addEventListener("click", () => { scanTf = b.getAttribute("data-scan-tf"); renderAll(); }));
 
     document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => { stockTab = b.getAttribute("data-tab"); rerenderStocks(); }));
