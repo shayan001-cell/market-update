@@ -129,7 +129,7 @@ def _stock_record(t: str, s: dict[str, Any], f: pd.DataFrame | None, meta: dict[
                                               "next_earnings", "days_to_earnings")}
     return {
         "ticker": t, "name": meta.get("name", t), "sector": meta.get("sector", ""), "industry": meta.get("industry", ""),
-        "kind": "ETF" if meta.get("quote_type") == "ETF" else "Stock",
+        "kind": {"ETF": "ETF", "CRYPTOCURRENCY": "Crypto", "INDEX": "Index", "MUTUALFUND": "Fund"}.get(meta.get("quote_type"), "Stock"),
         "last_price": s["last_price"], "prev_close": s["prev_close"], "last_ts": s["last_ts"],
         "chg_pct": s["gap_pct"], "gap_pct": s["gap_pct"] if mstate != "open" else None,
         "rel_volume": s["rel_volume"], "avg_volume": s["avg_volume"], "avg_dollar_volume": s["avg_dollar_volume"],

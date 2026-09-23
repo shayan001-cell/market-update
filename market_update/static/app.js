@@ -102,7 +102,7 @@
   const explain = (t) => `<div class="explain">${t}</div>`;
   const ST = {
     stance: { buy_now: ["BUY", "Everything lines up: trend, structure, candle and entry agree, with room to the target."], buy_the_dip: ["BUY THE DIP", "Strong stock, but it has run too far to chase. Wait for a pullback toward the 20-day average or the named support."], wait_for_breakout: ["WAIT FOR BREAKOUT", "Constructive, but capped under a level. A close through it is the trigger."], hold_dont_add: ["HOLD, DON'T ADD", "If you own it, keep it with a stop. New money has no edge here."], avoid: ["AVOID", "Reads conflict, an event is near, or informed money is selling. No trade."], short_setup: ["SHORT SETUP", "Downtrend with sellers in control and a clean short entry."] },
-    reason: { trend_and_entry: "because of the trend and the entry", extended: "because it has run too far from its averages", resistance: "because of overhead resistance", event_risk: "because of a dated event ahead", smart_money: "because of who is buying or selling", market_tone: "because of the market mood", poor_reward: "because the reward does not justify the risk" },
+    reason: { trend_and_entry: "because of the trend and the entry", extended: "because it has run too far from its averages", resistance: "because of overhead resistance", event_risk: "because of a dated event ahead", smart_money: "because of who is buying or selling", options_flow: "because of the options flow", volume: "because of the intraday volume picture", market_tone: "because of the market mood", poor_reward: "because the reward does not justify the risk" },
     cls: { buy_now: "up", buy_the_dip: "up2", wait_for_breakout: "flat", hold_dont_add: "flat", avoid: "down", short_setup: "down" },
     intraday: { long_momentum: ["LONG MOMENTUM", "Buy strength through yesterday's high on above-normal volume.", "up"], buy_dip_to_support: ["BUY DIP TO SUPPORT", "Buy the first pullback to the pivot or yesterday's high.", "up2"], short_momentum: ["SHORT MOMENTUM", "Short weakness through yesterday's low with sellers in control.", "down"], fade_the_gap: ["FADE THE GAP", "Extended on light volume; fade back toward the pivot.", "down"], range_scalp: ["RANGE SCALP", "Trade between yesterday's high and low; no directional edge.", "flat"], no_trade: ["NO TRADE", "Too quiet, too erratic or an event pending.", "flat"] },
   };
@@ -322,69 +322,6 @@
         ${fact("Money flow", pretty(g.flow_read.choice))}
       </div>
     </section>`;
-  }
-
-  function whatsappMessage(r) {
-    const B = (t) => `*${t}*`, I = (t) => `_${t}_`;
-    const NB = " "; const IND = NB + NB + NB + NB;            // indent that WhatsApp keeps
-    const DIV = "━━━━━━━━━━━━━━━━━━━━";
-    const role = (p) => { p = (p || "").toLowerCase(); if (p.includes("chief executive")) return "CEO"; if (p.includes("chief financial")) return "CFO"; if (p.includes("chief technology")) return "CTO"; if (p.includes("chief operating")) return "COO"; if (p.includes("president")) return "President"; if (p.includes("director")) return "Director"; if (p.includes("10%")) return "10% owner"; if (p.includes("officer")) return "Officer"; return p ? p[0].toUpperCase() + p.slice(1, 18) : "Insider"; };
-    const dm = (d) => { const [y, m, day] = d.split("-"); return `${parseInt(day, 10)} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][parseInt(m, 10) - 1]}`; };
-    const name = (n) => { const parts = (n || "").split(" "); return parts.length > 1 ? `${parts.slice(1).join(" ")} ${parts[0]}` : n; }; // "Cohen Ryan" -> "Ryan Cohen"
-    const rows = (r.smart_money && r.smart_money.rows) || [];
-    const buys = rows.flatMap((m) => (m.insider.open_market_buys_90d || []).map((b) => ({ t: m.ticker, ...b }))).filter((b) => (b.value || 0) > 0).sort((a, b) => b.value - a.value).slice(0, 8);
-    const g = r.regime;
-    const L = [];
-    L.push(`📟 ${B("MARKET UPDATE")} · ${dm(r.session_date)} ${r.session_date.slice(0, 4)}`);
-    L.push(DIV);
-    if (g) {
-      const me = { risk_on: "🟢", risk_off: "🔴", mixed: "🟡" }[g.tone.choice];
-      L.push(`${me} ${B("MOOD: " + pretty(g.tone.choice).toUpperCase())} ${I((g.tone.confidence * 100).toFixed(0) + "% sure")}`);
-      L.push(`${IND}⚡ Driver: ${pretty(g.driver.choice)}`);
-      L.push(`${IND}🏦 Rates: ${pretty(g.rates_read.choice)}`);
-      L.push(`${IND}💸 Money flow: ${pretty(g.flow_read.choice)}`);
-      L.push("");
-    }
-    L.push(`💼 ${B("INSIDERS ARE BUYING")}`);
-    L.push(I("SEC Form 4 · open-market buys · last 90 days"));
-    if (buys.length) buys.forEach((b) => { L.push(`🟢 ${B(b.t)} · ${name(b.insider)}, ${role(b.position)}`); L.push(`${IND}💵 ${fcap(b.value)} · ${dm(b.date)}`); });
-    else L.push("▪️ No open-market insider buys in the analysed names.");
-    const sells = rows.filter((m) => (m.insider.sell_value_90d || 0) > 20e6).sort((a, b) => b.insider.sell_value_90d - a.insider.sell_value_90d).slice(0, 4);
-    if (sells.length) { L.push(""); L.push(`🚪 ${B("INSIDERS SELLING")}`); sells.forEach((m) => L.push(`🔻 ${B(m.ticker)} · ${fcap(m.insider.sell_value_90d)} sold`)); }
-    const cg = (r.smart_money && r.smart_money.congress_top) || [];
-    if (cg.length) { L.push(""); L.push(`🏛️ ${B("CONGRESS BUYING")}`); L.push(`${IND}${cg.slice(0, 6).map((x) => `${x.ticker} ×${x.buys}`).join("  ·  ")}`); }
-    const hv = ((r.options && r.options.heavy) || []).slice(0, 5);
-    if (hv.length) { L.push(""); L.push(`📊 ${B("HEAVY OPTIONS BUYING")}`); L.push(I("volume swamping open interest · today")); hv.forEach((u) => L.push(`${u.side === "call" ? "📈" : "📉"} ${B(u.ticker)} ${fnum(u.strike, 0)}${u.side === "call" ? "C" : "P"} ${u.dte}d · ${fvol(u.volume)} contracts · ${fcap(u.notional)}`)); }
-    const scn = ((r.scan && r.scan.rows) || []).slice(0, 3);
-    if (scn.length) { L.push(""); L.push(`🔊 ${B("VOLUME BUILDING")}`); L.push(I(`30m · 1h · 2h scan · ${r.scan.market_state === "open" ? "live" : "last session"}`)); scn.forEach((x) => L.push(`${x.direction === "up" ? "📈" : "📉"} ${B(x.ticker)} ${fnum(x.price)} (${fpct(x.chg_pct)}) · ${x.score.toFixed(0)}/100 on ${x.lead_timeframe}${x.ai ? " · " + SC.read[x.ai.read.choice][0] : ""}`)); }
-    const lfr = ((r.low_float && r.low_float.rows) || []).slice(0, 3);
-    if (lfr.length) { L.push(""); L.push(`🧨 ${B("LOW FLOAT IN PLAY")}`); L.push(I("float under 30M shares")); lfr.forEach((x) => L.push(`${(x.chg_pct || 0) >= 0 ? "🟢" : "🔻"} ${B(x.ticker)} ${fnum(x.price)} (${fpct(x.chg_pct)}) · float ${(x.float / 1e6).toFixed(1)}M · ${isNum(x.float_turnover) ? x.float_turnover.toFixed(1) + "× traded" : ""}${x.ai ? " · " + LF.state[x.ai.state.choice][0] : ""}`)); }
-    const watch = r.stocks.filter((s) => isWatched(s.ticker) && s.ai && s.ai.stance);
-    if (watch.length) {
-      L.push(""); L.push(`🎯 ${B("WATCHLIST VERDICTS")}`); L.push(I("swing · intraday"));
-      watch.forEach((s) => { const st = s.ai.stance.choice; const e = { buy_now: "✅", buy_the_dip: "🟢", wait_for_breakout: "⏳", hold_dont_add: "✋", avoid: "⛔", short_setup: "🔻" }[st];
-        L.push(`${e} ${B(s.ticker)} ${fnum(s.last_price)} (${fpct(s.chg_pct)})`);
-        L.push(`${IND}📈 Swing: ${B(ST.stance[st][0])}`);
-        if (s.ai.intraday) L.push(`${IND}⏱ Intraday: ${ST.intraday[s.ai.intraday.choice][0]}`); });
-    }
-    L.push(DIV);
-    L.push(I("Model reads from typed questions, not advice. Full board on the Market Update dashboard."));
-    return L.join("\n");
-  }
-  function sharePanel(r) {
-    const msg = whatsappMessage(r);
-    const href = "https://wa.me/?text=" + encodeURIComponent(msg);
-    const html = esc(msg).replace(/\*([^*\n]+)\*/g, "<b>$1</b>").replace(/_([^_\n]+)_/g, "<i>$1</i>").replace(/━{6,}/g, '<span class="wa-div"></span>').split("\n").map((l) => `<div class="wa-line${/^(💼|🚪|🏛️|🎯|📟|🟢 <b>MOOD)/.test(l) ? " wa-head" : ""}">${l || "&nbsp;"}</div>`).join("");
-    return `<details class="share">
-      <summary><span class="wa-logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-.9.9-.9 2.2s.9 2.6 1.1 2.8c.1.2 1.8 2.8 4.4 3.8 2.2.9 2.6.7 3.1.6.5 0 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.2-.2-.5-.3l-1.7-.8c-.2-.1-.4-.1-.6.1-.2.3-.7.8-.8 1-.2.2-.3.2-.6.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.5-1.5-1.8-.1-.3 0-.4.1-.5l.4-.5.3-.4c.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5z"/></svg></span>
-        <span class="share-title">WhatsApp brief: what insiders are buying</span>
-        <span class="muted">${(r.smart_money && r.smart_money.rows || []).reduce((n, m) => n + (m.insider.open_market_buys_90d || []).length, 0)} insider buys · ${r.stocks.filter((s) => s.on_watchlist).length} verdicts · tap to preview</span>
-        <a class="btn wa" href="${href}" target="_blank" rel="noopener" data-stop>Send on WhatsApp</a>
-        <button class="btn ghost sm" data-copy data-stop>Copy text</button>
-      </summary>
-      <div class="chat"><div class="bubble"><div class="bubble-text">${html}</div><div class="bubble-meta">${r.generated_at.slice(11, 16)} ✓✓</div></div></div>
-      <textarea class="share-src" hidden>${esc(msg)}</textarea>
-    </details>`;
   }
 
   function verdictPanel(r) {
@@ -632,31 +569,6 @@
         <ul class="feed" id="feed">${feedHtml(r)}</ul></section>
     </aside>`;
   }
-  function secTodayOld(r) {
-    const cal = (r.calendar || []).slice(0, 5).map((c) => `<li><samp>${esc(c.time_et)}</samp> ${esc(c.title)} <span class="muted">${c.relevance.toFixed(1)}</span></li>`).join("") || "<li class=\"muted\">no relevant events</li>";
-    const earn = (r.earnings || []).slice(0, 4).map((e) => `<li><b>${esc(e.symbol)}</b> ${esc(e.report_time)} <span class="muted">${e.attention.toFixed(1)}</span></li>`).join("") || "<li class=\"muted\">none</li>";
-    const news = (r.headlines || []).slice(0, 5).map((h) => { const a = h.ai || {}; const d = a.direction ? a.direction.choice : ""; return `<li><span class="${{ bullish: "up", bearish: "down" }[d] || "flat"}">${d === "bullish" ? "▲" : d === "bearish" ? "▼" : "•"}</span> ${h.url ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.headline)}</a>` : esc(h.headline)}</li>`; }).join("");
-    const H = r.horizons && r.horizons.ai; const T_ = r.theme && r.theme.ai;
-    return `<aside class="today">
-      <section class="panel"><h3>Today, ${esc(r.session_date)}</h3><ul class="list">${cal}</ul></section>
-      <section class="panel"><h3>Earnings today</h3><ul class="list">${earn}</ul></section>
-      <section class="panel"><h3>News that matters</h3><ul class="list news">${news}</ul></section>
-      <section class="panel"><h3>How to read a card</h3><ul class="list help">
-        <li><b>Verdict</b> is the model's stance from every read combined: buy, buy the dip, wait for breakout, hold, avoid or short. It says why in one line.</li>
-        <li><b>LONG / SHORT / NEUTRAL</b> is the 1–5 day lean and how sure the model is.</li>
-        <li><b>Swing setup / Day trade</b> are 0–100 quality scores: weak, modest, good, strong.</li>
-        <li><b>Who is buying</b> reads SEC insider filings, the latest 13F holder changes, congressional trades and short interest. YES means they are buying.</li>
-        <li><b>The plan</b> is arithmetic on the chart: entry, stop, target, reward for each dollar risked.</li>
-        <li><b>Checklist</b> counts ten things a careful trader checks before buying.</li>
-      </ul></section>
-      <section class="panel"><h3>Market reads</h3><dl class="kv">
-        ${H ? `<dt>MACRO</dt><dd>${pretty(H.macro_read.choice)}</dd><dt>3M EQUITY LEAN</dt><dd>${H.equity_lean_3m.choice}</dd><dt>BIGGEST RISK</dt><dd class="down">${pretty(H.biggest_risk.choice)}</dd>` : ""}
-        ${r.options && r.options.ai ? `<dt>OPTIONS</dt><dd>${pretty(r.options.ai.positioning.choice)}</dd>` : ""}
-        ${T_ ? `<dt>DATA-CENTER THEME</dt><dd>${pretty(T_.stage.choice)}</dd><dt>NEXT LEG</dt><dd>${TH.group[T_.next_group.choice] || pretty(T_.next_group.choice)}</dd>` : ""}
-      </dl></section>
-    </aside>`;
-  }
-
   // ---------------------------------------------------------------- sections
   function secRegime(r) {
     const g = r.regime;
@@ -816,6 +728,7 @@
     const sel = r.stocks.find((s) => s.ticker === selectedTicker);
     const tabName = (SUBTABS.stock.find(([k]) => k === (subTab.stock || "all")) || ["", "All names"])[1];
     return `<section><h2>Stocks · ${esc(tabName)} <span class="muted">${stockRows(r).length} of ${r.stocks.length} analysed names (${r.stocks_scanned} liquid stocks scanned) · pick a group in the left menu · click a row for the full breakdown</span></h2>
+      ${subTabs("stock")}
       <div class="tbl-wrap"><table class="tbl" id="stocks-tbl"><thead><tr><th>Stock</th>${th("chg", "Price / change")}${th("atr", `Daily range`)}${th("rvol", "Volume vs normal")}<th>Verdict</th><th>Setup</th>${th("day", "Day score")}${th("swing", "Swing score")}<th>Flags</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div id="stock-detail" class="detail">${sel ? stockDetail(sel, r) : '<div class="card muted">Select a stock to see its chart, levels, fundamentals, news and model judgments.</div>'}</div></section>`;
   }
@@ -934,9 +847,6 @@
     if (report) renderAll();
     const m = $("main"); if (m) m.scrollTop = 0;
   }
-  function newList() { const name = prompt("Name for the new list:", "List " + (Object.keys(lists.lists).length + 1)); if (!name) return; const n = name.trim().slice(0, 30); if (!n || lists.lists[n]) return; lists.lists[n] = []; lists.active = n; saveLists(); renderAll(); }
-  function renameList() { const name = prompt("Rename this list:", lists.active); if (!name) return; const n = name.trim().slice(0, 30); if (!n || n === lists.active || lists.lists[n]) return; lists.lists[n] = lists.lists[lists.active]; delete lists.lists[lists.active]; lists.active = n; saveLists(); renderAll(); }
-  function deleteList() { const names = Object.keys(lists.lists); if (!confirm(`Delete the list "${lists.active}"?`)) return; delete lists.lists[lists.active]; if (!Object.keys(lists.lists).length) lists.lists["My watchlist"] = []; lists.active = Object.keys(lists.lists)[0]; saveLists(); renderAll(); }
   async function requestAnalysis(t, attempt = 0) {
     if (analyzing.has(t) && attempt === 0) return;
     analyzing.add(t); delete analyzeError[t];
@@ -1033,12 +943,6 @@
       <div class="wc-actions">${STATIC_MODE ? "" : `<button class="btn sm" data-analyze="${esc(t)}" ${analyzing.has(t) ? "disabled" : ""}>${analyzing.has(t) ? "Analysing…" : "Analyze"}</button>`}<a class="btn sm ghost" href="${tvLink(t)}" target="_blank" rel="noopener">Open chart</a></div>
     </article>`;
   }
-  function listBar() {
-    const names = Object.keys(lists.lists);
-    return `<div class="listbar">${names.map((n) => `<button class="tab ${n === lists.active ? "active" : ""}" data-list="${esc(n)}">${esc(n)} <span class="cnt">${lists.lists[n].length}</span></button>`).join("")}<button class="tab ghost" data-newlist>+ New list</button>
-      <span class="listbar-actions"><button class="btn sm ghost" data-renamelist>Rename</button><button class="btn sm ghost" data-deletelist>Delete</button></span></div>`;
-  }
-
   // ---------------------------------------------------------------- volume scanner + low float
   const SC = {
     read: { breakout_with_volume: ["Breakout on volume", "up", "Price is clearing its recent range on rising volume and closing near the highs of its bars: buyers are pressing."],
@@ -1219,16 +1123,6 @@
     document.body.classList.add("dash-enter");
     setTimeout(() => document.body.classList.remove("dash-enter"), 2200);
   }
-  function nameHtml() {
-    return `<div class="g-shell reveal"><div class="g-core">
-      ${gateBrand()}
-      ${hexSteps(1)}
-      <span class="eyebrow">Welcome</span>
-      <h1>What should we call you?</h1>
-      <p>Signed in as <b>${esc(user.email)}</b>. Your name is shown in the menu and next to the sign-out button.</p>
-      <form id="name-form" class="gate-form"><div class="field"><input id="name-input" placeholder="Your name" maxlength="60" autocomplete="name" autofocus value="${esc(user.email.split("@")[0])}"></div>${pillBtn("Go to my dashboard", 'type="submit"')}</form>
-    </div></div>`;
-  }
   const hexSteps = (n) => { const steps = ["Sign in", "Confirm", "Watchlist"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
   const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
   const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
@@ -1321,23 +1215,6 @@
       stage.addEventListener("mouseleave", () => { card.style.transform = ""; });
     }
   }
-  function onboardingHtml() {
-    const have = (user.profile && user.profile.tickers) || [];
-    return `<div class="g-shell wide reveal"><div class="g-core">
-      ${gateBrand()}<span class="who">${esc(user.email)}</span>
-      ${hexSteps(1)}
-      <div class="disc"><span class="eyebrow warn">Read before you continue</span><h2>This is not financial advice.</h2><p>Webex Market Update shows market data, arithmetic over that data, and model reads produced by typed questions. None of it is a recommendation to buy or sell anything. Markets move against you fast, low-float names halt, and you alone are responsible for any trade you make. If you need advice, talk to a licensed adviser.</p>
-        <label class="ck"><input type="checkbox" id="disc-ok"><span>I understand that nothing on this site is financial advice and that I trade at my own risk.</span></label></div>
-      <div class="picks-block"><span class="eyebrow">Your watchlist</span><h1>Three or four tickers to start</h1><p>Stocks or ETFs. Each one is analysed on the spot, gets a verdict on your home page and its own page in the left menu. You can add or remove names any time; the list is saved to your account.</p>
-        <div class="picks" id="picks">${picksInputs(have)}</div>
-        <datalist id="sym-list"></datalist>
-        <div class="gate-actions">${pillBtn("Create my watchlist", 'id="picks-go" disabled')}<span id="picks-status" class="gate-status"></span></div></div>
-    </div></div>`;
-  }
-  function picksInputs(have) {
-    const ph = ["NVDA", "AAPL", "SPY", "TSLA"];
-    return Array.from({ length: 4 }, (_, i) => `<div class="field pickf"><span class="pick-n">${i + 1}</span><input class="pick" list="sym-list" placeholder="${ph[i]}${i === 3 ? " (optional)" : ""}" value="${esc((have[i] || "").toUpperCase())}" maxlength="12" autocomplete="off"></div>`).join("");
-  }
   function renderGate() {
     const g = $("#gate"); if (!g) return;
     const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) lb.textContent = `SIGN OUT · ${(user.name || user.email.split("@")[0]).toUpperCase().slice(0, 14)}`; }
@@ -1364,7 +1241,7 @@
         leaveGate(() => { renderGate(); renderAll(); if (!STATIC_MODE && lists) refreshAdhoc(); });
       });
     }
-    const nf = $("#name-form"); if (nf) nf.addEventListener("submit", async (e) => { e.preventDefault(); const name = $("#name-input").value.trim(); if (!name) return; try { const res = await fetch("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const j = await res.json(); if (res.ok) { user.name = j.name; renderGate(); renderAll(); } } catch (err) {} });
+
     if (!user && !STATIC_MODE && !mailStatus) fetch("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
   }
   function wireGate() {
@@ -1546,7 +1423,6 @@
 
   function wireStocks() {
     document.querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", (e) => e.stopPropagation()));
-    document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async (e) => { e.preventDefault(); const src = b.closest(".share").querySelector(".share-src"); try { await navigator.clipboard.writeText(src.value); b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy text"), 1500); } catch (err) { src.hidden = false; src.select(); } }));
     document.querySelectorAll(".nav-btn, .side-item").forEach((b) => b.addEventListener("click", () => switchView(b.getAttribute("data-view"))));
     document.querySelectorAll("[data-theme-group]").forEach((b) => b.addEventListener("click", () => {
       themeGroup = b.getAttribute("data-theme-group");
@@ -1565,9 +1441,6 @@
     document.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
     document.querySelectorAll("[data-analyze]").forEach((b) => b.addEventListener("click", () => { requestAnalysis(b.getAttribute("data-analyze")); renderAll(); }));
     document.querySelectorAll("[data-list]").forEach((b) => b.addEventListener("click", () => { lists.active = b.getAttribute("data-list"); saveLists(); renderAll(); }));
-    const nl = $("[data-newlist]"); if (nl) nl.addEventListener("click", newList);
-    const rl = $("[data-renamelist]"); if (rl) rl.addEventListener("click", renameList);
-    const dl = $("[data-deletelist]"); if (dl) dl.addEventListener("click", deleteList);
     document.querySelectorAll("[data-sub]").forEach((b) => b.addEventListener("click", () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }));
     document.querySelectorAll("[data-scan-tf]").forEach((b) => b.addEventListener("click", () => { scanTf = b.getAttribute("data-scan-tf"); renderAll(); }));
 

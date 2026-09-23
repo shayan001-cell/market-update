@@ -7,7 +7,8 @@ Settings live in config (SCAN_*). What a day trader usually screens for:
   * relative volume by time of day (today's volume so far vs the same clock
     time over the prior sessions), not just vs a full-day average
   * volume building bar over bar on the timeframe, with the last three bars
-    well above the 20-bar norm
+    well above the same bars on prior sessions (time-of-day baseline, since
+    volume is U-shaped through the day)
   * range expansion (the bar's range vs the timeframe's ATR)
   * price confirming: above session VWAP, breaking the 20-bar high or low
 """
@@ -51,16 +52,29 @@ def _roll_up(df30: pd.DataFrame, n: int) -> pd.DataFrame:
     return out
 
 
-def _tf_stats(bars: pd.DataFrame, look: int = 20) -> dict[str, Any] | None:
+def _tf_stats(bars: pd.DataFrame, look: int = 20, prior_sessions: int = 10) -> dict[str, Any] | None:
+    """Volume is U-shaped through the day, so a bar is compared with the same bar position on prior
+    sessions (time-of-day baseline); the flat 20-bar average is only the fallback."""
     if len(bars) < look + 4:
         return None
     v = bars["Volume"].astype(float)
+    dates = pd.Index(bars.index.date)
+    pos = pd.Series(range(len(bars)), index=bars.index).groupby(dates.values).cumcount().values
+    today = dates[-1]
     last = bars.iloc[-1]
     prior = v.iloc[-(look + 1):-1]
-    avg = float(prior.mean()) if len(prior) else 0.0
-    if not avg:
+    flat = float(prior.mean()) if len(prior) else 0.0
+    if not flat:
         return None
+
+    def baseline(p: int) -> float:
+        mask = (pos == p) & (dates.values != today)
+        vals = v.values[mask][-prior_sessions:]
+        return float(vals.mean()) if len(vals) >= 3 and vals.mean() > 0 else flat
+
+    last3_pos = list(pos[-3:])
     last3 = v.iloc[-3:]
+    base3 = sum(baseline(p) for p in last3_pos)
     building = 0
     for i in range(len(v) - 1, 0, -1):
         if v.iloc[i] > v.iloc[i - 1] and v.iloc[i] > 0:
@@ -78,9 +92,9 @@ def _tf_stats(bars: pd.DataFrame, look: int = 20) -> dict[str, Any] | None:
     lo20 = float(bars["Low"].iloc[-(look + 1):-1].min())
     return {
         "bar_time": bars.index[-1].isoformat(),
-        "vol_last": float(last["Volume"]), "vol_avg20": avg,
-        "vol_ratio_last": round(float(last["Volume"]) / avg, 2),
-        "vol_ratio_3bar": round(float(last3.mean()) / avg, 2),
+        "vol_last": float(last["Volume"]), "vol_avg20": flat,
+        "vol_ratio_last": round(float(last["Volume"]) / baseline(int(pos[-1])), 2),
+        "vol_ratio_3bar": round(float(last3.sum()) / base3, 2) if base3 else None,
         "building_bars": building,
         "range_vs_atr": round(rng / atr, 2) if atr else None,
         "chg_3bar_pct": round(chg3, 2),
@@ -94,7 +108,7 @@ def _tf_stats(bars: pd.DataFrame, look: int = 20) -> dict[str, Any] | None:
 def _score_tf(s: dict[str, Any] | None, n: int, above_vwap: bool | None) -> float:
     if not s:
         return 0.0
-    vol = min(s["vol_ratio_3bar"], 4.0) / 4.0 * 40
+    vol = min(s["vol_ratio_3bar"] or 0.0, 4.0) / 4.0 * 40
     build = min(s["building_bars"], 3) / 3 * 15
     rng = min(s["range_vs_atr"] or 0, 2.5) / 2.5 * 15
     cap = MOMENTUM_CAP.get(n, 4.0)
@@ -155,7 +169,7 @@ def scan(intraday: pd.DataFrame, snapshot: dict[str, dict[str, Any]], tickers: l
         passed = {
             "price": bool(price and price >= config.SCAN_MIN_PRICE),
             "volume": bool((ses.get("session_volume") or 0) >= config.SCAN_MIN_SESSION_VOLUME),
-            "rvol": bool((ses.get("rvol_time_of_day") or 0) >= config.SCAN_MIN_RVOL or any(x["vol_ratio_3bar"] >= 2.0 for x in tfs.values())),
+            "rvol": bool((ses.get("rvol_time_of_day") or 0) >= config.SCAN_MIN_RVOL or any((x["vol_ratio_3bar"] or 0) >= 2.0 for x in tfs.values())),
         }
         lead = max(tfs, key=lambda k: tfs[k]["score"])
         rec = {"ticker": t, "name": None, "price": price, "chg_pct": snap.get("gap_pct") if snap.get("gap_pct") is not None else ses.get("chg_pct"),

@@ -56,11 +56,11 @@ mode it re-runs every minute while the market is pre, open or after hours (every
 minutes overnight) and the table updates in place with a live stamp and a countdown; the
 hourly build adds the model reads. Regular-session 15-minute bars for the whole scan
 universe (plus the low-float names) are rolled up into 30-minute, 1-hour and 2-hour
-candles; the 15m and 30m columns are the day-trading view, 1h and 2h the context.
+candles; the 15m and 30m columns are the day-trading view, 1h and 2h the context. Volume is compared with the same bar position on the prior ten sessions (a time-of-day baseline), not a flat average, so the habitual open and close surges do not count as builds.
 Clicking a row opens that name's page (chart, verdict, smart money). Per name: relative volume by time of day
 (volume so far versus the same clock time over the prior ten sessions), session VWAP and
 position in the day's range; per timeframe: the last three bars' volume against the
-20-bar norm, how many bars in a row volume has grown, the bar's range against that
+same bars on prior sessions, how many bars in a row volume has grown, the bar's range against that
 timeframe's ATR, the three-bar move, RSI, and whether price broke the 20-bar range. Each
 timeframe scores 0–100 (volume build 40, rising bars 15, range 15, move 15, confirmation
 15); the overall score weights 15m/30m/1h/2h at 30/30/25/15. Filters: price ≥ $2, session volume

@@ -235,8 +235,8 @@ def fetch_info(tickers: list[str]) -> dict[str, dict[str, Any]]:
                 pass
         out[t] = {
             "name": info.get("shortName") or info.get("longName") or t,
-            "sector": info.get("sector") or ("ETF" if qt == "ETF" else "Unknown"),
-            "industry": info.get("industry") or ("ETF" if qt == "ETF" else ""),
+            "sector": info.get("sector") or {"ETF": "ETF", "CRYPTOCURRENCY": "Crypto", "INDEX": "Index"}.get(qt, "Unknown"),
+            "industry": info.get("industry") or {"ETF": "ETF", "CRYPTOCURRENCY": "Cryptocurrency"}.get(qt, ""),
             "market_cap": info.get("marketCap"),
             "beta": info.get("beta"),
             "short_float": info.get("shortPercentOfFloat"),

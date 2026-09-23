@@ -497,7 +497,7 @@ STANCE_QUESTIONS = {
             "needs a clean entry with the trend, not just a strong stock."
         ),
         criteria={
-            "buy_now": "Trend, structure, candle and entry all agree, reward at least 1.5x risk, not extended, no event inside a week",
+            "buy_now": "Trend, structure, candle and entry all agree, reward at least 1.5x risk, not extended, no event inside a week, and nothing in `smart_money` (informed selling, bearish options flow) argues against it",
             "buy_the_dip": "Strong trend but the stock is extended or the entry is poor; wait for a pullback toward the 20-day average or a named support",
             "wait_for_breakout": "Constructive but capped under resistance or inside a range; a close through the level is the trigger",
             "hold_dont_add": "Already-long holders can stay with a stop, but new money has no edge here",
@@ -508,9 +508,12 @@ STANCE_QUESTIONS = {
     "intraday": Choice(
         instructions=(
             "For an intraday trade in `ticker` in the coming session, weighing `intraday` (relative volume, ATR as a percent "
-            "of price, yesterday's high and low, the pivot, the gap and the session state), `control`, `setup`, `day_fit`, "
-            "`extended_p` and `market_tone`, which intraday playbook fits best? Be conservative: momentum plays need volume "
-            "above normal; fades need an extended move on thin volume."
+            "of price, yesterday's high and low, the pivot, the gap and the session state) and `intraday.volume_scan` (the "
+            "intraday volume-build scan: a 0-100 score, the leading timeframe, its direction, volume versus the same time of "
+            "day on prior sessions, and the scan's read when present), plus `control`, `setup`, `day_fit`, `extended_p` and "
+            "`market_tone`, which intraday playbook fits best? Be conservative: momentum plays need volume above normal and a "
+            "volume scan that agrees in direction; fades need an extended move on thin volume; when `volume_scan` is null or "
+            "the session is closed, judge from yesterday's tape."
         ),
         criteria={
             "long_momentum": "Buy strength through yesterday's high or the opening-range high, volume above normal, trend up",
@@ -529,6 +532,8 @@ STANCE_QUESTIONS = {
             "resistance": "Overhead resistance or a range cap",
             "event_risk": "Earnings or another dated event",
             "smart_money": "Insider, institutional or congressional positioning",
+            "options_flow": "What the options market is doing in the name",
+            "volume": "The intraday volume picture: a volume build confirming or contradicting the move",
             "market_tone": "The overall market mood",
             "poor_reward": "The plan's reward-to-risk",
         },
