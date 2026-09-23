@@ -305,6 +305,26 @@
     </article>`;
   }
 
+  function plainFacts(r) {
+    const out = [];
+    const m = (r.macro || []); const find = (re) => m.find((x) => re.test(x.label || "") || re.test(x.symbol || ""));
+    const es = find(/S&P/i), vix = find(/VIX/i), tnx = find(/10Y|10-year/i), dxy = find(/Dollar/i), oil = find(/Oil|WTI|Crude/i), gold = find(/Gold/i);
+    if (es && isNum(es.chg_pct)) out.push({ k: "S&P futures", v: fpct(es.chg_pct), c: cls(es.chg_pct), t: es.chg_pct >= 0.5 ? "Buyers are pressing before the open; dips are more likely to get bought." : es.chg_pct <= -0.5 ? "Sellers have the upper hand before the open; bounces are more likely to get sold." : "No lead from overnight; the open will set the tone." });
+    if (vix && isNum(vix.last)) { const mv = vix.last / 15.9; out.push({ k: "VIX", v: fnum(vix.last, 1), c: vix.last < 15 ? "up" : vix.last < 20 ? "flat" : "down", t: (vix.last < 15 ? "The market is calm: a normal day moves about " : vix.last < 20 ? "Ordinary nerves: a normal day moves about " : vix.last < 30 ? "The market is nervous: expect swings of about " : "Fear is high: swings of about ") + mv.toFixed(1) + "% on the S&P." }); }
+    if (tnx && isNum(tnx.last)) { const bp = isNum(tnx.chg_pct) ? tnx.chg_pct : null; out.push({ k: "10-year yield", v: fnum(tnx.last, 2) + "%", c: bp == null ? "flat" : bp > 0 ? "down" : "up", t: bp != null && Math.abs(bp) >= 1 ? (bp > 0 ? "Borrowing costs rose: a headwind for growth and tech valuations today." : "Yields eased: cheaper money, a tailwind for growth stocks today.") : "Rates are steady: not a factor for stocks today." }); }
+    if (dxy && isNum(dxy.chg_pct) && Math.abs(dxy.chg_pct) >= 0.3) out.push({ k: "Dollar", v: fpct(dxy.chg_pct), c: cls(-dxy.chg_pct), t: dxy.chg_pct > 0 ? "A stronger dollar weighs on commodities and companies that sell abroad." : "A weaker dollar helps commodities, gold and exporters." });
+    if (oil && isNum(oil.chg_pct) && Math.abs(oil.chg_pct) >= 1.5) out.push({ k: "Oil", v: fpct(oil.chg_pct), c: cls(oil.chg_pct), t: oil.chg_pct > 0 ? "Oil jumped: energy stocks benefit, inflation worries rise." : "Oil fell: relief for airlines and consumers, pressure on energy names." });
+    if (gold && isNum(gold.chg_pct) && Math.abs(gold.chg_pct) >= 1) out.push({ k: "Gold", v: fpct(gold.chg_pct), c: cls(gold.chg_pct), t: gold.chg_pct > 0 ? "Money is looking for safety." : "Less demand for safety today." });
+    const B = (r.flows || {}).breadth; if (B && B.n) { const p = Math.round(B.above20 / B.n * 100); out.push({ k: "Breadth", v: p + "%", c: p >= 60 ? "up" : p <= 40 ? "down" : "flat", t: p >= 60 ? `${p}% of stocks are above their 20-day average: the move is broad, not a few big names.` : p <= 40 ? `Only ${p}% of stocks are above their 20-day average: strength is narrow and fragile.` : `${p}% of stocks are above their 20-day average: an even, choppy tape.` }); }
+    const sp = (((r.rates || {}).spreads || {})["2s10s"] || {}).latest; if (isNum(sp)) out.push({ k: "2s10s curve", v: fbp(sp), c: sp < 0 ? "down" : "flat", t: sp < 0 ? "The yield curve is inverted: bond traders are pricing a slowdown ahead." : "The curve is positive: no recession signal from bonds." });
+    const S = (!STATIC_MODE && liveScan) || r.scan; if (S && isNum(S.qualified)) out.push({ k: "Volume scanner", v: String(S.qualified), c: S.qualified >= 20 ? "up" : "flat", t: `${S.qualified} names have unusual volume ${S.market_state === "open" ? "right now" : "in the last session"}; see SCAN for the list.` });
+    const lf = ((r.low_float || {}).rows || []).filter((x) => isNum(x.float_turnover) && x.float_turnover >= 1).length; if (lf) out.push({ k: "Low float", v: String(lf), c: "down", t: `${lf} thin names have traded their whole float today: big moves and halts are likely there.` });
+    return out;
+  }
+  function secMeaning(r) {
+    const f = plainFacts(r); if (!f.length) return "";
+    return `<section class="meaning"><h3>What today's numbers mean</h3><div class="mean-grid">${f.map((x) => `<div class="mean-row"><span class="mean-k">${esc(x.k)}</span><span class="mean-v mono ${x.c}">${x.v}</span><span class="mean-t">${esc(x.t)}</span></div>`).join("")}</div></section>`;
+  }
   function moodPanel(r) {
     const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">Model read unavailable this build.</div></section>`;
     const volL = ["quiet", "normal", "elevated", "extreme"];
@@ -344,14 +364,23 @@
     </section>`;
   }
 
+  function watchStrip(r) {
+    const tickers = activeList();
+    const chips = tickers.map((t) => { const s = stockFor(t); const q = s || (r.lite || {})[t] || {}; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
+      return `<span class="chip-t ${analyzing.has(t) ? "busy" : ""}"><button class="chip-open" data-ticker-page="${esc(t)}" title="Open ${esc(t)}"><i class="st-dot ${st ? ST.cls[st] : "none"}"></i><b>${esc(t)}</b><span class="delta ${cls(q.chg_pct)}">${isNum(q.chg_pct) ? fpct(q.chg_pct, 1) : ""}</span></button><button class="chip-x" data-remove="${esc(t)}" title="Remove ${esc(t)} from your watchlist" aria-label="Remove ${esc(t)}">×</button></span>`; }).join("");
+    return `<div class="wl-strip">
+      <div class="wl-head"><div><b>Your watchlist</b><span class="muted"> · ${tickers.length} ${tickers.length === 1 ? "name" : "names"} · ${user ? "saved to your account" : "kept in this browser"}</span></div><span class="muted wl-hint">Type a ticker to add · press × to remove · click a name for its page</span></div>
+      <div class="wl-chips">${chips}<div class="wl-add hud-search"><input id="search" type="search" placeholder="Add ticker or company" autocomplete="off" spellcheck="false" aria-label="Add a ticker to your watchlist"><div id="search-results" class="search-results" hidden></div></div></div>
+    </div>`;
+  }
   function secBoard(r) {
     const tickers = activeList();
     const others = r.stocks.filter((s) => !isWatched(s.ticker) && s.tags.includes("swing")).sort((a, b) => b.scores.swing - a.scores.swing).slice(0, 4);
     const cards = tickers.map((t) => { const s = stockFor(t); if (s) return watchCard(s, false, r); const q = r.lite && r.lite[t]; return q ? liteCard(t, q, r) : pendingCard(t); });
     const watchHtml = cards.length ? `<div class="board">${cards.join("")}</div>`
-      : `<div class="empty">This list is empty. Type a ticker or company name in the search box at the top (press <kbd>/</kbd>) and pick a result: stocks and ETFs both work. Each name gets a quote, technicals and, where the model has run, a lean, a plan and a verdict.</div>`;
+      : `<div class="empty">Your watchlist is empty. Type a ticker or company name in the box above (press <kbd>/</kbd>) and pick a result: stocks and ETFs both work. Each name gets a verdict, a plan and a checklist here.</div>`;
     return `<section class="top">
-      <h2>Your watchlist <span class="muted">${tickers.length} names · lean for the next 1–5 sessions · plan uses yesterday's range, the 20-day average and 20-day high/low · click a ticker for its page</span></h2>
+      ${watchStrip(r)}
       ${watchHtml}
       ${others.length ? `<h2>Best swing setups outside your list <span class="muted">top ${others.length} by swing score</span></h2><div class="board">${others.map((s) => watchCard(s, true, r)).join("")}</div>` : ""}
     </section>`;
@@ -910,7 +939,7 @@
   }
   function closeSearch() { const i = $("#search"); if (i) { i.value = ""; i.blur(); } const b = $("#search-results"); if (b) b.hidden = true; searchSel = 0; }
   function wireSearch() {
-    const input = $("#search"); if (!input) return;
+    const input = $("#search"); if (!input || input.dataset.wired) return; input.dataset.wired = "1";
     input.addEventListener("focus", () => { loadSymbols(); renderSearch(); });
     input.addEventListener("input", () => { searchSel = 0; renderSearch(); });
     input.addEventListener("blur", () => setTimeout(() => { const b = $("#search-results"); if (b) b.hidden = true; }, 150));
@@ -1033,7 +1062,7 @@
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
     $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
-      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}</span><kbd>${n}</kbd></button>` +
+      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}${k === "home" && lists ? ` <span class="cnt">${activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
@@ -1327,6 +1356,9 @@
     $("#generated-line").textContent = `UPD ${r.generated_at.slice(11, 16)} ET · ${r.elapsed_s}S`;
     const app = $("#app");
     renderNav();
+    const ttl = $("#hud-title"), sub = $("#hud-sub");
+    if (ttl) { const v = VIEWS.find((x) => x[0] === currentView); ttl.textContent = currentView === "ticker" ? (tickerSel || "Ticker") : (v ? v[1].charAt(0) + v[1].slice(1).toLowerCase() : "Home"); }
+    if (sub) sub.textContent = `${r.session_label.split(",")[0]} ${r.session_date.slice(5).replace("-", "/")} · report ${r.generated_at.slice(11, 16)} ET`;
     app.innerHTML = viewHtml(r);
     firstRender = false;
     const st = r.ai_stats;
@@ -1338,7 +1370,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secBoard(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secMeaning(r)}${secBoard(r)}</div>${secToday(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
       case "admin": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one admin-view">${secAdmin()}</div>`;
       case "scan": return `<div class="view sub">${subTabs("scan")}<div class="subview">${subTab.scan === "lowfloat" ? secLowFloat(r) : secScan(r)}</div></div>`;
@@ -1443,6 +1475,7 @@
     }));
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.getAttribute("data-open"))));
     const ag = $("[data-agree]"); if (ag) ag.addEventListener("click", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} if (user && !STATIC_MODE) fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: activeList() }) }).catch(() => {}); renderAll(); });
+    wireSearch();
     document.querySelectorAll("#app [data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));

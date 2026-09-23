@@ -31,17 +31,12 @@
 <div class="shell" id="shell">
   <aside class="side" id="side">
     <div class="side-brand"><img class="logo" src="static/logo.svg" alt="Webex Market Update" width="30" height="30"><span class="brand-text"><small>WEBEX</small> <b>MARKET UPDATE</b></span><button class="side-toggle" id="side-toggle" title="Collapse the menu" aria-label="Collapse the menu">‹</button></div>
-    <section class="side-panel" id="side-create" aria-label="Create my watchlist">
-      <h2 class="side-title">Create My Watchlist</h2>
-      <p class="side-hint" id="side-hint">Type a ticker or company and press Enter. Each name gets a card with its verdict, plan and checklist.</p>
-      <div class="hud-search"><input id="search" type="search" placeholder="Add a ticker · NVDA, Apple, SPY" autocomplete="off" spellcheck="false" aria-label="Add a ticker to your watchlist"><div id="search-results" class="search-results" hidden></div></div>
-      <div class="side-watch" id="side-watch"></div>
-    </section>
     <nav class="side-nav" id="nav" aria-label="Views"></nav>
     <div class="side-foot" id="side-foot"></div>
   </aside>
   <div class="hud">
     <header class="hud-bar">
+      <div class="hud-context" id="hud-context"><b id="hud-title">Home</b><span id="hud-sub"></span></div>
       <div class="hud-spacer"></div>
       <span class="readout count" id="refresh-count" title="The page pulls fresh data at the top of every hour">—</span>
       <div class="hud-status">
