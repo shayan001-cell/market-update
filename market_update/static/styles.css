@@ -967,3 +967,9 @@ body.dash-enter .today { animation: slide-in-r .9s .2s cubic-bezier(.32,.72,0,1)
 .wc-now > span { white-space: normal; overflow: visible; line-height: 1.3; }
 .wc-now > span:only-of-type, .wc-now > span:nth-of-type(1):nth-last-of-type(2) { grid-column: span 2; }
 @media (max-width: 1250px) { .wc-now { grid-template-columns: auto minmax(0, 1fr); } .wc-now .wc-now-k { grid-row: 1 / span 4; } .wc-now > span { grid-column: auto !important; } }
+/* under 1250px the main column is too narrow for two dense cards: one column, horizontal strip label */
+@media (max-width: 1250px) {
+  .board { grid-template-columns: 1fr; }
+  .wc-now { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto; }
+  .wc-now .wc-now-k { writing-mode: horizontal-tb; transform: none; grid-row: auto; grid-column: 1 / -1; border: 0; padding: 0; margin: 0 0 2px; align-self: auto; }
+}
