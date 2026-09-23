@@ -973,3 +973,24 @@ body.dash-enter .today { animation: slide-in-r .9s .2s cubic-bezier(.32,.72,0,1)
   .wc-now { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto; }
   .wc-now .wc-now-k { writing-mode: horizontal-tb; transform: none; grid-row: auto; grid-column: 1 / -1; border: 0; padding: 0; margin: 0 0 2px; align-self: auto; }
 }
+
+/* ---- terminal skin: squared panels, terse mono headers, market tape ---- */
+.hud { grid-template-rows: var(--bar-h) auto auto 1fr auto; }
+.tape-bar { overflow: hidden; height: 28px; background: #07090E; border-bottom: 1px solid var(--line-2); mask-image: linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent); }
+.tape-track { display: inline-flex; gap: 28px; height: 28px; align-items: center; padding: 0 16px; white-space: nowrap; animation: tape 60s linear infinite; }
+.tape-bar:hover .tape-track { animation-play-state: paused; }
+.tp { display: inline-flex; gap: 8px; align-items: baseline; font-size: 11.5px; } .tp b { color: var(--text-2); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 10.5px; } .tp .mono { color: var(--text); } .tp .delta { font-size: 10.5px; }
+.card, .tile, .wcard, .panel.mood, .panel.verdicts, .tbl-wrap, .ck, .verdict, .wc-now, .wc-plan, .wl-strip, .pcard, .pgrid, .pplan, .sm-card, .hv, .chip-t, .wc-scores > span { border-radius: 4px; }
+.wcard, .pcard, .wl-strip, .panel.mood, .panel.verdicts { box-shadow: none; }
+h2 { font-family: var(--mono); font-size: 12.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text); padding-left: 10px; border-left: 3px solid var(--accent); }
+h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.panel h3, .today h3, .meaning h3, .wl-head b, .ideas h3, .admin .card h3 { font-family: var(--mono); letter-spacing: .12em; text-transform: uppercase; font-size: 11px; }
+.ideas { margin-top: 14px; } .ideas h3 { margin: 0 0 8px; color: var(--accent); } .ideas h3 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; font-weight: 400; }
+.ideas-tbl td { font-size: 12px; } .ideas-tbl .btn.sm { padding: 3px 8px; }
+.mood-tone { font-family: var(--macro); }
+.verdict-word, .pverdict, .tk-sym, .wc-ticker { font-family: var(--macro); }
+.readout, .hud-context span, .sc-stamp { font-family: var(--mono); }
+.view.home .col-main > .home-top { margin-bottom: 12px; }
+@media (max-width: 900px) { .tape-bar { display: none; } }
+/* mood and verdicts stack when the main column is narrow */
+@media (max-width: 1250px) { .home-top { grid-template-columns: 1fr; } .vrow { grid-template-columns: 56px 118px 128px 1fr auto; } }

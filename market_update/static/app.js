@@ -422,7 +422,7 @@
     return `<section class="top">
       ${watchStrip(r)}
       ${watchHtml}
-      ${others.length ? `<h2>Best swing setups outside your list <span class="muted">top ${others.length} by swing score</span></h2><div class="board">${others.map((s) => watchCard(s, true, r)).join("")}</div>` : ""}
+      ${others.length ? `<div class="ideas"><h3>Ideas outside your list <span class="muted">top ${others.length} swing setups from the scan · click to open</span></h3><table class="tbl ideas-tbl"><thead><tr><th>Name</th><th>Price</th><th>Verdict</th><th>Setup</th><th>Swing</th><th>Day</th><th></th></tr></thead><tbody>${others.map((s) => { const a = s.ai || {}; const st = a.stance ? a.stance.choice : null; return `<tr class="clickable" data-ticker-page="${esc(s.ticker)}"><td class="sym"><b>${esc(s.ticker)}</b><div class="meta2">${esc(s.name)}</div></td><td class="num">${fnum(s.last_price)}<div class="delta ${cls(s.chg_pct)}">${fpct(s.chg_pct)}</div></td><td>${st ? `<span class="pill ${ST.cls[st]}">${ST.stance[st][0]}</span>` : "–"}</td><td>${a.setup ? pretty(a.setup.choice) : "–"}</td><td class="num"><b>${(s.scores.swing * 100).toFixed(0)}</b></td><td class="num">${(s.scores.day * 100).toFixed(0)}</td><td><button class="btn sm ghost" data-add-ticker="${esc(s.ticker)}" data-stop>+ Watch</button></td></tr>`; }).join("")}</tbody></table></div>` : ""}
     </section>`;
   }
 
@@ -1173,7 +1173,7 @@
       if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
     }
   }
-  const gateNeeded = () => (STATIC_MODE ? (gateOpen || !discAgreed()) : (!user || !(user.profile && user.profile.accepted_disclaimer_at) || !user.name));
+  const gateNeeded = () => (STATIC_MODE ? true : (!user || !(user.profile && user.profile.accepted_disclaimer_at) || !user.name));
   function disclaimerHtml() {
     const needName = !STATIC_MODE && !(user && user.name);
     return `<div class="login-stage disc-stage"><canvas id="login-bg" aria-hidden="true"></canvas><div class="disc-wrap"><div class="g-shell wide disc-card reveal" id="lg-card"><div class="g-core disc-core">
@@ -1227,10 +1227,11 @@
   function loginHtml() {
     const r = report || {};
     const card = STATIC_MODE
-      ? `<div class="g-core"><span class="eyebrow">Sign in or sign up</span><h1>Accounts live on the app server</h1>
-        <p>This address is the free public preview: it has no server behind it, so it cannot email a sign-in link or keep an account. Your watchlist here stays in this browser.</p>
-        ${APP_URL ? `<div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Open the live app</span><i aria-hidden="true">↗</i></a><button class="lnk" data-gate-close>Continue as a guest</button></div>`
-          : `<p class="fine">The live app with email sign-in has not been published yet.</p><div class="gate-actions"><button class="pill-btn" data-gate-close><span>Continue as a guest</span><i aria-hidden="true">↗</i></button></div>`}</div>`
+      ? `<div class="g-core">${hexSteps(0)}<span class="eyebrow">Sign in required</span><h1>Sign in to your desk</h1>
+        <p>Webex Market Update is for signed-in users. Enter your email on the app and we send a one-time link; the same link creates a new account.</p>
+        ${APP_URL ? `<div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Sign in or sign up</span><i aria-hidden="true">↗</i></a></div>`
+          : `<p class="fine">The sign-in service for this address is being connected. Until then, sign in on the app server given to you by the site owner.</p>`}
+        <p class="fine">Market data, model reads and scans here are information, not advice.</p></div>`
       : `<div class="g-core" id="login-core">
         ${hexSteps(0)}
         <span class="eyebrow">Sign in or sign up · no password</span>
@@ -1396,6 +1397,9 @@
     $("#generated-line").textContent = `UPD ${r.generated_at.slice(11, 16)} ET · ${r.elapsed_s}S`;
     const app = $("#app");
     renderNav();
+    const tape = $("#tape"); if (tape) { const items = [...(r.indices || []).map((i) => ({ l: i.symbol, v: i.last, c: i.chg_pct })), ...(r.macro || []).map((m) => ({ l: m.label || m.symbol, v: m.last, c: m.chg_pct }))].filter((x) => isNum(x.v));
+      const row = items.map((x) => `<span class="tp"><b>${esc(x.l)}</b><span class="mono">${fnum(x.v, x.v < 10 ? 3 : 2)}</span><span class="delta ${cls(x.c)}">${isNum(x.c) ? fpct(x.c) : "–"}</span></span>`).join("");
+      tape.innerHTML = `<div class="tape-track">${row}${row}</div>`; tape.hidden = !items.length; }
     const ttl = $("#hud-title"), sub = $("#hud-sub");
     if (ttl) { const v = VIEWS.find((x) => x[0] === currentView); ttl.textContent = currentView === "ticker" ? (tickerSel || "Ticker") : (v ? v[1].charAt(0) + v[1].slice(1).toLowerCase() : "Home"); }
     if (sub) sub.textContent = `${r.session_label.split(",")[0]} ${r.session_date.slice(5).replace("-", "/")} · report ${r.generated_at.slice(11, 16)} ET`;
