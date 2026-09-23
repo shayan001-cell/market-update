@@ -25,6 +25,8 @@
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
   const NAV_GROUPS = [["Workspace", ["home", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro"]]];
   let subTab = { scan: "scanner", smart: "money", macro: "picture" };
+  let tickerSel = (location.hash.match(/[&#]t=([A-Z0-9.\-^=]+)/i) || [])[1] || null;
+  let mailStatus = null;
   const USER_KEY = "mu-user";
   let user = null;                       // { email, profile: { accepted_disclaimer_at, kind, tickers } }
   let newsItems = [], newsSeen = new Set();
@@ -35,6 +37,7 @@
   let symbolIndex = null, symbolLoading = false, searchSel = 0, searchRows = [];
   let scanTf = "lead", scanOpen = null;
   let currentView = (location.hash.match(/view=([a-z]+)/) || [])[1] || "home";
+  if (currentView === "ticker" && tickerSel) tickerSel = tickerSel.toUpperCase();
   if (["market", "flows", "news", "options"].includes(currentView)) currentView = { market: "macro", flows: "macro", news: "home", options: "smart" }[currentView];
   let lastInteraction = Date.now();
   let pendingReport = null;
@@ -270,7 +273,7 @@
     const it = a.intraday ? ST.intraday[a.intraday.choice] : null;
     const verdict = st ? `<div class="verdict ${ST.cls[st]}"><div class="verdict-word">${ST.stance[st][0]}</div><div class="verdict-why">${ST.stance[st][1]} ${a.main_reason ? "Mainly " + ST.reason[a.main_reason.choice] + "." : ""} ${a.stance.confidence < 0.45 ? '<span class="tag lowconf">low confidence</span>' : `<span class="muted">${(a.stance.confidence * 100).toFixed(0)}% sure</span>`}</div>${it ? `<div class="verdict-intra"><span class="pill ${it[2]}">Intraday: ${it[0]}</span> <span class="muted">${it[1]}${a.intraday.confidence < 0.45 ? " Low confidence." : ""}</span></div>` : ""}</div>` : "";
     return `<article class="wcard ${leanCls}" data-ticker="${esc(s.ticker)}">
-      <div class="wc-head"><div><span class="wc-ticker">${esc(s.ticker)}</span><span class="wc-name">${esc(s.name)}</span></div><div class="wc-price"><span class="px">${fnum(s.last_price)}</span> <span class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</span>${compact ? "" : `<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from this list">×</button>`}</div></div>
+      <div class="wc-head"><div><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}" title="Open ${esc(s.ticker)}'s page">${esc(s.ticker)}</button><span class="wc-name">${esc(s.name)}</span></div><div class="wc-price"><span class="px">${fnum(s.last_price)}</span> <span class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</span>${compact ? "" : `<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from this list">×</button>`}</div></div>
       ${verdict}
       <div class="wc-lean"><span class="lean ${leanCls}">${lean.toUpperCase()}</span><span class="wc-leansub">${a.bias ? `${(a.bias.confidence * 100).toFixed(0)}% sure` : "no model read"} · ${a.setup ? pretty(a.setup.choice) : "–"}</span></div>
       <div class="wc-scores"><span title="Swing setup quality, 0–100">Swing setup: <b>${words(s.scores.swing, 1.0001, SCORE_WORDS)}</b> <span class="muted">${(s.scores.swing * 100).toFixed(0)}</span></span><span title="Day-trade fit, 0–100">Day trade: <b>${words(s.scores.day, 1.0001, SCORE_WORDS)}</b> <span class="muted">${(s.scores.day * 100).toFixed(0)}</span></span><span title="Average daily move">Moves ${fpct(t.atr_pct, 1, false)} a day</span></div>
@@ -393,8 +396,7 @@
     const watchHtml = cards.length ? `<div class="board">${cards.join("")}</div>`
       : `<div class="empty">This list is empty. Type a ticker or company name in the search box at the top (press <kbd>/</kbd>) and pick a result: stocks and ETFs both work. Each name gets a quote, technicals and, where the model has run, a lean, a plan and a verdict.</div>`;
     return `<section class="top">
-      <h2>${esc(lists.active)} <span class="muted">${tickers.length} names · lean for the next 1–5 sessions · plan uses yesterday's range, the 20-day average and 20-day high/low</span></h2>
-      ${listBar()}
+      <h2>Your watchlist <span class="muted">${tickers.length} names · lean for the next 1–5 sessions · plan uses yesterday's range, the 20-day average and 20-day high/low · click a ticker for its page</span></h2>
       ${watchHtml}
       ${others.length ? `<h2>Best swing setups outside your list <span class="muted">top ${others.length} by swing score</span></h2><div class="board">${others.map((s) => watchCard(s, true, r)).join("")}</div>` : ""}
     </section>`;
@@ -865,8 +867,23 @@
 
   // ---------------------------------------------------------------- watchlists (dynamic)
   function loadLists() { try { const j = JSON.parse(localStorage.getItem(LISTS_KEY)); if (j && j.lists && j.active in j.lists) return j; } catch (e) {} return null; }
-  function ensureLists(r) { if (!lists) { lists = loadLists() || { active: "My watchlist", lists: { "My watchlist": (r.watchlist || []).slice() } }; } }
-  function saveLists() { try { localStorage.setItem(LISTS_KEY, JSON.stringify(lists)); } catch (e) {} syncServerWatchlist(); }
+  function ensureLists(r) {
+    if (lists) return;
+    const fromProfile = user && user.profile && Array.isArray(user.profile.tickers) && user.profile.tickers.length ? user.profile.tickers.slice() : null;
+    const saved = loadLists();
+    const tickers = fromProfile || (saved && saved.lists[saved.active]) || (r.watchlist || []).slice();
+    lists = { active: "My watchlist", lists: { "My watchlist": tickers } };
+  }
+  let profileTimer = null;
+  function saveLists() {
+    try { localStorage.setItem(LISTS_KEY, JSON.stringify(lists)); } catch (e) {}
+    syncServerWatchlist();
+    if (!STATIC_MODE && user && user.profile) {           // the watchlist lives with the account, so it follows the user to any browser
+      user.profile.tickers = activeList().slice();
+      clearTimeout(profileTimer);
+      profileTimer = setTimeout(() => fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: activeList() }) }).catch(() => {}), 600);
+    } else if (STATIC_MODE && user) { user.profile = Object.assign({}, user.profile, { tickers: activeList().slice() }); try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
+  }
   const activeList = () => (lists && lists.lists[lists.active]) || [];
   const isWatched = (t) => activeList().includes(t);
   const stockFor = (t) => report && report.stocks.find((s) => s.ticker === t);
@@ -884,7 +901,18 @@
     if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t);
     closeSearch(); if (currentView !== "home") switchView("home"); else renderAll();
   }
-  function removeTicker(t) { const l = lists.lists[lists.active]; const i = l.indexOf(t); if (i >= 0) { l.splice(i, 1); saveLists(); renderAll(); } }
+  function removeTicker(t) {
+    const l = lists.lists[lists.active]; const i = l.indexOf(t); if (i < 0) return;
+    if (l.length <= 1) { notice("Your watchlist keeps at least one ticker. Add another before removing this one.", true); return; }
+    l.splice(i, 1); saveLists();
+    if (currentView === "ticker" && tickerSel === t) { currentView = "home"; try { history.replaceState(null, "", "#view=home"); } catch (e) {} }
+    renderAll();
+  }
+  function openTicker(t) {
+    tickerSel = t; currentView = "ticker"; try { history.replaceState(null, "", "#view=ticker&t=" + encodeURIComponent(t)); } catch (e) {}
+    if (report) renderAll();
+    const m = $("main"); if (m) m.scrollTop = 0;
+  }
   function newList() { const name = prompt("Name for the new list:", "List " + (Object.keys(lists.lists).length + 1)); if (!name) return; const n = name.trim().slice(0, 30); if (!n || lists.lists[n]) return; lists.lists[n] = []; lists.active = n; saveLists(); renderAll(); }
   function renameList() { const name = prompt("Rename this list:", lists.active); if (!name) return; const n = name.trim().slice(0, 30); if (!n || n === lists.active || lists.lists[n]) return; lists.lists[n] = lists.lists[lists.active]; delete lists.lists[lists.active]; lists.active = n; saveLists(); renderAll(); }
   function deleteList() { const names = Object.keys(lists.lists); if (!confirm(`Delete the list "${lists.active}"?`)) return; delete lists.lists[lists.active]; if (!Object.keys(lists.lists).length) lists.lists["My watchlist"] = []; lists.active = Object.keys(lists.lists)[0]; saveLists(); renderAll(); }
@@ -1066,12 +1094,18 @@
     const label = (k) => VIEWS.find((v) => v[0] === k);
     $("#nav").innerHTML = NAV_GROUPS.map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
       return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}</span><kbd>${n}</kbd></button>` +
-        (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("");
+        (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
+      + sideWatch();
     const foot = $("#side-foot");
-    if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links"><button class="lnk" data-picks>Change picks</button> · <button class="lnk" data-signout>Sign out</button></div>${STATIC_MODE ? '<div class="meta2">profile kept in this browser</div>' : ""}`
+    if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links"><button class="lnk" data-signout>Sign out</button></div>${STATIC_MODE ? '<div class="meta2">profile kept in this browser</div>' : ""}`
       : `<div class="meta2">Not signed in</div>`;
-    const pk = foot && foot.querySelector("[data-picks]"); if (pk) pk.addEventListener("click", () => { if (user) { user.profile = Object.assign({}, user.profile, { accepted_disclaimer_at: null }); renderGate(); } });
     const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
+  }
+  function sideWatch() {
+    if (!lists || !report) return "";
+    const rows = activeList().map((t) => { const s = stockFor(t); const q = s || (report.lite || {})[t] || {}; const px = q.last_price, ch = q.chg_pct; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
+      return `<button class="side-tick ${currentView === "ticker" && tickerSel === t ? "active" : ""}" data-ticker-page="${esc(t)}" title="Open ${esc(t)}'s page"><span class="st-dot ${st ? ST.cls[st] : "none"}"></span><b>${esc(t)}</b><span class="st-px">${isNum(px) ? fnum(px) : "–"}</span><span class="delta ${cls(ch)}">${isNum(ch) ? fpct(ch, 1) : ""}</span></button>`; }).join("");
+    return `<div class="side-group">Watchlist <span class="cnt">${activeList().length}</span></div><div class="side-watch">${rows || '<div class="meta2" style="padding:4px 10px">Add a ticker at the top.</div>'}</div>`;
   }
   function initSide() {
     const shell = $("#shell"), tg = $("#side-toggle"); if (!shell || !tg) return;
@@ -1082,43 +1116,50 @@
 
   // ---------------------------------------------------------------- sign-in gate + onboarding
   async function loadUser() {
-    if (STATIC_MODE) { try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; } return; }
-    try { const res = await fetch("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; }
+    if (STATIC_MODE) { try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; } }
+    else { try { const res = await fetch("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; } }
+    lists = null;                                   // rebuild the watchlist from the account on every (re)load
   }
   const gateNeeded = () => !user || !(user.profile && user.profile.accepted_disclaimer_at);
-  const CRYPTO_PICKS = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "DOT-USD", "LTC-USD", "TRX-USD"];
+  const hexSteps = (n) => { const steps = ["Sign in", "Confirm", "Watchlist"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
   const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
   const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
+  function mailLine() {
+    if (STATIC_MODE) return "";
+    if (!mailStatus) return `<div class="mail-line muted">Checking the mail service…</div>`;
+    return mailStatus.configured ? `<div class="mail-line ok">Links are emailed from <b>${esc(mailStatus.from_name)}</b> &lt;${esc(mailStatus.from_address)}&gt; via ${esc(mailStatus.transport)}.</div>`
+      : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
+  }
   function loginHtml() {
     return `<div class="g-shell reveal"><div class="g-core">
       ${gateBrand()}
+      ${hexSteps(0)}
       <span class="eyebrow">Passwordless access</span>
       <h1>Sign in to your desk</h1>
-      <p>${STATIC_MODE ? "Enter your email to open your personal dashboard. This public copy has no mail server, so nothing is sent: your email and picks stay in this browser only. The hosted server emails a one-time link."
+      <p>${STATIC_MODE ? "Enter your email to open your personal dashboard. This public copy has no mail server, so nothing is sent: your email and watchlist stay in this browser only. The hosted server emails a one-time link."
         : "Enter your email and we will send a one-time link. It works for 57 minutes and signs you in on the device you open it on. Your session then stays active until you sign out."}</p>
       <form id="login-form" class="gate-form"><div class="field"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus></div>${pillBtn(STATIC_MODE ? "Continue" : "Email me a link", 'type="submit"')}</form>
       <div id="login-status" class="gate-status"></div>
+      ${mailLine()}
       <p class="fine">Market data, model reads and scans here are information, not advice. You will confirm this once after signing in.</p>
     </div></div>`;
   }
   function onboardingHtml() {
-    const kind = (user.profile && user.profile.kind) || "stocks";
     const have = (user.profile && user.profile.tickers) || [];
     return `<div class="g-shell wide reveal"><div class="g-core">
       ${gateBrand()}<span class="who">${esc(user.email)}</span>
-      <div class="disc"><span class="eyebrow warn">Read before you continue</span><h2>This is not financial advice.</h2><p>Market Update shows market data, arithmetic over that data, and model reads produced by typed questions. None of it is a recommendation to buy or sell anything. Markets move against you fast, low-float names halt, and you alone are responsible for any trade you make. If you need advice, talk to a licensed adviser.</p>
+      ${hexSteps(1)}
+      <div class="disc"><span class="eyebrow warn">Read before you continue</span><h2>This is not financial advice.</h2><p>Webex Market Update shows market data, arithmetic over that data, and model reads produced by typed questions. None of it is a recommendation to buy or sell anything. Markets move against you fast, low-float names halt, and you alone are responsible for any trade you make. If you need advice, talk to a licensed adviser.</p>
         <label class="ck"><input type="checkbox" id="disc-ok"><span>I understand that nothing on this site is financial advice and that I trade at my own risk.</span></label></div>
-      <div class="picks-block"><span class="eyebrow">Personalise</span><h1>What do you follow?</h1><p>Give us your top five stocks or your top two cryptocurrencies. Each one is analysed on the spot and becomes your home page.</p>
-        <div class="picks-kind"><button class="kind ${kind === "stocks" ? "active" : ""}" data-kind="stocks">Top 5 stocks</button><button class="kind ${kind === "crypto" ? "active" : ""}" data-kind="crypto">Top 2 cryptocurrencies</button></div>
-        <div class="picks" id="picks">${picksInputs(kind, have)}</div>
+      <div class="picks-block"><span class="eyebrow">Your watchlist</span><h1>Three or four tickers to start</h1><p>Stocks or ETFs. Each one is analysed on the spot, gets a verdict on your home page and its own page in the left menu. You can add or remove names any time; the list is saved to your account.</p>
+        <div class="picks" id="picks">${picksInputs(have)}</div>
         <datalist id="sym-list"></datalist>
-        <div class="gate-actions">${pillBtn("Build my dashboard", 'id="picks-go" disabled')}<span id="picks-status" class="gate-status"></span></div></div>
+        <div class="gate-actions">${pillBtn("Create my watchlist", 'id="picks-go" disabled')}<span id="picks-status" class="gate-status"></span></div></div>
     </div></div>`;
   }
-  function picksInputs(kind, have) {
-    const n = kind === "crypto" ? 2 : 5;
-    const ph = kind === "crypto" ? ["BTC-USD", "ETH-USD"] : ["NVDA", "AAPL", "TSLA", "SPY", "AMD"];
-    return Array.from({ length: n }, (_, i) => `<div class="field"><input class="pick" list="sym-list" placeholder="${ph[i]}" value="${esc((have[i] || "").toUpperCase())}" data-kind="${kind}" maxlength="12" autocomplete="off"></div>`).join("");
+  function picksInputs(have) {
+    const ph = ["NVDA", "AAPL", "SPY", "TSLA"];
+    return Array.from({ length: 4 }, (_, i) => `<div class="field pickf"><span class="pick-n">${i + 1}</span><input class="pick" list="sym-list" placeholder="${ph[i]}${i === 3 ? " (optional)" : ""}" value="${esc((have[i] || "").toUpperCase())}" maxlength="12" autocomplete="off"></div>`).join("");
   }
   function renderGate() {
     const g = $("#gate"); if (!g) return;
@@ -1126,6 +1167,7 @@
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
     g.hidden = false; g.innerHTML = user ? onboardingHtml() : loginHtml();
     wireGate();
+    if (!user && !STATIC_MODE && !mailStatus) fetch("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
   }
   function wireGate() {
     const lf = $("#login-form");
@@ -1143,24 +1185,22 @@
       } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
     });
     const go = $("#picks-go"); if (!go) return;
-    const state = () => { const ok = $("#disc-ok").checked; const vals = [...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean); go.disabled = !(ok && vals.length); return vals; };
+    const state = () => { const ok = $("#disc-ok").checked; const vals = [...new Set([...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean))]; go.disabled = !(ok && vals.length >= 3); const st = $("#picks-status"); if (st && !st.classList.contains("err")) st.textContent = ok ? (vals.length >= 3 ? "" : `${3 - vals.length} more to go`) : "Tick the box above first"; return vals; };
     $("#disc-ok").addEventListener("change", state);
-    document.querySelectorAll("[data-kind]").forEach((b) => b.tagName === "BUTTON" && b.addEventListener("click", () => { document.querySelectorAll(".picks-kind .kind").forEach((x) => x.classList.toggle("active", x === b)); $("#picks").innerHTML = picksInputs(b.getAttribute("data-kind"), []); wirePicks(); state(); }));
     function wirePicks() {
       document.querySelectorAll("#picks .pick").forEach((inp) => inp.addEventListener("input", () => {
         state();
-        const kind = inp.getAttribute("data-kind"); const q = inp.value.trim().toUpperCase(); const dl = $("#sym-list"); if (!dl) return;
+        const q = inp.value.trim().toUpperCase(); const dl = $("#sym-list"); if (!dl) return;
         loadSymbols();
-        const rows = kind === "crypto" ? CRYPTO_PICKS.filter((c) => c.startsWith(q)).map((c) => [c, ""]) : searchSymbols(q).filter((r) => r[2] !== "Crypto").slice(0, 8);
-        dl.innerHTML = rows.map((r) => `<option value="${esc(r[0])}">${esc(r[1] || "")}</option>`).join("");
+        dl.innerHTML = searchSymbols(q).slice(0, 8).map((r) => `<option value="${esc(r[0])}">${esc(r[1] || "")}</option>`).join("");
       }));
     }
     wirePicks();
     go.addEventListener("click", async () => {
-      const vals = state(); if (!vals.length) return;
-      const kind = $(".picks-kind .kind.active") ? $(".picks-kind .kind.active").getAttribute("data-kind") : "stocks";
+      const vals = state(); if (vals.length < 3) return;
+      const kind = "stocks";
       const st = $("#picks-status"); st.className = "gate-status"; st.textContent = "Saving…";
-      const profile = { accepted_disclaimer_at: new Date().toISOString(), kind, tickers: vals.slice(0, kind === "crypto" ? 2 : 5) };
+      const profile = { accepted_disclaimer_at: new Date().toISOString(), kind, tickers: vals.slice(0, 4) };
       if (STATIC_MODE) { user.profile = profile; try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
       else {
         try {
@@ -1174,14 +1214,16 @@
   }
   function applyProfile() {
     const picks = (user.profile && user.profile.tickers) || [];
-    ensureLists(report);
-    if (picks.length) { lists.lists["My picks"] = picks.slice(); lists.active = "My picks"; saveLists(); picks.forEach((t) => { if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t); }); }
+    lists = { active: "My watchlist", lists: { "My watchlist": picks.slice() } };
+    try { localStorage.setItem(LISTS_KEY, JSON.stringify(lists)); } catch (e) {}
+    syncServerWatchlist();
+    picks.forEach((t) => { if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t); });
     renderGate(); if (currentView !== "home") currentView = "home"; renderAll();
   }
   async function signOut() {
     if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
     else { try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) {} }
-    user = null; renderGate();
+    user = null; lists = null; renderGate();
   }
 
   function renderAll() {
@@ -1205,6 +1247,7 @@
   function viewHtml(r) {
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secBoard(r)}</div>${secToday(r)}</div>`;
+      case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
       case "scan": return `<div class="view sub">${subTabs("scan")}<div class="subview">${subTab.scan === "lowfloat" ? secLowFloat(r) : secScan(r)}</div></div>`;
       case "stock": return `<div class="view stock">${secStocks(r)}</div>`;
       case "theme": return `<div class="view one">${secTheme(r)}</div>`;
@@ -1212,6 +1255,24 @@
       case "macro": return `<div class="view sub">${subTabs("macro")}<div class="subview ${subTab.macro}">${{ picture: () => secRegime(r) + secHorizons(r), indexes: () => secMacro(r) + secIndexesWeekly(r), rates: () => secRates(r), flows: () => secFlows(r) }[subTab.macro]()}</div></div>`;
       default: currentView = "home"; return viewHtml(r);
     }
+  }
+  function secTickerPage(r) {
+    const t = tickerSel; if (!t) { currentView = "home"; return viewHtml(r); }
+    const s = stockFor(t), q = (r.lite || {})[t], src = s || q || {};
+    const a = (s && s.ai) || {}; const st = a.stance ? a.stance.choice : null; const it = a.intraday ? ST.intraday[a.intraday.choice] : null;
+    const watched = isWatched(t);
+    const hero = `<header class="tk-hero">
+      <button class="btn sm ghost" data-back-home>‹ Home</button>
+      <div class="tk-id"><div class="tk-sym">${esc(t)}</div><div class="tk-name">${esc(src.name || "")}${src.sector ? ` <span class="muted">· ${esc(src.sector)}</span>` : ""}${src.kind ? ` <span class="tag ${src.kind === "ETF" ? "acc" : ""}">${esc(src.kind)}</span>` : ""}</div></div>
+      <div class="tk-price"><span class="px">${fnum(src.last_price)}</span><span class="delta ${cls(src.chg_pct)}">${arrow(src.chg_pct)} ${fpct(src.chg_pct)}</span></div>
+      ${st ? `<div class="tk-verdict verdict ${ST.cls[st]}"><div class="verdict-word">${ST.stance[st][0]}</div><div class="verdict-why">${ST.stance[st][1]}${it ? ` <span class="pill ${it[2]}">Intraday: ${it[0]}</span>` : ""}</div></div>` : `<div class="tk-verdict verdict flat"><div class="verdict-word">${analyzing.has(t) ? "ANALYSING" : s ? "NO VERDICT" : "QUOTE ONLY"}</div><div class="verdict-why">${analyzing.has(t) ? "About 20 seconds: history, news, smart money, options and the model reads." : s ? "The model did not return a stance for this build." : STATIC_MODE ? "Daily technicals only on the public copy." : "Press Analyze for the full model read."}</div></div>`}
+      <div class="tk-actions">${!s && !STATIC_MODE ? `<button class="btn sm" data-analyze="${esc(t)}" ${analyzing.has(t) ? "disabled" : ""}>${analyzing.has(t) ? "Analysing…" : "Analyze"}</button>` : ""}<a class="btn sm ghost" href="${tvLink(t)}" target="_blank" rel="noopener">Open chart</a>${watched ? `<button class="btn sm ghost" data-remove="${esc(t)}">Remove from watchlist</button>` : `<button class="btn sm" data-add-ticker="${esc(t)}">Add to watchlist</button>`}</div>
+    </header>`;
+    let body;
+    if (s) body = stockDetail(s, r);
+    else if (q) { const tech = q.technicals || {}; body = `<div class="card"><div class="grid c4" style="border:0"><div class="tile"><div class="tile-label">Trend</div><div class="tile-value small ${{ up: "up", down: "down" }[tech.trend] || "flat"}">${tech.trend || "–"}</div></div><div class="tile"><div class="tile-label">${term("rsi", "RSI 14")}</div><div class="tile-value">${fnum(tech.rsi14, 0)}</div></div><div class="tile"><div class="tile-label">Moves a day</div><div class="tile-value">${fpct(tech.atr_pct, 1, false)}</div></div><div class="tile"><div class="tile-label">vs 20-day avg</div><div class="tile-value ${cls(tech.dist_sma20_pct)}">${fpct(tech.dist_sma20_pct, 1)}</div></div><div class="tile"><div class="tile-label">1m / 3m</div><div class="tile-value"><span class="${cls(tech.ret_1m)}">${fpct(tech.ret_1m, 1)}</span> / <span class="${cls(tech.ret_3m)}">${fpct(tech.ret_3m, 1)}</span></div></div><div class="tile"><div class="tile-label">${term("relvol", "Volume vs normal")}</div><div class="tile-value">${isNum(q.rel_volume) ? q.rel_volume.toFixed(2) + "×" : "n/a"}</div></div><div class="tile"><div class="tile-label">20-day high / low</div><div class="tile-value small">${fnum(tech.hi20)} / ${fnum(tech.lo20)}</div></div><div class="tile"><div class="tile-label">Prev high / low</div><div class="tile-value small">${fnum(tech.prev_high)} / ${fnum(tech.prev_low)}</div></div></div>${q.scan ? explain(`Intraday volume scan: ${q.scan.score.toFixed(0)}/100 on ${q.scan.lead}, ${q.scan.direction}.`) : ""}</div>`; }
+    else body = `<div class="card muted">${STATIC_MODE ? "This ticker is not in the public build's data." : analyzing.has(t) ? "Analysing…" : analyzeError[t] ? "Analysis failed: " + esc(analyzeError[t]) : "Not analysed yet."}</div>`;
+    return `<section class="tk-page">${hero}${body}</section>`;
   }
   function subTabs(v) { return `<div class="tabs subtabs">${SUBTABS[v].map(([k, l]) => `<button class="tab ${subTab[v] === k ? "active" : ""}" data-sub="${v}:${k}">${l}</button>`).join("")}</div>`; }
   function switchView(k) {
@@ -1266,6 +1327,9 @@
       if (!row.hidden) { const el = row.querySelector("[data-chart-weekly]"); if (el && el.childElementCount === 0) { const a = report.horizons.assets.find((x) => x.symbol === sym); weeklyChart(el, a.weekly); } }
     }));
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.getAttribute("data-open"))));
+    document.querySelectorAll("[data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
+    document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
+    document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
     document.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
     document.querySelectorAll("[data-analyze]").forEach((b) => b.addEventListener("click", () => { requestAnalysis(b.getAttribute("data-analyze")); renderAll(); }));
     document.querySelectorAll("[data-list]").forEach((b) => b.addEventListener("click", () => { lists.active = b.getAttribute("data-list"); saveLists(); renderAll(); }));
@@ -1362,7 +1426,9 @@
     wireSearch(); initSide();
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
-    addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
+    addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; const t = (location.hash.match(/[&#]t=([A-Za-z0-9.\-^=]+)/) || [])[1];
+      if (v === "ticker" && t) { if (currentView !== "ticker" || tickerSel !== t.toUpperCase()) { tickerSel = t.toUpperCase(); currentView = "ticker"; if (report) renderAll(); } return; }
+      if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
     $("#refresh-btn").addEventListener("click", onRefresh);
     if (STATIC_MODE) {
       report = JSON.parse(EMBEDDED.textContent);

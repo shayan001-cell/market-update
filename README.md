@@ -160,11 +160,23 @@ are set; without a mail server the link is written to the server log and, unless
 `MU_DEV_LINKS=0`, handed back to the page so local use still works. `MU_PUBLIC_URL`
 fixes the base URL in links behind a proxy.
 
+**Sending the emails.** `market_update/mail.py` sends the branded sign-in email (gold on
+black, one button) through whichever transport is configured in `.env` (copy
+`.env.example`): a Resend API key, a SendGrid API key, or any SMTP mailbox with STARTTLS
+(Gmail with an app password, Outlook / Microsoft 365, a company or Webex-hosted mailbox).
+`MU_MAIL_FROM` sets the sender shown to users, e.g. `Webex Market Update <alerts@yourdomain.com>`.
+Check it with `market-update mail-test` (prints the transport) or
+`market-update mail-test you@example.com` (sends a test message). The sign-in card shows
+which transport and sender are active, and says so when none is connected.
+
 Right after the first sign-in the user must accept a one-page disclaimer ("This is not
-financial advice.") and enter their top five stock tickers or top two cryptocurrencies
-(`POST /api/profile`, saved in `users.json`, added to the server's watchlist). Those
-names become the "My picks" list on the home page and are analysed on the spot. "Change
-picks" in the menu footer reopens the step; "Sign out" clears the cookie.
+financial advice.") and enter three or four tickers (stocks or ETFs). That becomes their
+watchlist: saved to the account (`users.json`, `PUT /api/profile/tickers`), shown in the
+left menu with live price and change, on the home cards and in the final verdicts, and
+loaded again on every later login from any browser. Cards can be removed one at a time
+(the list always keeps at least one name); tickers are added from the ADD TICKER box.
+Clicking a ticker anywhere opens its own page: hero with price and verdict, chart with
+levels, plan, checklist, model reads, who is buying, stats and news.
 
 The public GitHub Pages copy has no server, so there the same card keeps the email and
 picks in the browser only and says so; real emailed links need the hosted server

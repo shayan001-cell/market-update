@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import config, fetch
+from . import config, fetch, mail
 from .analyze import analyze_ticker, build_report
 
 log = logging.getLogger("market_update.server")
@@ -342,44 +342,17 @@ def _public_url(request: Request) -> str:
 
 
 def _send_link(email: str, link: str) -> bool:
-    host = os.environ.get("MU_SMTP_HOST")
-    if not host:
+    if not mail.status()["configured"]:
         return False
-    msg = EmailMessage()
-    msg["Subject"] = "Your Market Update sign-in link"
-    msg["From"] = os.environ.get("MU_SMTP_FROM", os.environ.get("MU_SMTP_USER", "market-update@localhost"))
-    msg["To"] = email
-    msg.set_content(f"Click to sign in to Market Update (valid {LINK_MINUTES} minutes):\n\n{link}\n\nIf you did not request this, ignore this email.")
-    with smtplib.SMTP(host, int(os.environ.get("MU_SMTP_PORT", "587")), timeout=20) as smtp:
-        smtp.starttls()
-        if os.environ.get("MU_SMTP_USER"):
-            smtp.login(os.environ["MU_SMTP_USER"], os.environ.get("MU_SMTP_PASS", ""))
-        smtp.send_message(msg)
+    subject, text, html = mail.signin_email(link, LINK_MINUTES)
+    mail.send(email, subject, text, html)
     return True
 
 
-async def _issue_link(request: Request, email: str) -> dict[str, Any]:
-    """Create a single-use token for `email`, email the link (or hand it back locally), rate-limited to one a minute."""
-    tokens = _load(TOKENS_PATH)
-    now = time.time()
-    tokens = {t: v for t, v in tokens.items() if v.get("exp", 0) > now - EXPIRED_KEEP_S}
-    if any(v["email"] == email and now - v.get("at", 0) < 60 for v in tokens.values()):
-        raise HTTPException(status_code=429, detail="a link was sent less than a minute ago; check your inbox")
-    token = secrets.token_urlsafe(32)
-    tokens[token] = {"email": email, "exp": now + LINK_MINUTES * 60, "at": now}
-    _save(TOKENS_PATH, tokens)
-    link = f"{_public_url(request)}/auth/verify?token={token}"
-    sent = False
-    try:
-        sent = await asyncio.to_thread(_send_link, email, link)
-    except Exception as e:  # noqa: BLE001
-        log.warning("email delivery failed for %s: %s", email, e)
-    out: dict[str, Any] = {"status": "sent" if sent else "not_sent", "email": email, "expires_in_s": LINK_MINUTES * 60, "expires_in_min": LINK_MINUTES}
-    if not sent:
-        log.info("SIGN-IN LINK for %s: %s", email, link)
-        if os.environ.get("MU_DEV_LINKS", "1") not in ("0", "false", "no"):
-            out["dev_link"] = link          # no mail server configured: hand the link to the page (local use)
-    return out
+@app.get("/api/auth/mail-status")
+async def auth_mail_status() -> dict[str, Any]:
+    """What the sign-in card shows: which transport sends the links and from whom (never the credentials)."""
+    return mail.status()
 
 
 @app.post("/api/auth/request")
@@ -456,17 +429,41 @@ async def api_profile(request: Request, payload: dict[str, Any] = Body(...)) -> 
         raise HTTPException(status_code=401, detail="sign in first")
     if not payload.get("accepted"):
         raise HTTPException(status_code=400, detail="the disclaimer must be accepted")
-    kind = payload.get("kind")
-    tickers = [str(t).upper().strip() for t in (payload.get("tickers") or []) if str(t).strip()]
-    limit = {"stocks": 5, "crypto": 2}.get(kind)
-    if limit is None or not tickers or len(tickers) > limit or any(len(t) > 12 for t in tickers):
-        raise HTTPException(status_code=400, detail="pick up to five stocks or two cryptocurrencies")
+    tickers = _clean_tickers(payload.get("tickers"))
+    if len(tickers) < 1 or len(tickers) > 4:
+        raise HTTPException(status_code=400, detail="enter three or four tickers")
     users = _load(USERS_PATH)
     u = users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat()})
-    u.update(accepted_disclaimer_at=datetime.now(tz=config.ET).isoformat(), kind=kind, tickers=tickers)
+    u.update(accepted_disclaimer_at=datetime.now(tz=config.ET).isoformat(), kind="stocks", tickers=tickers)
     _save(USERS_PATH, users)
     config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
     return JSONResponse({"status": "ok", "profile": {k: u.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}})
+
+
+def _clean_tickers(raw: Any) -> list[str]:
+    out: list[str] = []
+    for t in (raw or []) if isinstance(raw, list) else []:
+        t = str(t).upper().strip()
+        if t and len(t) <= 12 and all(ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.^=" for ch in t) and t not in out:
+            out.append(t)
+    return out
+
+
+@app.put("/api/profile/tickers")
+async def api_profile_tickers(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    """The user's watchlist, kept server-side so it loads on every login from any browser."""
+    email = _session_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="sign in first")
+    tickers = _clean_tickers(payload.get("tickers"))
+    if not tickers or len(tickers) > 40:
+        raise HTTPException(status_code=400, detail="keep at least one ticker (and at most forty)")
+    users = _load(USERS_PATH)
+    u = users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat()})
+    u["tickers"] = tickers
+    _save(USERS_PATH, users)
+    config.save_dynamic_watchlist(config.load_dynamic_watchlist() + tickers)
+    return JSONResponse({"status": "ok", "tickers": tickers})
 
 
 @app.post("/api/auth/logout")

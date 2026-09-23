@@ -4,6 +4,7 @@
     market-update --no-ai      # data only, no TypeSafe calls
     market-update --open       # build and open in the default browser
     market-update serve        # run the web service (uvicorn)
+    market-update mail-test [you@example.com]   # show the mail transport, or send a test sign-in email
 """
 from __future__ import annotations
 
@@ -24,6 +25,20 @@ from .render import render_html
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "mail-test":
+        from . import mail
+        st = mail.status()
+        if len(argv) < 2:
+            print(f"Mail: {st['transport']} from {st['from_name']} <{st['from_address']}>" if st["configured"] else f"Mail is not configured: {st['problem']}. See .env.example.")
+            return 0 if st["configured"] else 1
+        subject, text, html = mail.signin_email("https://example.com/auth/verify?token=TEST", 57)
+        try:
+            used = mail.send(argv[1], f"[test] {subject}", text, html)
+        except Exception as e:  # noqa: BLE001
+            print(f"Send failed via {st['transport']}: {e}", file=sys.stderr)
+            return 1
+        print(f"Sent a test sign-in email to {argv[1]} via {used} as {st['from_name']} <{st['from_address']}>")
+        return 0
     if argv and argv[0] == "serve":
         import uvicorn
         port = int(os.environ.get("PORT", "8000"))

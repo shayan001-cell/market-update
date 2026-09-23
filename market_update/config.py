@@ -10,6 +10,27 @@ from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
 
+
+def _load_dotenv() -> None:
+    """KEY=VALUE lines from .env (project root, then the working directory); never overrides real env vars."""
+    for p in (Path(__file__).resolve().parent.parent / ".env", Path.cwd() / ".env"):
+        try:
+            lines = p.read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            os.environ.setdefault(k, v)
+
+
+_load_dotenv()
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # When the package is pip-installed (GitHub Actions, Docker) PROJECT_ROOT is inside
 # site-packages, so data paths can be pointed elsewhere with env vars.
