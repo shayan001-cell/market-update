@@ -24,8 +24,10 @@ def _load_dotenv() -> None:
                 continue
             k, v = line.split("=", 1)
             k, v = k.strip(), v.strip()
-            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-                v = v[1:-1]
+            if v[:1] in ("\"", "'") and v.find(v[0], 1) > 0:      # quoted value, ignore anything after the closing quote
+                v = v[1:v.find(v[0], 1)]
+            elif " #" in v:                                       # unquoted value with an inline comment
+                v = v.split(" #", 1)[0].rstrip()
             os.environ.setdefault(k, v)
 
 

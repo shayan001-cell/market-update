@@ -30,8 +30,10 @@ SENDER_NAME = config.SITE_NAME
 
 
 def _from() -> tuple[str, str]:
-    raw = os.environ.get("MU_MAIL_FROM") or os.environ.get("MU_SMTP_FROM") or os.environ.get("MU_SMTP_USER") or ""
+    raw = os.environ.get("MU_MAIL_FROM") or os.environ.get("MU_SMTP_FROM") or ""
     name, addr = parseaddr(raw)
+    if not addr or "YOUR-ADDRESS" in addr:            # unfilled template: send as the SMTP login itself
+        addr = os.environ.get("MU_SMTP_USER", "")
     return (name or SENDER_NAME, addr)
 
 
@@ -50,8 +52,11 @@ def status() -> dict[str, object]:
     p = provider()
     host = os.environ.get("MU_SMTP_HOST", "")
     label = {"resend": "Resend API", "sendgrid": "SendGrid API", "smtp": f"SMTP via {host}"}.get(p or "", "not configured")
-    return {"configured": bool(p and addr), "provider": p, "transport": label, "from_name": name, "from_address": addr,
-            "problem": None if (p and addr) else ("MU_MAIL_FROM (or MU_SMTP_USER) is not set" if p else "no mail transport is configured")}
+    placeholder = "YOUR-ADDRESS" in addr or os.environ.get("MU_SMTP_PASS", "").startswith("xxxx")
+    ok = bool(p and addr) and not placeholder
+    return {"configured": ok, "provider": p, "transport": label, "from_name": name, "from_address": addr,
+            "problem": None if ok else ("the .env file still has the placeholder address or app password" if placeholder
+                                        else "MU_MAIL_FROM (or MU_SMTP_USER) is not set" if p else "no mail transport is configured")}
 
 
 def signin_email(link: str, minutes: int) -> tuple[str, str, str]:
