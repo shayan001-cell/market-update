@@ -720,6 +720,7 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         "earnings": earnings_kept,
         "earnings_total": len(earnings),
         "watchlist": watch,
+        "default_watchlist": config.DEFAULT_WATCHLIST,
         "elapsed_s": round(time.time() - t0, 1),
     })
 

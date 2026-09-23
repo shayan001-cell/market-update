@@ -892,7 +892,7 @@
     if (lists) return;
     const fromProfile = user && user.profile && Array.isArray(user.profile.tickers) && user.profile.tickers.length ? user.profile.tickers.slice() : null;
     const saved = loadLists();
-    const tickers = fromProfile || (saved && saved.lists[saved.active]) || (r.watchlist || []).slice();
+    const tickers = fromProfile || (saved && saved.lists[saved.active]) || (r.default_watchlist || r.watchlist || []).slice(0, 7);
     lists = { active: "My watchlist", lists: { "My watchlist": tickers } };
   }
   let profileTimer = null;
@@ -1192,7 +1192,24 @@
       if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
     }
   }
-  const gateNeeded = () => (STATIC_MODE ? gateOpen : (!user || !user.name));
+  const gateNeeded = () => (STATIC_MODE ? (gateOpen || !discAgreed()) : (!user || !(user.profile && user.profile.accepted_disclaimer_at) || !user.name));
+  function disclaimerHtml() {
+    const needName = !STATIC_MODE && !(user && user.name);
+    return `<div class="g-shell wide reveal"><div class="g-core disc-core">
+      ${gateBrand()}${user ? `<span class="who">${esc(user.email)}</span>` : ""}
+      ${hexSteps(1)}
+      <span class="eyebrow warn">Read before you continue</span>
+      <h1>This is not financial advice.</h1>
+      <div class="disc-body">
+        <p>Webex Market Update is an information tool. It shows market data, arithmetic over that data (levels, ranges, volume, scores) and model reads produced by typed questions. None of it is investment, legal or tax advice, and nothing here is a recommendation or solicitation to buy, sell or hold any security, option or other instrument.</p>
+        <p>Markets move fast and against you. Low-float names halt and gap. Data from public sources can be late or wrong, and model reads are probabilities, not predictions. Past patterns do not guarantee future results. You alone decide what to trade, and you alone carry the risk of loss, which can exceed your original stake with leverage or options.</p>
+        <p>Nothing on this site creates an adviser, broker or fiduciary relationship. If you need advice, consult a licensed professional who knows your situation.</p>
+      </div>
+      ${needName ? `<div class="field"><input id="name-input" placeholder="Your name (shown in the menu)" maxlength="60" autocomplete="name" value="${esc(user.email.split("@")[0])}"></div>` : ""}
+      <label class="ck"><input type="checkbox" id="disc-ok"><span>I have read this. I understand that nothing on Webex Market Update is financial advice and that I trade at my own risk.</span></label>
+      <div class="gate-actions">${pillBtn("I agree, take me to my dashboard", 'id="disc-go" disabled')}<span id="disc-status" class="gate-status"></span></div>
+    </div></div>`;
+  }
   function nameHtml() {
     return `<div class="g-shell reveal"><div class="g-core">
       ${gateBrand()}
@@ -1257,10 +1274,28 @@
     const g = $("#gate"); if (!g) return;
     const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) lb.textContent = `SIGN OUT · ${(user.name || user.email.split("@")[0]).toUpperCase().slice(0, 14)}`; }
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
-    const html = !user ? loginHtml() : nameHtml();
+    const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
     g.hidden = false; g.innerHTML = STATIC_MODE ? html.replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Continue as a guest">×</button>') : html;
     wireGate();
     document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; renderGate(); }));
+    const dgo = $("#disc-go"); if (dgo) {
+      const ok = $("#disc-ok"); ok.addEventListener("change", () => { dgo.disabled = !ok.checked; });
+      dgo.addEventListener("click", async () => {
+        const st = $("#disc-status"); st.textContent = "Saving…";
+        try { localStorage.setItem("mu-disc", "1"); } catch (e) {}
+        if (!STATIC_MODE && user) {
+          const nm = $("#name-input") ? $("#name-input").value.trim() : "";
+          try {
+            if (nm && !user.name) { const r1 = await fetch("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm }) }); if (r1.ok) user.name = (await r1.json()).name; }
+            const r2 = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: (user.profile && user.profile.tickers) || [] }) });
+            if (!r2.ok) { st.className = "gate-status err"; st.textContent = "Could not save. Try again."; return; }
+            user.profile = (await r2.json()).profile; if (!user.name) user.name = user.email.split("@")[0];
+          } catch (e) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; return; }
+          lists = null; ensureLists(report);
+        }
+        renderGate(); renderAll(); if (!STATIC_MODE && lists) refreshAdhoc();
+      });
+    }
     const nf = $("#name-form"); if (nf) nf.addEventListener("submit", async (e) => { e.preventDefault(); const name = $("#name-input").value.trim(); if (!name) return; try { const res = await fetch("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const j = await res.json(); if (res.ok) { user.name = j.name; renderGate(); renderAll(); } } catch (err) {} });
     if (!user && !STATIC_MODE && !mailStatus) fetch("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
   }
@@ -1310,7 +1345,7 @@
   function disclaimerBanner() { /* replaced by the right-side panel */ }
   const discAgreed = () => { try { return localStorage.getItem("mu-disc") === "1"; } catch (e) { return false; } };
   function discPanel() {
-    return discAgreed()
+    return (discAgreed() || (user && user.profile && user.profile.accepted_disclaimer_at))
       ? `<section class="panel disc-panel agreed"><span class="disc-mini"><b>Not financial advice.</b> Data, arithmetic and model reads only. <span class="muted">Agreed</span></span></section>`
       : `<section class="panel disc-panel"><h3>Not financial advice</h3><p>Everything on this page is market data, arithmetic over that data, and model reads from typed questions. None of it is a recommendation to buy or sell anything. You trade at your own risk.</p><button class="pill-btn small" data-agree><span>I agree</span><i aria-hidden="true">✓</i></button></section>`;
   }

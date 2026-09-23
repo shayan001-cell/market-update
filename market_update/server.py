@@ -486,6 +486,8 @@ async def auth_verify(request: Request, token: str = "") -> Response:
     email = rec["email"]
     db.ensure_user(email)
     db.touch_login(email)
+    if not (db.profile(email) or {}).get("tickers"):
+        db.set_watchlist(email, list(config.DEFAULT_WATCHLIST))        # a new desk starts with the default seven
     db.log_activity(email, "login", request.headers.get("user-agent", "")[:80])
     cookie = _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}")
     db.open_session(cookie, email, SESSION_DAYS * 86400, request.headers.get("user-agent"))
