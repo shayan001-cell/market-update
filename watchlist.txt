@@ -1,0 +1,8 @@
+# One ticker per line. These are merged into the gap scan and exempt from the
+# dollar-volume floor, so thinner names you care about still show up.
+NVDA
+TSLA
+AMD
+PLTR
+COIN
+INTC

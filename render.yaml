@@ -1,0 +1,20 @@
+# Render.com blueprint: one web service, persistent disk for the cached report.
+services:
+  - type: web
+    name: market-update
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: TYPESAFE_API_KEY
+        sync: false          # set in the Render dashboard
+      - key: MU_DATA_DIR
+        value: /data
+      - key: MU_INTERVAL_MARKET
+        value: "300"
+      - key: MU_INTERVAL_OFF
+        value: "3600"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

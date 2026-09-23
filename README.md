@@ -1,0 +1,195 @@
+# Market Update
+
+A live market dashboard for day and swing traders, written so that someone with a few
+years of market knowledge can read it without a glossary. Code fetches the data;
+[TypeSafe](https://typesafe.ai) supplies the judgment calls as typed, calibrated answers;
+every judgment is explained in one plain sentence on the page.
+
+## What is on the page
+
+**Verdict per stock.** A second TypeSafe round runs after every other read is in: it sees the
+lean and confidence, setup, who is in control, entry quality, day and swing fit, extended
+and event-risk probabilities, days to earnings, the plan's reward-to-risk, the ten-item
+checklist with its failed items, the smart-money picture (insider buys and sells,
+institutional changes, congressional buys, short-interest change) and the market tone,
+and answers one question: what is the sensible stance now? Buy, buy the dip, wait for
+breakout, hold but don't add, avoid, or short setup, plus the single factor that most
+drives it. Cards and the stock view lead with that verdict in plain words. "Who is
+buying" lists insiders, institutions, Congress and shorts as YES / NO lines with the
+specific evidence. Scores are shown as words (weak, modest, good, strong) with the number
+beside them.
+
+**Intraday verdict.** The same second round also answers an intraday question over relative
+volume, ATR, yesterday's high and low, the pivot, the gap and the session state: long
+momentum, buy dip to support, short momentum, fade the gap, range scalp, or no trade.
+
+**Options flow (view 9).** For the index ETFs, every analysed stock and the top theme names,
+Yahoo option chains over the nearest three expiries give call and put volume and open
+interest, put/call ratios, dollars traded (contracts × price × 100), the share of dollars
+in calls, top strikes, and "unusual" contracts where volume is at least 3× established
+open interest and $250k. Cboe's daily market statistics add market-wide put/call ratios
+and category volumes. TypeSafe reads each name (aggressive call buying, measured call
+positioning, put hedging, bearish put buying, two-sided, quiet; plus an intensity score)
+and the market as a whole (complacent, bullish and healthy, balanced, hedged, fearful;
+and which group carries the most notional). The options read also feeds each stock's
+stance. Caveat: Yahoo posts open interest overnight and its after-hours implied
+volatility is unreliable, so new listings are not counted as unusual and IV shows as
+unavailable outside market hours.
+
+**WhatsApp.** The green icon at the top right opens WhatsApp with a formatted brief:
+mood, insider buys, insider sales, congressional buys, heavy options buying and the
+watchlist verdicts. Nothing is drawn on the page.
+
+**Top of the page: the action board.** One-line market mood, then a card for every
+watchlist stock: LEAN (long / short / neutral with confidence), setup, swing and day
+scores, and a plan in one sentence (entry near the current price, stop at the nearest
+structural level capped at two ATRs, target at the 20-day extreme, reward-to-risk with a
+plain verdict). Two buttons: **Full analysis** opens the complete toolkit for that name,
+**Open chart** opens it on TradingView. Each card also carries a **price-action read**
+(who is in control, market structure, last candle) and a **pre-position checklist**
+scored out of ten. Below that, the best swing setups outside your list. Everything else
+lives in collapsible "Deeper analysis" sections.
+
+**Big picture, 1 / 3 / 6 / 12 months.** Right under the watchlist: S&P 500 futures, Nasdaq
+100, gold, WTI crude and the 10-year yield, each with return (or basis-point change) over
+every horizon, position in that window's range, drawdown from the window high, and swing
+structure, plus a 52-week candlestick chart on click. TypeSafe reads each asset (phase,
+horizon alignment, trend strength) and the five together (macro picture, three-month equity
+lean, biggest risk to the trend).
+
+**Theme screen: AI data-center buildout.** About fifty names by role in the stack (compute,
+memory and storage, networking and optics, servers and cooling, power, chip equipment,
+data-center REITs, hyperscalers and clouds). Each gets relative strength versus SPY over
+1 and 3 months, trend and structure, ATR, beta, short interest, revenue growth and forward
+P/E, plus four TypeSafe reads: theme leverage (peripheral to pure play), phase (leader,
+catching up, laggard, extended, broken), move potential in a risk-on tape, and fundamental
+support. A run score ranks them; a group read says what stage the theme is in and which
+part of the stack is likely to lead next.
+
+**Smart money.** For the analysed names and the top theme names: insider open-market buys
+and sales (SEC Form 4 via Yahoo, last 90 days, with the 6-month buy/sell counts),
+institutional ownership and top-10 holder changes (13F, quarterly), short interest and
+its month-on-month change, and congressional STOCK Act trades (via Quiver Quant's public
+page, cached 6 hours). TypeSafe scores conviction 0–3 and names who is positioning. There
+is no public feed of executive-branch or presidential-family purchases; those appear only
+in annual OGE disclosures.
+
+Everything else in the toolkit:
+
+1. **How the market feels today** — mood (risk-on / risk-off / mixed), expected swings, what's driving it, who should lead, what rates are doing to stocks, where money is going. One TypeSafe request over the overnight tape, index technicals, the yield curve, flow gauges, breadth, headlines and calendar.
+2. **What moved overnight** — index futures, VIX, 10-year, dollar, oil, gold, bitcoin with 5-day lines.
+3. **The big indexes** — SPY, QQQ, IWM, DIA candlestick charts with SMA 20/50, prior-day high/low, pivot, RSI, ATR, 52-week position.
+4. **Interest rates** — the full Treasury curve today vs one month and one year ago (FRED), 2s10s and 3m10y spread history, live yields, and a plain-language read.
+5. **Where the money is going** — seven ratio gauges (equal vs cap weight, small vs large, discretionary vs staples, high yield vs Treasuries, copper vs gold, semis vs market, VIX term structure), breadth across the scan universe, sector returns over 1D/5D/1M.
+6. **News that actually matters** — headlines judged for actionability, ranked by impact, tagged with lean, scope and theme. Listicles are dropped.
+7. **Stocks worth watching** — the most volatile and gapping liquid names plus your watchlist. Click a row for a candlestick chart with levels, volatility stats, trend, fundamentals, recent headlines, and model judgments: lean, chart setup, day-trade fit, swing fit, catalyst, event risk, extended. Filter tabs: All / Day trade / Swing / Gapping / Watchlist.
+8. **Today's economic events** and **companies reporting earnings**, each scored for relevance.
+
+Hover any dotted-underlined term for a one-line definition.
+
+### Price action and the checklist
+
+`technicals.py` reads the daily candles with no AI: last-candle pattern (doji, hammer,
+shooting star, bullish or bearish engulfing, inside bar, outside bar, strong close), close
+location in the range, body size, range versus ATR, volume versus the 20-day average, the
+up/down streak, gap at the open, and market structure from swing highs and lows (higher
+highs and higher lows, lower highs and lower lows, expanding, contracting), with the
+nearest swing support and resistance, which are also drawn on the chart as S and R.
+TypeSafe then answers two questions over that state: who is in control (buyers, sellers,
+either side exhausting, indecision) and entry quality (0–3).
+
+The checklist in `app.js` is plain code over those facts. For a long lean: trend agrees,
+structure agrees, market mood agrees, not chasing (within two ATRs of the 20-day average
+and not flagged extended), last candle agrees, volume backs it, room to run (reward at
+least 1.5× risk), no event inside five sessions, RSI below 70, clean entry (model score
+at least 2). Short leans mirror these. Eight or more is "Ready", six or seven "Almost",
+fewer "Not yet". Every line shows why it passed or failed.
+
+## Layout: one screen, eight views
+
+The page never scrolls on desktop. A HUD bar at the top holds the brand, the view menu
+and the status readouts. Views switch from the menu or with keys 1–8 and are kept in the
+URL hash: HOME (mood, watchlist board, today's sheet), STOCK (candidate list beside the
+full analysis), THEME, SMART $, MACRO (mood detail and the 1/3/6/12-month picture),
+MARKET (tape, indexes, rates), FLOWS, NEWS. Dense tables scroll inside their own
+compartment. Below 900px the shell falls back to a single scrolling column.
+
+## Design
+
+Calm dark terminal: a soft near-black ground, IBM Plex Sans for reading, IBM Plex Mono for
+numbers, green for up, red for down, amber for caution, blue for the one accent. 1px
+grid lines, 8px radius, no shadows or textures. The one-screen HUD layout with eight
+views is unchanged. Earlier explorations (retro Gen-Z tokens and components) remain in
+the Figma file "Market Update — Retro Gen-Z Trader Dashboard"
+(https://www.figma.com/design/9joJMIMs7X9Ay2l9Im9k9N).
+
+## Run locally
+
+```bash
+source ~/.zshrc                      # loads TYPESAFE_API_KEY
+.venv/bin/market-update serve        # http://localhost:8000
+```
+
+The server rebuilds on a schedule (every 5 min pre-market and during the session, 15 min after hours, hourly otherwise), serves the latest report instantly, and exposes a **Refresh** button with a 2-minute cooldown. New data is applied automatically when you are idle, or offered with an "Update now" button while you are reading.
+
+One-file static export (also what the release zip and GitHub Pages ship):
+
+```bash
+.venv/bin/market-update --open       # writes output/index.html + output/report.json
+```
+
+`--no-ai` builds without TypeSafe calls.
+
+## Host it for free (GitHub Pages)
+
+The workflow in `.github/workflows/build.yml` rebuilds the dashboard every hour on
+weekdays and every four hours at weekends, and publishes it to GitHub Pages. The page
+polls `report.json` every two minutes and updates itself without a reload; the REFRESH
+button re-checks immediately. A forced rebuild is one click on the workflow's "Run
+workflow" button in the repository's Actions tab (owner only). Free tier: about 2,000
+Actions minutes a month; this schedule uses roughly 500.
+
+```bash
+gh auth login                                   # once
+gh repo create market-update --public --source . --push
+gh secret set TYPESAFE_API_KEY                  # paste the key when prompted
+gh api -X POST repos/{owner}/market-update/pages -f build_type=workflow
+gh workflow run build.yml
+```
+
+The site appears at `https://<your-user>.github.io/market-update/` after the first run.
+Free tier: about 2,000 Actions minutes a month; this schedule uses roughly 600.
+
+## Host the live server (Docker)
+
+`Dockerfile` and `render.yaml` are included. Set `TYPESAFE_API_KEY` in the host's
+environment. Optional tuning: `MU_INTERVAL_MARKET`, `MU_INTERVAL_POST`, `MU_INTERVAL_OFF`,
+`MU_REFRESH_COOLDOWN`, `MU_NO_AI=1`.
+
+## Release packaging
+
+```bash
+python scripts/package_release.py --version 1.0.0 --release-type market-ready
+```
+
+Stamps the version, rebuilds the dashboard, and writes `dist/market-update-<v>-<type>.zip`.
+
+## Files to review
+
+- `market_update/judgments.py` — **every TypeSafe question, threshold and ranking weight.** Read and tune this one.
+- `market_update/static/app.js` — the page, including the plain-English explanations (`EX`) and glossary (`G`).
+- `market_update/config.py` — symbols, universe, gauges, filters, schedule.
+- `watchlist.txt` — your tickers; always analysed, exempt from the liquidity floor.
+- `market_update/fetch.py`, `technicals.py`, `analyze.py`, `server.py`, `render.py`.
+
+## Data sources (all keyless)
+
+Yahoo Finance (quotes, history, extended-hours bars, news, fundamentals), FRED (Treasury
+curve, one-day lag), ForexFactory (economic calendar), Nasdaq (earnings calendar).
+Caveats: Yahoo's minute feed does not report extended-hours volume; exchange holidays are
+not modelled; ForexFactory rate-limits, so its feed is cached for an hour.
+
+## Cost
+
+A full build is about 80 TypeSafe calls and 130k input tokens, and takes 20–30 seconds.
+Nothing here is investment advice.

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "market-update-server",
+      "runtimeExecutable": "zsh",
+      "runtimeArgs": ["-c", "source ~/.zshrc >/dev/null 2>&1; exec .venv/bin/uvicorn market_update.server:app --host 127.0.0.1 --port 8000"],
+      "port": 8000
+    }
+  ]
+}

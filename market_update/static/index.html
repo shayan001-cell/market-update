@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market Update</title>
+<meta name="description" content="Tactical market terminal for day and swing traders: mood, watchlist plans, theme screen, smart money, macro and technicals.">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div class="hud">
+  <header class="hud-bar">
+    <div class="hud-brand"><span class="br">[</span> MARKET UPDATE <span class="br">]</span><span class="rev">REV 2.0 · UNIT D-01</span></div>
+    <nav class="hud-nav" id="nav" aria-label="Views"></nav>
+    <div class="hud-status">
+      <span class="readout" id="market-state">—</span>
+      <span class="readout" id="session-line">LOADING</span>
+      <span class="readout" id="generated-line"></span>
+      <a class="wa-icon" id="wa-btn" href="#" target="_blank" rel="noopener" title="Send today's insider brief on WhatsApp" aria-label="Send on WhatsApp"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-.9.9-.9 2.2s.9 2.6 1.1 2.8c.1.2 1.8 2.8 4.4 3.8 2.2.9 2.6.7 3.1.6.5 0 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.2-.2-.5-.3l-1.7-.8c-.2-.1-.4-.1-.6.1-.2.3-.7.8-.8 1-.2.2-.3.2-.6.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.5-1.5-1.8-.1-.3 0-.4.1-.5l.4-.5.3-.4c.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5z"/></svg></a>
+      <button class="btn" id="refresh-btn" title="Rebuild the report now">REFRESH</button>
+      <button class="btn ghost" id="theme-btn" hidden>THEME</button>
+    </div>
+  </header>
+  <div id="notice" class="notice" hidden></div>
+  <main id="app"><div class="loading">>>> LOADING REPORT</div></main>
+  <footer id="footer"></footer>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

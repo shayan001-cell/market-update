@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+output/
+dist/
+.cache/
+.claude/skills/
+.claude/agents/
+.DS_Store

@@ -1,0 +1,54 @@
+name: Build and publish dashboard
+
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC. Hourly around the clock on weekdays, every four hours at weekends.
+    - cron: "0 * * * 1-5"
+    - cron: "0 */4 * * 0,6"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -q .
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: output/.cache
+          key: mu-cache-${{ github.run_id }}
+          restore-keys: mu-cache-
+      - name: Build dashboard
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: |
+          mkdir -p site
+          market-update --out site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

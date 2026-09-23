@@ -1,0 +1,619 @@
+"""Orchestration: fetch -> technicals -> TypeSafe judgments -> report dict.
+
+The report is plain JSON-able data consumed by static/app.js.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import uuid
+from datetime import datetime
+from typing import Any
+
+from typesafe_sdk import AsyncTypeSafeClient, TypeSafeError
+
+from . import config, fetch, technicals as T
+from . import judgments as J
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# TypeSafe helpers
+# ---------------------------------------------------------------------------
+def _answers_to_dict(resp: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k, a in resp.answers.items():
+        t = getattr(a, "type", None)
+        if t == "noul":
+            out[k] = {"type": "noul", "p": float(a.noul)}
+        elif t == "choice":
+            out[k] = {"type": "choice", "choice": a.choice, "confidence": float(a.confidence),
+                      "probabilities": {kk: float(vv) for kk, vv in dict(a.probabilities).items()}}
+        elif t == "score":
+            out[k] = {"type": "score", "score": float(a.score), "confidence": float(a.confidence),
+                      "probabilities": {str(kk): float(vv) for kk, vv in dict(a.probabilities).items()}}
+    return out
+
+
+class Judge:
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self.calls = self.failures = self.input_tokens = self.output_tokens = 0
+
+    async def run_many(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None]:
+        if not self.enabled or not states:
+            return [None] * len(states)
+        sem = asyncio.Semaphore(config.TYPESAFE_CONCURRENCY)
+        try:
+            client_cm = AsyncTypeSafeClient(model=config.TYPESAFE_MODEL)
+        except TypeSafeError as e:
+            self.failures += len(states)
+            log.error("TypeSafe unavailable, continuing without judgments: %s", e)
+            return [None] * len(states)
+        async with client_cm as client:
+            async def one(state: dict[str, Any]) -> dict[str, Any] | None:
+                async with sem:
+                    try:
+                        resp = await client.system_one(state=state, questions=questions)
+                    except TypeSafeError as e:
+                        self.failures += 1
+                        log.warning("TypeSafe call failed: %s", e)
+                        return None
+                    self.calls += 1
+                    u = getattr(resp, "usage", None)
+                    if u is not None:
+                        self.input_tokens += int(getattr(u, "input_tokens", 0) or 0)
+                        self.output_tokens += int(getattr(u, "output_tokens", 0) or 0)
+                    return _answers_to_dict(resp)
+            return list(await asyncio.gather(*(one(s) for s in states)))
+
+    async def run_one(self, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any] | None:
+        return (await self.run_many([state], questions))[0]
+
+
+def _r(x: Any, nd: int = 2) -> Any:
+    return round(x, nd) if isinstance(x, (int, float)) and not isinstance(x, bool) else x
+
+
+# ---------------------------------------------------------------------------
+# State builders (what the model sees)
+# ---------------------------------------------------------------------------
+def _headline_state(h: dict[str, Any]) -> dict[str, Any]:
+    return {k: h[k] for k in ("headline", "summary", "source", "published", "related_tickers")}
+
+
+def _stock_state(s: dict[str, Any], market_state: str) -> dict[str, Any]:
+    t, f = s["technicals"], s["fundamentals"]
+    return {
+        "ticker": s["ticker"], "name": s["name"], "sector": s["sector"], "industry": s["industry"],
+        "market_state": market_state,
+        "price": {"last": _r(s["last_price"]), "prev_close": _r(s["prev_close"]), "chg_pct": s["chg_pct"], "gap_pct": s["gap_pct"]},
+        "volatility": {"atr_pct": _r(t.get("atr_pct")), "realized_vol_20d_annualized_pct": _r(t.get("rv20")),
+                       "beta": _r(f.get("beta")), "rel_volume": s["rel_volume"] if s["rel_volume"] is not None else "unavailable",
+                       "prev_day_range_pct": _r(t.get("prev_range_pct"))},
+        "trend": {"trend": t.get("trend"), "above_sma20": t.get("above_sma20"), "above_sma50": t.get("above_sma50"),
+                  "above_sma200": t.get("above_sma200"), "dist_sma20_pct": _r(t.get("dist_sma20_pct")),
+                  "rsi14": _r(t.get("rsi14"), 1), "pct_from_52w_high": _r(t.get("pct_from_hi52"), 1),
+                  "pct_from_52w_low": _r(t.get("pct_from_lo52"), 1), "ret_5d": _r(t.get("ret_5d")), "ret_1m": _r(t.get("ret_1m")),
+                  "new_high_20d": t.get("new_high_20d"), "new_low_20d": t.get("new_low_20d")},
+        "levels": {"prev_high": _r(t.get("prev_high")), "prev_low": _r(t.get("prev_low")),
+                   "hi_20d": _r(t.get("hi20")), "lo_20d": _r(t.get("lo20"))},
+        "fundamentals": {"market_cap": f.get("market_cap"), "forward_pe": _r(f.get("forward_pe"), 1),
+                         "rev_growth": _r(f.get("rev_growth"), 3), "short_float": _r(f.get("short_float"), 3),
+                         "analyst": f.get("analyst"), "days_to_earnings": f.get("days_to_earnings")},
+        "price_action": {k: v for k, v in (s.get("price_action") or {}).items() if k != "prev_close"},
+        "headlines": [{"headline": h["headline"], "summary": h["summary"][:300], "published": h["published"], "source": h["source"]}
+                      for h in s["headlines"]],
+    }
+
+
+def _earnings_state(e: dict[str, Any]) -> dict[str, Any]:
+    return {k: e[k] for k in ("symbol", "name", "market_cap", "report_time", "eps_forecast", "last_year_eps", "num_estimates")}
+
+
+# ---------------------------------------------------------------------------
+# Pipeline
+# ---------------------------------------------------------------------------
+async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dict[str, Any]:
+    t0 = time.time()
+    session = fetch.next_session_date()
+    mstate = fetch.market_state()
+    max_cards = max_cards or config.MAX_STOCK_CARDS
+    watch = config.load_watchlist()
+    universe = list(dict.fromkeys(config.UNIVERSE + watch))
+    theme_symbols = [t for g in config.THEME["groups"].values() for t in g]
+    all_symbols = list(dict.fromkeys(universe + list(config.INDEX_ETFS) + list(config.SECTOR_ETFS) + config.AUX_SYMBOLS + theme_symbols))
+
+    log.info("fetching history for %d symbols", len(all_symbols))
+    history = fetch.fetch_history(all_symbols, "1y")
+    snapshot = fetch.fetch_snapshot(all_symbols, history)
+    macro = fetch.fetch_macro_tape()
+    rates = fetch.fetch_fred_curve()
+    live_yields = fetch.fetch_live_yields()
+    calendar = fetch.fetch_calendar(session)
+    earnings = fetch.fetch_earnings(session)
+
+    # ---- indices ------------------------------------------------------------
+    indices = []
+    for sym, name in config.INDEX_ETFS.items():
+        f = fetch.frame_for(history, sym)
+        s = snapshot.get(sym)
+        if f is None or s is None:
+            continue
+        tech = T.summarize(f, s["last_price"])
+        indices.append({"symbol": sym, "name": name, "last": s["last_price"], "prev_close": s["prev_close"],
+                        "chg_pct": s["gap_pct"], "rel_volume": s["rel_volume"], "technicals": tech,
+                        "price_action": T.price_action(f),
+                        "ohlc": T.ohlc_records(f, config.OHLC_DAYS_INDEX)})
+
+    # ---- big picture: multi-horizon assets --------------------------------------
+    horizon_assets = []
+    for sym, label, kind in config.HORIZON_ASSETS:
+        f = fetch.frame_for(history, sym)
+        if f is None or len(f) < 30:
+            continue
+        is_yield = kind == "yield"
+        tech = T.summarize(f)
+        hz = {k: T.horizon_stats(f, n, is_yield) for k, n in config.HORIZONS.items()}
+        q = snapshot.get(sym) or {}
+        horizon_assets.append({
+            "symbol": sym, "label": label, "kind": kind,
+            "last": q.get("last_price") or tech.get("last_close"), "chg_pct": q.get("gap_pct"),
+            "sma50": tech.get("sma50"), "sma200": tech.get("sma200"),
+            "above_sma50": tech.get("above_sma50"), "above_sma200": tech.get("above_sma200"), "rsi14": tech.get("rsi14"),
+            "horizons": hz, "weekly": T.weekly_ohlc(f, 52),
+            "closes_12m": [round(float(x), 4) for x in f["Close"].dropna().tail(252).tolist()[::3]],
+        })
+
+    # ---- theme screen: AI data-center buildout ----------------------------------
+    spy_f = fetch.frame_for(history, "SPY")
+    spy_ret = {n: T.pct_return(spy_f["Close"].dropna(), n) for n in (21, 63)} if spy_f is not None else {21: None, 63: None}
+    theme_rows: list[dict[str, Any]] = []
+    for group, tickers in config.THEME["groups"].items():
+        for t in tickers:
+            f = fetch.frame_for(history, t)
+            q = snapshot.get(t)
+            if f is None or q is None or not q.get("last_price") or len(f) < 30:
+                continue
+            tech = T.summarize(f, q["last_price"])
+            pa = T.price_action(f)
+            r1, r3 = tech.get("ret_1m"), tech.get("ret_3m")
+            theme_rows.append({
+                "ticker": t, "group": group, "last_price": q["last_price"], "chg_pct": q["gap_pct"],
+                "technicals": tech, "price_action": pa,
+                "rel_1m": round(r1 - spy_ret[21], 2) if (r1 is not None and spy_ret[21] is not None) else None,
+                "rel_3m": round(r3 - spy_ret[63], 2) if (r3 is not None and spy_ret[63] is not None) else None,
+                "session_closes": q["session_closes"][-40:],
+            })
+    theme_info = fetch.fetch_info([x["ticker"] for x in theme_rows][: config.THEME_MAX_JUDGED])
+    for x in theme_rows:
+        m = theme_info.get(x["ticker"], {})
+        x["name"] = m.get("name", x["ticker"])
+        x["fundamentals"] = {k: m.get(k) for k in ("market_cap", "beta", "forward_pe", "trailing_pe", "rev_growth", "eps_growth", "short_float", "next_earnings", "days_to_earnings")}
+
+    # ---- flows --------------------------------------------------------------
+    gauges = fetch.ratio_gauges(history, snapshot)
+    sectors = fetch.sector_table(history, snapshot)
+    n = above20 = above50 = above200 = adv = dec = nh = nl = 0
+    for t in universe:
+        f = fetch.frame_for(history, t)
+        s = snapshot.get(t)
+        if f is None or s is None or not s["last_price"]:
+            continue
+        tech = T.summarize(f, s["last_price"])
+        s["technicals"] = tech
+        n += 1
+        above20 += bool(tech.get("above_sma20")); above50 += bool(tech.get("above_sma50")); above200 += bool(tech.get("above_sma200"))
+        adv += s["gap_pct"] > 0; dec += s["gap_pct"] < 0
+        nh += bool(tech.get("new_high_20d")); nl += bool(tech.get("new_low_20d"))
+    breadth = {"n": n, "above20": above20, "above50": above50, "above200": above200,
+               "adv": adv, "dec": dec, "unch": n - adv - dec, "new_high_20d": nh, "new_low_20d": nl}
+
+    # ---- stock selection: watchlist + gappers + volatility ranking ----------------
+    liquid = [snapshot[t] for t in universe if t in snapshot and snapshot[t].get("technicals")
+              and snapshot[t]["last_price"] and snapshot[t]["last_price"] >= config.MIN_PRICE
+              and (snapshot[t]["avg_dollar_volume"] >= config.MIN_AVG_DOLLAR_VOLUME or t in watch)]
+    liquid_set = {s["ticker"] for s in liquid}
+    by_atr = sorted(liquid, key=lambda s: s["technicals"].get("atr_pct") or 0, reverse=True)
+    gappers = sorted([s for s in liquid if abs(s["gap_pct"]) >= config.GAP_MIN_PCT], key=lambda s: abs(s["gap_pct"]), reverse=True)
+    watch_rows = [snapshot[t] for t in watch if t in liquid_set]
+    picked: list[str] = []
+    for s in watch_rows + gappers + by_atr:
+        if s["ticker"] not in picked:
+            picked.append(s["ticker"])
+        if len(picked) >= max_cards:
+            break
+    vol_rank = {s["ticker"]: i + 1 for i, s in enumerate(by_atr)}
+
+    log.info("building %d stock cards", len(picked))
+    info = fetch.fetch_info(picked)
+    stocks: list[dict[str, Any]] = []
+    for t in picked:
+        s = snapshot[t]
+        tech = s["technicals"]
+        f = fetch.frame_for(history, t)
+        meta = info.get(t, {})
+        fundamentals = {k: meta.get(k) for k in ("market_cap", "beta", "short_float", "trailing_pe", "forward_pe", "ps",
+                                                  "rev_growth", "eps_growth", "margins", "analyst", "target",
+                                                  "next_earnings", "days_to_earnings")}
+        stocks.append({
+            "ticker": t, "name": meta.get("name", t), "sector": meta.get("sector", ""), "industry": meta.get("industry", ""),
+            "last_price": s["last_price"], "prev_close": s["prev_close"], "last_ts": s["last_ts"],
+            "chg_pct": s["gap_pct"], "gap_pct": s["gap_pct"] if mstate != "open" else None,
+            "rel_volume": s["rel_volume"], "avg_volume": s["avg_volume"], "avg_dollar_volume": s["avg_dollar_volume"],
+            "session_closes": s["session_closes"],
+            "technicals": tech, "fundamentals": fundamentals,
+            "price_action": T.price_action(f) if f is not None else {},
+            "ohlc": T.ohlc_records(f, config.OHLC_DAYS_STOCK) if f is not None else [],
+            "headlines": fetch.fetch_news([t], per_symbol=config.NEWS_PER_STOCK, lookback_hours=96),
+            "on_watchlist": t in watch, "is_gapper": abs(s["gap_pct"]) >= config.GAP_MIN_PCT,
+            "volatility_rank": vol_rank.get(t), "volatility_universe": len(by_atr),
+        })
+
+    # ---- smart money: insiders, institutions, shorts, Congress -------------------
+    sm_tickers = list(dict.fromkeys([t for t in picked] + [x["ticker"] for x in theme_rows[:20]]))
+    smart = fetch.fetch_smart_money(sm_tickers)
+    congress = fetch.fetch_congress_trades()
+    for t, row in smart.items():
+        row["congress"] = [c for c in congress.get("by_ticker", {}).get(t, [])][:8]
+
+    # ---- options flow: calls, puts, heavy buying ------------------------------------
+    opt_tickers = list(dict.fromkeys(["SPY", "QQQ", "IWM"] + sm_tickers))
+    options = fetch.fetch_options_flow(opt_tickers)
+    cboe = fetch.fetch_cboe_daily()
+
+    # ---- market-wide headlines ---------------------------------------------------
+    seeds = config.NEWS_SEED_SYMBOLS + [s["ticker"] for s in stocks[:6]]
+    headlines = fetch.fetch_news(seeds, per_symbol=10)[: config.MAX_HEADLINES_TO_JUDGE]
+
+    # ---- TypeSafe round 1: everything independent, concurrently ------------------
+    judge = Judge(enabled=use_ai)
+    cal_states = calendar[: config.MAX_CALENDAR_TO_JUDGE]
+    earn_states = earnings[: config.MAX_EARNINGS_TO_JUDGE]
+    log.info("judging %d headlines, %d stocks, %d calendar, %d earnings", len(headlines), len(stocks), len(cal_states), len(earn_states))
+    def _hz_state(a: dict[str, Any]) -> dict[str, Any]:
+        keep = ("return_pct", "change_bp", "range_pos", "from_high_pct", "from_high_bp", "max_drawdown_pct", "max_runup_pct", "structure")
+        return {"asset": a["label"], "kind": a["kind"], "last": _r(a["last"]), "sma50": _r(a["sma50"]), "sma200": _r(a["sma200"]),
+                "above_sma50": a["above_sma50"], "above_sma200": a["above_sma200"], "rsi14": _r(a["rsi14"], 1),
+                "horizons": {k: {kk: (_r(vv, 2) if isinstance(vv, float) else vv) for kk, vv in v.items() if kk in keep} for k, v in a["horizons"].items()}}
+    cross_state = {
+        "assets": [{"asset": a["label"], "kind": a["kind"],
+                    **{f"move_{k}": (a["horizons"][k].get("change_bp") if a["kind"] == "yield" else a["horizons"][k].get("return_pct")) for k in config.HORIZONS},
+                    "unit": "bp" if a["kind"] == "yield" else "pct", "range_pos_12m": _r(a["horizons"]["12m"].get("range_pos"), 2),
+                    "structure_3m": a["horizons"]["3m"].get("structure")} for a in horizon_assets],
+        "rates": {"spread_2s10s_bp": (rates.get("spreads", {}).get("2s10s") or {}).get("latest"),
+                  "chg_10y_1m_bp": _r(rates.get("chg_10y_1m_bp"), 1), "chg_2y_1m_bp": _r(rates.get("chg_2y_1m_bp"), 1)},
+    }
+    def _theme_state(x: dict[str, Any]) -> dict[str, Any]:
+        t, f, pa = x["technicals"], x["fundamentals"], x["price_action"]
+        return {"ticker": x["ticker"], "name": x["name"], "group": x["group"], "theme": config.THEME["name"], "market_tone": mstate,
+                "price": {"last": _r(x["last_price"]), "chg_pct": x["chg_pct"]},
+                "technicals": {"trend": t.get("trend"), "structure": pa.get("structure"), "atr_pct": _r(t.get("atr_pct")), "rsi14": _r(t.get("rsi14"), 1),
+                               "dist_sma20_pct": _r(t.get("dist_sma20_pct"), 1), "ret_1m": _r(t.get("ret_1m"), 1), "ret_3m": _r(t.get("ret_3m"), 1),
+                               "rel_vs_spy_1m": x["rel_1m"], "rel_vs_spy_3m": x["rel_3m"], "pct_from_52w_high": _r(t.get("pct_from_hi52"), 1),
+                               "new_high_20d": t.get("new_high_20d"), "last_candle": pa.get("pattern"), "volume_vs_avg": pa.get("volume_vs_avg")},
+                "fundamentals": {"market_cap": f.get("market_cap"), "beta": _r(f.get("beta")), "forward_pe": _r(f.get("forward_pe"), 1),
+                                 "rev_growth": _r(f.get("rev_growth"), 3), "eps_growth": _r(f.get("eps_growth"), 3), "short_float": _r(f.get("short_float"), 3),
+                                 "days_to_earnings": f.get("days_to_earnings")}}
+    group_stats = []
+    for group in config.THEME["groups"]:
+        rows = [x for x in theme_rows if x["group"] == group]
+        if not rows:
+            continue
+        def avg(key):
+            vals = [x[key] if key in x else x["technicals"].get(key) for x in rows]
+            vals = [v for v in vals if isinstance(v, (int, float))]
+            return round(sum(vals) / len(vals), 2) if vals else None
+        group_stats.append({"group": group, "n": len(rows), "avg_ret_1m": avg("ret_1m"), "avg_ret_3m": avg("ret_3m"), "avg_rel_vs_spy_1m": avg("rel_1m"),
+                            "share_in_uptrend": round(sum(x["technicals"].get("trend") == "up" for x in rows) / len(rows), 2),
+                            "share_extended": round(sum((x["technicals"].get("dist_sma20_pct") or 0) > 2 * (x["technicals"].get("atr_pct") or 99) for x in rows) / len(rows), 2)})
+    theme_group_state = {"theme": config.THEME["name"], "market_tone": mstate, "groups": group_stats}
+    def _sm_state(t: str) -> dict[str, Any]:
+        row = smart[t]; ins = row.get("insider", {}); inst = row.get("institutions", {}); sh = row.get("short", {})
+        snap = snapshot.get(t) or {}
+        tech = snap.get("technicals") or {}
+        return {"ticker": t, "name": (info.get(t) or theme_info.get(t) or {}).get("name", t), "price_1m_pct": _r(tech.get("ret_1m")),
+                "insider": {k: ins.get(k) for k in ("buy_trans_6m", "sell_trans_6m", "net_shares_6m", "buy_value_90d", "sell_value_90d", "distinct_buyers_90d")}
+                           | {"open_market_buys_90d": [{k: b[k] for k in ("date", "insider", "position", "shares", "value")} for b in ins.get("open_market_buys_90d", [])[:5]],
+                              "open_market_sales_90d": [{k: b[k] for k in ("date", "insider", "position", "shares", "value")} for b in ins.get("open_market_sales_90d", [])[:5]]},
+                "institutions": {k: inst.get(k) for k in ("pct_held", "top10_avg_change", "as_of")},
+                "short": {k: sh.get(k) for k in ("change_pct", "short_pct_float", "days_to_cover")},
+                "congress": row.get("congress", [])}
+    sm_keys = [t for t in sm_tickers if t in smart]
+    def _opt_state(t: str) -> dict[str, Any]:
+        o = options[t]; snap = snapshot.get(t) or {}; tech = snap.get("technicals") or {}
+        slim = lambda c: {k: c[k] for k in ("side", "strike", "otm_pct", "dte", "volume", "oi", "notional") if k in c}
+        return {"ticker": t, "name": (info.get(t) or theme_info.get(t) or {}).get("name", t), "spot": _r(o.get("spot")), "chg_pct": snap.get("gap_pct"),
+                "trend": tech.get("trend"), "nearest_expiries": o.get("expiries"),
+                "call_volume": o.get("call_volume"), "put_volume": o.get("put_volume"), "put_call_volume": o.get("pc_volume"), "put_call_open_interest": o.get("pc_oi"),
+                "call_notional": o.get("call_notional"), "put_notional": o.get("put_notional"), "call_share_of_notional": o.get("call_share"), "atm_iv": o.get("atm_iv"),
+                "volume_to_open_interest": o.get("volume_to_oi"), "open_interest_posted": o.get("oi_posted"),
+                "note": "Open interest updates overnight; contracts with oi 0 are new listings, not evidence of aggression. Use volume_to_open_interest and the unusual list, which already requires established open interest.",
+                "top_calls": [slim(c) for c in o.get("top_calls", [])], "top_puts": [slim(c) for c in o.get("top_puts", [])],
+                "unusual": [{**slim(c), "vol_oi": c.get("vol_oi"), "basis": c.get("basis"), "share_of_side_volume": c.get("share_of_side_volume")} for c in o.get("unusual", [])],
+                "unusual_call_notional": o.get("unusual_call_notional"), "unusual_put_notional": o.get("unusual_put_notional")}
+    opt_keys = [t for t in opt_tickers if options.get(t, {}).get("ok")]
+    h_ans, s_ans, c_ans, e_ans, hz_ans, cross_ans, th_ans, tg_ans, sm_ans, op_ans = await asyncio.gather(
+        judge.run_many([_headline_state(h) for h in headlines], J.HEADLINE_QUESTIONS),
+        judge.run_many([_stock_state(s, mstate) for s in stocks], J.STOCK_QUESTIONS),
+        judge.run_many(cal_states, J.CALENDAR_QUESTIONS),
+        judge.run_many([_earnings_state(e) for e in earn_states], J.EARNINGS_QUESTIONS),
+        judge.run_many([_hz_state(a) for a in horizon_assets], J.HORIZON_ASSET_QUESTIONS),
+        judge.run_many([cross_state] if horizon_assets else [], J.HORIZON_CROSS_QUESTIONS),
+        judge.run_many([_theme_state(x) for x in theme_rows[: config.THEME_MAX_JUDGED]], J.THEME_STOCK_QUESTIONS),
+        judge.run_many([theme_group_state] if group_stats else [], J.THEME_GROUP_QUESTIONS),
+        judge.run_many([_sm_state(t) for t in sm_keys], J.SMART_MONEY_QUESTIONS),
+        judge.run_many([_opt_state(t) for t in opt_keys], J.OPTIONS_QUESTIONS),
+    )
+    for t, ans in zip(opt_keys, op_ans):
+        options[t]["ai"] = ans
+    for s in stocks:
+        s["options"] = options.get(s["ticker"])
+        if s.get("options") and s["options"].get("ai") and s["options"]["ai"]["intensity"]["score"] >= J.OPTIONS_INTENSITY_FLAG:
+            s.setdefault("tags", [])
+    for x in theme_rows:
+        x["options"] = options.get(x["ticker"])
+    opt_rows = sorted([options[t] for t in opt_keys], key=lambda o: -(o.get("total_notional") or 0))
+    group_of = {t: g for g, ts in config.THEME["groups"].items() for t in ts}
+    opt_market_state = {
+        "cboe": {"as_of": cboe.get("as_of"), "ratios": cboe.get("ratios", {}),
+                 "volumes": {k: {"call": v[0].get("call"), "put": v[0].get("put")} for k, v in cboe.items()
+                             if k in ("SUM OF ALL PRODUCTS", "INDEX OPTIONS", "EXCHANGE TRADED PRODUCTS", "EQUITY OPTIONS", "CBOE VOLATILITY INDEX (VIX)", "SPX + SPXW")
+                             and isinstance(v, list) and v and isinstance(v[0], dict)}},
+        "scanned": {"n": len(opt_rows), "aggregate_call_volume": sum(o.get("call_volume") or 0 for o in opt_rows), "aggregate_put_volume": sum(o.get("put_volume") or 0 for o in opt_rows),
+                    "aggregate_put_call": round(sum(o.get("put_volume") or 0 for o in opt_rows) / max(1, sum(o.get("call_volume") or 0 for o in opt_rows)), 2)},
+        "leaders": [{"ticker": o["ticker"], "group": "index_etfs" if o["ticker"] in ("SPY", "QQQ", "IWM") else group_of.get(o["ticker"], "other"),
+                     "total_notional": o.get("total_notional"), "call_share": o.get("call_share"),
+                     "read": (o.get("ai") or {}).get("read", {}).get("choice"), "intensity": _r((o.get("ai") or {}).get("intensity", {}).get("score"), 1)} for o in opt_rows[:15]],
+        "market_tone": mstate,
+    }
+    opt_market = (await judge.run_many([opt_market_state], J.OPTIONS_MARKET_QUESTIONS))[0] if opt_rows else None
+    for t, ans in zip(sm_keys, sm_ans):
+        smart[t]["ai"] = ans
+    # attach to stock cards and theme rows so the page can badge them
+    for s in stocks:
+        s["smart"] = smart.get(s["ticker"])
+    for x in theme_rows:
+        x["smart"] = smart.get(x["ticker"])
+    for x, ans in zip(theme_rows, th_ans):
+        x["ai"] = ans
+        t = x["technicals"]
+        agree = [v for v in (t.get("above_sma20"), t.get("above_sma50"), t.get("above_sma200")) if v is not None]
+        align = ((max(sum(agree), len(agree) - sum(agree)) / len(agree)) - 0.5) * 2 if agree else 0.0
+        if agree and sum(agree) < len(agree) / 2:
+            align = -align                                      # aligned to the downside counts against a long theme
+        lev = ans["theme_leverage"]["score"] if ans else None
+        mv = ans["move_potential"]["score"] if ans else None
+        x["rank"] = round(J.theme_rank(lev, mv, max(0.0, align), t.get("atr_pct"), x["fundamentals"].get("beta"), x["rel_1m"]), 3)
+        x["tags"] = []
+        if ans and ans["phase"]["choice"] == "extended":
+            x["tags"].append("extended")
+        if isinstance(x["fundamentals"].get("days_to_earnings"), int) and 0 <= x["fundamentals"]["days_to_earnings"] <= 10:
+            x["tags"].append("earnings_soon")
+        if t.get("new_high_20d"):
+            x["tags"].append("new_high")
+        if isinstance(x["fundamentals"].get("short_float"), (int, float)) and x["fundamentals"]["short_float"] >= 0.10:
+            x["tags"].append("high_short")
+    theme_rows.sort(key=lambda x: x["rank"], reverse=True)
+    for x in theme_rows:
+        x["technicals"] = {k: v for k, v in x["technicals"].items() if k in ("trend", "sma20", "sma50", "sma200", "above_sma20", "above_sma50", "above_sma200",
+                                                                              "dist_sma20_pct", "rsi14", "atr14", "atr_pct", "ret_5d", "ret_1m", "ret_3m", "hi52", "lo52",
+                                                                              "pct_from_hi52", "hi20", "lo20", "prev_high", "prev_low", "new_high_20d")}
+        x["price_action"] = {k: v for k, v in x["price_action"].items() if k in ("structure", "pattern", "close_location", "volume_vs_avg", "nearest_resistance", "nearest_support", "broke_last_swing_high")}
+    theme_block = {"name": config.THEME["name"], "key": config.THEME["key"], "groups": group_stats, "rows": theme_rows,
+                   "ai": tg_ans[0] if tg_ans else None, "spy_ret_1m": _r(spy_ret[21]), "spy_ret_3m": _r(spy_ret[63])}
+    for a, ans in zip(horizon_assets, hz_ans):
+        a["ai"] = ans
+    horizons_block = {"assets": horizon_assets, "windows": config.HORIZONS, "ai": cross_ans[0] if cross_ans else None}
+
+    # ---- compose headlines --------------------------------------------------------
+    for h, a in zip(headlines, h_ans):
+        h["ai"] = a
+        h["rank"] = J.headline_rank(a["actionable"]["p"], a["impact"]["score"]) if a else 0.0
+        h["keep"] = (a["actionable"]["p"] >= J.HEADLINE_ACTIONABLE_MIN) if a else True
+    kept = sorted([h for h in headlines if h["keep"]], key=lambda h: h["rank"], reverse=True)
+
+    # ---- compose stocks -------------------------------------------------------------
+    for s, a in zip(stocks, s_ans):
+        s["ai"] = a
+        tech = s["technicals"]
+        agree = [x for x in (tech.get("above_sma20"), tech.get("above_sma50"), tech.get("above_sma200")) if x is not None]
+        if agree:
+            share = max(sum(agree), len(agree) - sum(agree)) / len(agree)
+            trend_alignment = (share - 0.5) * 2          # 0 when split, 1 when unanimous
+        else:
+            trend_alignment = 0.0
+        day_fit = a["day_trade_fit"]["score"] if a else None
+        swing_fit = a["swing_fit"]["score"] if a else None
+        s["scores"] = {
+            "day": round(J.day_score(day_fit, tech.get("atr_pct"), s["chg_pct"], s["rel_volume"]), 3),
+            "swing": round(J.swing_score(swing_fit, trend_alignment, tech.get("atr_pct")), 3),
+        }
+        tags = []
+        if s["is_gapper"]:
+            tags.append("gapper")
+        if s["on_watchlist"]:
+            tags.append("watchlist")
+        if a:
+            if day_fit >= J.DAY_TAG_MIN:
+                tags.append("day")
+            if swing_fit >= J.SWING_TAG_MIN:
+                tags.append("swing")
+            if a["event_risk"]["p"] >= J.EVENT_RISK_MIN:
+                tags.append("event_risk")
+            if a["extended"]["p"] >= J.EXTENDED_MIN:
+                tags.append("extended")
+        s["tags"] = tags
+    stocks.sort(key=lambda s: max(s["scores"]["day"], s["scores"]["swing"]), reverse=True)
+
+    # ---- compose calendar / earnings --------------------------------------------------
+    for c, a in zip(cal_states, c_ans):
+        c["ai"] = a
+        c["relevance"] = a["equity_relevance"]["score"] if a else (2.0 if c["ff_impact"] == "High" else 1.0)
+    calendar_kept = [c for c in cal_states if c["relevance"] >= J.CALENDAR_SHOW_MIN]
+    for e, a in zip(earn_states, e_ans):
+        e["ai"] = a
+        e["attention"] = a["attention"]["score"] if a else 1.0
+    ranked = sorted(earn_states, key=lambda e: (e["attention"], e["market_cap"] or 0), reverse=True)
+    earnings_kept = [e for e in ranked if e["attention"] >= J.EARNINGS_SHOW_MIN]
+    if len(earnings_kept) < config.MIN_EARNINGS_SHOWN:
+        earnings_kept = ranked[: config.MIN_EARNINGS_SHOWN]
+    earnings_kept = earnings_kept[: config.MAX_EARNINGS_SHOWN]
+
+    # ---- TypeSafe round 2: regime over the composed picture ---------------------------
+    regime = None
+    if use_ai:
+        sp = rates.get("spreads", {})
+        regime_state = {
+            "session_date": session.isoformat(), "market_state": mstate,
+            "macro_tape": [{"asset": r["label"], "last": r.get("last"), "change_pct": r.get("change_pct")} for r in macro],
+            "indices": [{"index": i["name"], "chg_pct": i["chg_pct"], "trend": i["technicals"].get("trend"),
+                         "rsi14": _r(i["technicals"].get("rsi14"), 1), "pct_from_52w_high": _r(i["technicals"].get("pct_from_hi52"), 1),
+                         "ret_5d": _r(i["technicals"].get("ret_5d")), "ret_1m": _r(i["technicals"].get("ret_1m"))} for i in indices],
+            "rates": {"as_of": rates.get("as_of"),
+                      "curve_today_vs_month_ago": [{"tenor": c["label"], "today": c["today"], "month_ago": c["month_ago"]} for c in rates.get("curve", [])],
+                      "spread_2s10s_bp": (sp.get("2s10s") or {}).get("latest"),
+                      "spread_3m10y_bp": (sp.get("3m10y") or {}).get("latest"),
+                      "chg_10y_1m_bp": _r(rates.get("chg_10y_1m_bp"), 1), "chg_2y_1m_bp": _r(rates.get("chg_2y_1m_bp"), 1),
+                      "live_yields": [{"tenor": y["label"], "yield": y["last"], "change_bp_today": y["change_bp"]} for y in live_yields]},
+            "flows": {"gauges": [{"gauge": g["label"], "rising_means": g["up_means"], "chg_1d": g["chg_1d"], "chg_5d": g["chg_5d"], "chg_1m": g["chg_1m"]} for g in gauges],
+                      "breadth": breadth,
+                      "sectors": [{"sector": s["label"], "chg_1d": s["chg_1d"], "chg_5d": s["chg_5d"], "chg_1m": s["chg_1m"]} for s in sectors]},
+            "top_headlines": [h["headline"] for h in kept[:12]],
+            "calendar_today": [f'{c["time_et"]} ET {c["country"]} {c["title"]}' for c in calendar_kept[:12]],
+        }
+        regime = await judge.run_one(regime_state, J.REGIME_QUESTIONS)
+
+    # ---- round 2: stance per stock over the composed picture ----------------------------
+    def _plan(s: dict[str, Any]) -> dict[str, Any] | None:
+        a, t, px = s.get("ai"), s["technicals"], s["last_price"]
+        if not a or not px:
+            return None
+        lean, atr = a["bias"]["choice"], t.get("atr14") or px * 0.02
+        if lean == "neutral":
+            return None
+        if lean == "long":
+            below = [v for v in (t.get("prev_low"), t.get("sma20")) if isinstance(v, (int, float)) and v < px]
+            stop = max(below) if below else px - 1.5 * atr
+            if px - stop > 2 * atr:
+                stop = px - 2 * atr
+            target = t["hi20"] if isinstance(t.get("hi20"), (int, float)) and t["hi20"] > px * 1.01 else px + 2 * atr
+        else:
+            above = [v for v in (t.get("prev_high"), t.get("sma20")) if isinstance(v, (int, float)) and v > px]
+            stop = min(above) if above else px + 1.5 * atr
+            if stop - px > 2 * atr:
+                stop = px + 2 * atr
+            target = t["lo20"] if isinstance(t.get("lo20"), (int, float)) and t["lo20"] < px * 0.99 else px - 2 * atr
+        risk, reward = abs(px - stop), abs(target - px)
+        return {"stop": round(stop, 2), "target": round(target, 2), "stop_pct": round((stop / px - 1) * 100, 1),
+                "target_pct": round((target / px - 1) * 100, 1), "reward_to_risk": round(reward / risk, 2) if risk else None}
+
+    def _checklist(s: dict[str, Any], tone: str) -> dict[str, Any] | None:
+        a, t, pa, f = s.get("ai"), s["technicals"], s.get("price_action") or {}, s["fundamentals"]
+        if not a or a["bias"]["choice"] == "neutral":
+            return None
+        long = a["bias"]["choice"] == "long"
+        pl = s.get("plan") or {}
+        rsi, d20, atrp = t.get("rsi14"), t.get("dist_sma20_pct"), t.get("atr_pct")
+        items = [
+            ("trend agrees", t.get("trend") == ("up" if long else "down")),
+            ("structure agrees", pa.get("structure") == ("uptrend_hh_hl" if long else "downtrend_lh_ll")),
+            ("market mood agrees", tone == ("risk_on" if long else "risk_off")),
+            ("not chasing", a["extended"]["p"] < 0.6 and isinstance(d20, (int, float)) and isinstance(atrp, (int, float)) and abs(d20) <= 2 * atrp),
+            ("last candle agrees", pa.get("direction") == ("up" if long else "down") and ((pa.get("close_location") or 0) >= 0.6 if long else (pa.get("close_location") or 1) <= 0.4)),
+            ("volume backs it", isinstance(pa.get("volume_vs_avg"), (int, float)) and pa["volume_vs_avg"] >= 1.0),
+            ("room to run", isinstance(pl.get("reward_to_risk"), (int, float)) and pl["reward_to_risk"] >= 1.5),
+            ("no event this week", a["event_risk"]["p"] < 0.6 and not (isinstance(f.get("days_to_earnings"), int) and 0 <= f["days_to_earnings"] <= 5)),
+            ("rsi not extreme", isinstance(rsi, (int, float)) and ((rsi < 70) if long else (rsi > 30))),
+            ("clean entry", (a.get("entry_quality") or {}).get("score", 0) >= 2),
+        ]
+        return {"passed": sum(ok for _, ok in items), "total": len(items), "failed": [n for n, ok in items if not ok]}
+
+    tone_now = regime["tone"]["choice"] if regime else "mixed"
+    for s in stocks:
+        s["plan"] = _plan(s)
+        s["checklist"] = _checklist(s, tone_now)
+    def _stance_state(s: dict[str, Any]) -> dict[str, Any]:
+        a = s["ai"]; sm = (s.get("smart") or {}); smi = sm.get("insider", {}); sma = sm.get("ai") or {}
+        return {"ticker": s["ticker"], "name": s["name"], "market_tone": tone_now,
+                "lean": {"choice": a["bias"]["choice"], "confidence": _r(a["bias"]["confidence"])}, "setup": a["setup"]["choice"],
+                "control": a["price_action"]["choice"], "entry_quality": _r(a["entry_quality"]["score"], 1),
+                "day_fit": _r(a["day_trade_fit"]["score"], 1), "swing_fit": _r(a["swing_fit"]["score"], 1),
+                "extended_p": _r(a["extended"]["p"]), "event_risk_p": _r(a["event_risk"]["p"]), "days_to_earnings": s["fundamentals"].get("days_to_earnings"),
+                "plan": {k: (s.get("plan") or {}).get(k) for k in ("stop_pct", "target_pct", "reward_to_risk")},
+                "intraday": {"rel_volume": s["rel_volume"] if s["rel_volume"] is not None else "unavailable", "atr_pct": _r(s["technicals"].get("atr_pct")),
+                             "prev_high": _r(s["technicals"].get("prev_high")), "prev_low": _r(s["technicals"].get("prev_low")),
+                             "pivot": _r((s["technicals"].get("pivots") or {}).get("p")), "last": _r(s["last_price"]), "gap_pct": s["chg_pct"],
+                             "prev_day_range_pct": _r(s["technicals"].get("prev_range_pct")), "volume_vs_avg_yesterday": (s.get("price_action") or {}).get("volume_vs_avg"),
+                             "session_state": mstate},
+                "checklist": s.get("checklist") or {"passed": None, "total": None, "failed": ["no lean"]},
+                "smart_money": {"conviction": _r((sma.get("conviction") or {}).get("score"), 1), "who": (sma.get("who") or {}).get("choice"),
+                                "insider_buy_value_90d": smi.get("buy_value_90d"), "insider_buyers": smi.get("distinct_buyers_90d"),
+                                "insider_sell_value_90d": smi.get("sell_value_90d"), "institutions_top10_change": _r((sm.get("institutions") or {}).get("top10_avg_change"), 3),
+                                "short_change_pct": (sm.get("short") or {}).get("change_pct"), "congress_buys": sum(1 for c in sm.get("congress", []) if c.get("type") == "buy"),
+                                "options": {"read": ((s.get("options") or {}).get("ai") or {}).get("read", {}).get("choice"), "intensity": _r(((s.get("options") or {}).get("ai") or {}).get("intensity", {}).get("score"), 1),
+                                            "put_call_volume": (s.get("options") or {}).get("pc_volume"), "call_share_of_notional": (s.get("options") or {}).get("call_share")}}}
+    stance_stocks = [s for s in stocks if s.get("ai")]
+    stance_ans = await judge.run_many([_stance_state(s) for s in stance_stocks], J.STANCE_QUESTIONS)
+    for s, ans in zip(stance_stocks, stance_ans):
+        if ans:
+            s["ai"]["stance"] = ans["stance"]
+            s["ai"]["main_reason"] = ans["main_reason"]
+            s["ai"]["intraday"] = ans["intraday"]
+    for s in stocks:
+        oa = ((s.get("options") or {}).get("ai") or {})
+        if oa and oa["intensity"]["score"] >= J.OPTIONS_INTENSITY_FLAG and "heavy_options" not in s["tags"]:
+            s["tags"].append("heavy_options")
+
+
+    return _clean({
+        "build_id": uuid.uuid4().hex[:12],
+        "generated_at": datetime.now(tz=config.ET).isoformat(),
+        "session_date": session.isoformat(),
+        "session_label": session.strftime("%A, %B %d, %Y"),
+        "market_state": mstate,
+        "ai_enabled": use_ai and judge.calls > 0,
+        "ai_stats": {"calls": judge.calls, "failures": judge.failures, "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens},
+        "regime": regime,
+        "macro": macro,
+        "indices": indices,
+        "rates": {**rates, "live": live_yields},
+        "flows": {"gauges": gauges, "breadth": breadth, "sectors": sectors},
+        "horizons": horizons_block,
+        "theme": theme_block,
+        "options": {"cboe": cboe, "rows": opt_rows, "ai": opt_market, "scanned": opt_market_state["scanned"],
+                    "heavy": sorted([{**u, "ticker": o["ticker"]} for o in opt_rows for u in o.get("unusual", [])], key=lambda u: -u["notional"])[:20]},
+        "smart_money": {"rows": [smart[t] for t in sm_keys], "congress_top": congress.get("top_buys", []), "congress_status": congress.get("status", "unavailable"),
+                        "congress_as_of": congress.get("as_of")},
+        "headlines": kept[: config.MAX_HEADLINES_SHOWN],
+        "headlines_dropped": len(headlines) - len(kept),
+        "headlines_judged": len(headlines),
+        "stocks": stocks,
+        "stocks_scanned": len(by_atr),
+        "calendar": calendar_kept,
+        "earnings": earnings_kept,
+        "earnings_total": len(earnings),
+        "watchlist": watch,
+        "elapsed_s": round(time.time() - t0, 1),
+    })
+
+
+def _clean(obj: Any) -> Any:
+    """Strict-JSON safe: NaN/inf -> None, numpy scalars -> Python, tuples -> lists."""
+    import math
+    if isinstance(obj, dict):
+        return {str(k): _clean(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean(v) for v in obj]
+    if isinstance(obj, bool) or obj is None or isinstance(obj, (str, int)):
+        return obj
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if hasattr(obj, "item"):
+        try:
+            return _clean(obj.item())
+        except Exception:  # noqa: BLE001
+            return str(obj)
+    return str(obj)
