@@ -567,3 +567,66 @@ tr.hz-chart-row td { background: var(--surface-2); }
 .shell > .hud, .shell > .side { height: 100%; min-height: 0; }
 @media (max-width: 900px) { .shell { grid-template-rows: auto minmax(0, 1fr); } .shell > .hud { height: auto; } html, body { overflow: auto; } }
 [hidden] { display: none !important; }
+
+/* ---- sign-in and onboarding: ethereal-glass treatment (Plus Jakarta Sans, double-bezel cards, pill CTAs) ---- */
+.gate { --g-bg: #050810; --g-core: #0B0F17; --g-text: #E6EAF2; --g-dim: #A3ADBF; --g-mute: #6B7280; --g-emerald: #10B981; --g-blue: #3B82F6; --g-amber: #F59E0B; --g-hair: rgba(255,255,255,.08);
+  font-family: "Plus Jakarta Sans", var(--sans); color: var(--g-text); padding: 40px 24px; place-items: center;
+  background: radial-gradient(760px 460px at 10% -10%, rgba(16,185,129,.22), transparent 60%), radial-gradient(680px 440px at 105% 110%, rgba(59,130,246,.20), transparent 60%), radial-gradient(500px 300px at 60% 40%, rgba(139,92,246,.08), transparent 60%), var(--g-bg); }
+.gate::after { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .035; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.g-shell { width: min(540px, 100%); padding: 6px; border-radius: 2rem; background: rgba(255,255,255,.04); border: 1px solid var(--g-hair); backdrop-filter: blur(24px); position: relative; }
+.g-shell.wide { width: min(720px, 100%); }
+.g-core { border-radius: calc(2rem - 6px); background: var(--g-core); padding: 36px 36px 30px; box-shadow: inset 0 1px 1px rgba(255,255,255,.12), 0 40px 120px rgba(0,0,0,.6); display: grid; gap: 16px; }
+.reveal { animation: gate-in .9s cubic-bezier(.32,.72,0,1) both; }
+@keyframes gate-in { from { opacity: 0; transform: translateY(28px); filter: blur(8px); } to { opacity: 1; transform: none; filter: blur(0); } }
+.gate .gate-brand { font-family: inherit; font-weight: 600; letter-spacing: .12em; font-size: 11px; color: var(--g-dim); }
+.gate .gate-brand b { color: var(--g-text); }
+.gate .who { justify-self: end; margin-top: -30px; font-size: 12px; color: var(--g-mute); font-variant-numeric: tabular-nums; }
+.eyebrow { display: inline-block; width: max-content; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; font-weight: 600; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--g-hair); color: var(--g-dim); background: rgba(255,255,255,.03); }
+.eyebrow.warn { color: var(--g-amber); border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.08); }
+.gate h1 { font-family: inherit; font-size: 30px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; margin: 0; }
+.gate h2 { font-family: inherit; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 0; color: var(--g-text); }
+.gate p { font-size: 14px; line-height: 1.6; color: var(--g-dim); }
+.gate .fine { font-size: 12px; color: var(--g-mute); }
+.gate-form { grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 10px; }
+.field { padding: 4px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px solid var(--g-hair); transition: border-color .5s cubic-bezier(.32,.72,0,1), box-shadow .5s cubic-bezier(.32,.72,0,1); }
+.field:focus-within { border-color: rgba(16,185,129,.6); box-shadow: 0 0 0 4px rgba(16,185,129,.14); }
+.gate .field input { width: 100%; border: 0; outline: none; background: #0F141E; color: var(--g-text); font: inherit; font-size: 14px; padding: 11px 16px; border-radius: 999px; box-shadow: inset 0 1px 1px rgba(255,255,255,.06); }
+.gate .field input.pick { font-family: var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.gate .field input::placeholder { color: var(--g-mute); text-transform: none; letter-spacing: 0; }
+.pill-btn { display: inline-flex; align-items: center; gap: 12px; padding: 6px 6px 6px 20px; border-radius: 999px; border: 0; cursor: pointer; font: inherit; font-weight: 700; font-size: 13.5px; color: #050810;
+  background: linear-gradient(90deg, var(--g-emerald), var(--g-blue)); box-shadow: 0 10px 30px rgba(16,185,129,.22); transition: transform .5s cubic-bezier(.32,.72,0,1), box-shadow .5s cubic-bezier(.32,.72,0,1), opacity .4s; white-space: nowrap; }
+.pill-btn i { width: 32px; height: 32px; border-radius: 50%; background: rgba(5,8,16,.22); display: inline-grid; place-items: center; font-style: normal; font-size: 14px; transition: transform .5s cubic-bezier(.32,.72,0,1); }
+.pill-btn:hover { transform: translateY(-1px); box-shadow: 0 14px 36px rgba(16,185,129,.3); } .pill-btn:hover i { transform: translate(2px, -1px) scale(1.06); }
+.pill-btn:active { transform: scale(.98); } .pill-btn:disabled { opacity: .4; cursor: default; transform: none; box-shadow: none; }
+.gate .disc { border: 1px solid rgba(245,158,11,.35); background: linear-gradient(180deg, rgba(245,158,11,.10), rgba(245,158,11,.04)); border-radius: 1.25rem; padding: 18px 20px; display: grid; gap: 10px; }
+.gate .disc h2 { color: #FBBF24; }
+.gate .ck { color: var(--g-text); font-size: 13.5px; align-items: center; gap: 12px; }
+.gate .ck input { width: 18px; height: 18px; accent-color: var(--g-emerald); margin: 0; flex: none; }
+.picks-block { display: grid; gap: 12px; }
+.picks-kind { gap: 8px; }
+.kind { font: inherit; font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--g-hair); background: rgba(255,255,255,.03); color: var(--g-dim); cursor: pointer; transition: all .5s cubic-bezier(.32,.72,0,1); }
+.kind:hover { color: var(--g-text); border-color: rgba(255,255,255,.2); }
+.kind.active { color: #050810; background: var(--g-text); border-color: var(--g-text); }
+.picks { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+.gate-status { color: var(--g-dim); } .gate-status b { color: var(--g-text); } .gate-status .devlink { color: var(--g-emerald); border-bottom-color: var(--g-emerald); }
+.gate-actions { gap: 14px; }
+.btn.logout { border-color: rgba(255,90,110,.45); color: var(--down); } .btn.logout:hover { background: rgba(255,90,110,.1); }
+/* menu: hairline separators and sprung transitions instead of flat gray borders */
+.side { border-right-color: rgba(255,255,255,.06); } .side-brand, .side-foot { border-color: rgba(255,255,255,.06); }
+.side-item, .side-sub button, .nav-ico { transition: background .45s cubic-bezier(.32,.72,0,1), border-color .45s cubic-bezier(.32,.72,0,1), color .3s, box-shadow .45s cubic-bezier(.32,.72,0,1); }
+.side-item:active { transform: scale(.985); }
+@media (max-width: 900px) { .gate { padding: 20px 16px; } .g-core { padding: 26px 22px; } .gate h1 { font-size: 24px; } .gate-form { grid-template-columns: 1fr; } .gate .who { justify-self: start; margin-top: 0; } }
+
+/* ---- Webex Market Update brand: gold neon fox on black ---- */
+.side-brand .logo, .gate-brand .logo { border-radius: 50%; filter: drop-shadow(0 0 8px rgba(245,197,66,.45)); }
+.brand-text { display: inline-grid; line-height: 1.05; }
+.brand-text small { font-size: 9px; letter-spacing: .28em; color: #F5C542; font-weight: 700; }
+.brand-text b { background: none; color: var(--text); -webkit-text-fill-color: initial; font-size: 12px; letter-spacing: .06em; }
+.gate .gate-brand span { display: inline-grid; line-height: 1.05; } .gate .gate-brand small { font-size: 9px; letter-spacing: .28em; color: #F5C542; }
+.gate { --g-emerald: #F5C542; --g-blue: #B8860B; background: radial-gradient(760px 460px at 10% -10%, rgba(245,197,66,.16), transparent 60%), radial-gradient(680px 440px at 105% 110%, rgba(184,134,11,.18), transparent 60%), #050505; }
+.pill-btn { background: linear-gradient(90deg, #FFE38A, #F5C542 55%, #B8860B); box-shadow: 0 10px 30px rgba(245,197,66,.22); color: #050505; }
+.pill-btn:hover { box-shadow: 0 14px 36px rgba(245,197,66,.32); }
+.field:focus-within { border-color: rgba(245,197,66,.6); box-shadow: 0 0 0 4px rgba(245,197,66,.14); }
+.gate .ck input { accent-color: #F5C542; } .gate-status .devlink { color: #F5C542; border-bottom-color: #F5C542; }
+.kind.active { background: #F5C542; border-color: #F5C542; }
+.shell.collapsed .side-brand .logo { width: 34px; height: 34px; }

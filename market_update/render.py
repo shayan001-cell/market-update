@@ -13,6 +13,7 @@ def render_html(report: dict[str, Any]) -> str:
     css = (config.STATIC_DIR / "styles.css").read_text()
     js = (config.STATIC_DIR / "app.js").read_text()
     data = json.dumps(report, default=str).replace("</", "<\\/")
+    html = html.replace("__PUBLIC_URL__", config.PUBLIC_URL)
     html = html.replace('<link rel="stylesheet" href="/static/styles.css">', f"<style>\n{css}\n</style>")
     symbols = json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")).replace("</", "<\\/")
     html = html.replace('<script src="/static/app.js"></script>',

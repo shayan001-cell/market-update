@@ -133,9 +133,10 @@ async def _startup() -> None:
 
 
 @app.get("/")
-async def index() -> HTMLResponse:
+async def index(request: Request) -> HTMLResponse:
     """Serve index.html with asset URLs versioned by file mtime, so a deploy never fights a browser cache."""
     html = (config.STATIC_DIR / "index.html").read_text()
+    html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request))
     for name in ("app.js", "styles.css"):
         v = int((config.STATIC_DIR / name).stat().st_mtime)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
@@ -271,7 +272,8 @@ USERS_PATH = DATA_DIR / "users.json"
 TOKENS_PATH = DATA_DIR / "auth_tokens.json"
 SESSION_COOKIE = "mu_session"
 SESSION_DAYS = 30
-LINK_MINUTES = 20
+LINK_MINUTES = 57
+EXPIRED_KEEP_S = 24 * 3600      # remember expired tokens so an old link can trigger a fresh email
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -356,14 +358,11 @@ def _send_link(email: str, link: str) -> bool:
     return True
 
 
-@app.post("/api/auth/request")
-async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
-    email = str(payload.get("email", "")).strip().lower()
-    if not _EMAIL_RE.match(email) or len(email) > 120:
-        raise HTTPException(status_code=400, detail="enter a valid email address")
+async def _issue_link(request: Request, email: str) -> dict[str, Any]:
+    """Create a single-use token for `email`, email the link (or hand it back locally), rate-limited to one a minute."""
     tokens = _load(TOKENS_PATH)
     now = time.time()
-    tokens = {t: v for t, v in tokens.items() if v.get("exp", 0) > now}
+    tokens = {t: v for t, v in tokens.items() if v.get("exp", 0) > now - EXPIRED_KEEP_S}
     if any(v["email"] == email and now - v.get("at", 0) < 60 for v in tokens.values()):
         raise HTTPException(status_code=429, detail="a link was sent less than a minute ago; check your inbox")
     token = secrets.token_urlsafe(32)
@@ -375,21 +374,57 @@ async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) ->
         sent = await asyncio.to_thread(_send_link, email, link)
     except Exception as e:  # noqa: BLE001
         log.warning("email delivery failed for %s: %s", email, e)
-    out: dict[str, Any] = {"status": "sent" if sent else "not_sent", "email": email, "expires_in_s": LINK_MINUTES * 60}
+    out: dict[str, Any] = {"status": "sent" if sent else "not_sent", "email": email, "expires_in_s": LINK_MINUTES * 60, "expires_in_min": LINK_MINUTES}
     if not sent:
         log.info("SIGN-IN LINK for %s: %s", email, link)
         if os.environ.get("MU_DEV_LINKS", "1") not in ("0", "false", "no"):
             out["dev_link"] = link          # no mail server configured: hand the link to the page (local use)
-    return JSONResponse(out)
+    return out
+
+
+@app.post("/api/auth/request")
+async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+    email = str(payload.get("email", "")).strip().lower()
+    if not _EMAIL_RE.match(email) or len(email) > 120:
+        raise HTTPException(status_code=400, detail="enter a valid email address")
+    return JSONResponse(await _issue_link(request, email))
+
+
+_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Update · sign-in link</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>html,body{{margin:0;min-height:100dvh;background:#050810;color:#E6EAF2;font:15px/1.55 "Plus Jakarta Sans",system-ui,sans-serif}}
+body{{display:grid;place-items:center;padding:24px;background:radial-gradient(700px 420px at 12% -8%,rgba(16,185,129,.22),transparent 60%),radial-gradient(640px 400px at 100% 110%,rgba(59,130,246,.2),transparent 60%),#050810}}
+.shell{{width:min(520px,100%);padding:6px;border-radius:2rem;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}}
+.core{{border-radius:calc(2rem - 6px);background:#0B0F17;padding:32px;box-shadow:inset 0 1px 1px rgba(255,255,255,.12);display:grid;gap:14px}}
+.eyebrow{{display:inline-block;width:max-content;font-size:10px;letter-spacing:.2em;text-transform:uppercase;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);color:#9CA3AF}}
+h1{{margin:0;font-size:24px;font-weight:800;letter-spacing:-.02em}} p{{margin:0;color:#A3ADBF}}
+a.pill{{display:inline-flex;align-items:center;gap:10px;width:max-content;padding:10px 10px 10px 18px;border-radius:999px;background:linear-gradient(90deg,#10B981,#3B82F6);color:#050810;font-weight:700;text-decoration:none;transition:transform .5s cubic-bezier(.32,.72,0,1)}}
+a.pill:hover{{transform:translateY(-1px)}} a.pill i{{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.18);display:inline-grid;place-items:center;font-style:normal}}
+.muted{{color:#6B7280;font-size:12.5px}}</style>
+<div class="shell"><div class="core"><span class="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{body}</p>{action}<p class="muted">{foot}</p></div></div>"""
 
 
 @app.get("/auth/verify")
-async def auth_verify(token: str = "") -> Response:
+async def auth_verify(request: Request, token: str = "") -> Response:
     tokens = _load(TOKENS_PATH)
     rec = tokens.pop(token, None)
     _save(TOKENS_PATH, tokens)
-    if not rec or rec.get("exp", 0) < time.time():
-        return HTMLResponse("<p style='font:15px system-ui;padding:40px'>This sign-in link is invalid or has expired. <a href='/'>Request a new one</a>.</p>", status_code=400)
+    if rec and rec.get("exp", 0) < time.time():
+        # Expired: send a fresh link to the same address on the spot, then say so.
+        email = rec["email"]
+        try:
+            issued = await _issue_link(request, email)
+            action = f'<a class="pill" href="{issued["dev_link"]}">Open the new link <i>↗</i></a>' if issued.get("dev_link") else ""
+            body = (f"Sign-in links are valid for {LINK_MINUTES} minutes and this one has run out. We have just emailed a fresh link to <b>{email}</b>; open it and you will land straight on your dashboard."
+                    if issued["status"] == "sent" else f"Sign-in links are valid for {LINK_MINUTES} minutes and this one has run out. No mail server is configured on this machine, so a fresh link for <b>{email}</b> is below.")
+        except HTTPException:
+            action = ""
+            body = f"This link ran out after {LINK_MINUTES} minutes. A fresh one was already sent to <b>{email}</b> less than a minute ago; open that one."
+        return HTMLResponse(_PAGE.format(eyebrow="Link expired", title="A fresh link is on its way", body=body, action=action,
+                                         foot="If you did not request this, you can ignore the email."), status_code=410)
+    if not rec:
+        return HTMLResponse(_PAGE.format(eyebrow="Link not valid", title="This link was already used", body="Each sign-in link works once. Request a new one from the sign-in page and open the latest email.",
+                                         action='<a class="pill" href="/">Go to sign-in <i>↗</i></a>', foot=""), status_code=400)
     email = rec["email"]
     users = _load(USERS_PATH)
     users.setdefault(email, {"created": datetime.now(tz=config.ET).isoformat(), "accepted_disclaimer_at": None, "kind": None, "tickers": []})
@@ -406,8 +441,12 @@ async def api_me(request: Request) -> JSONResponse:
     if not email:
         return JSONResponse({"status": "anonymous"}, status_code=401, headers={"Cache-Control": "no-store"})
     profile = _load(USERS_PATH).get(email) or {}
-    return JSONResponse({"status": "ok", "email": email, "profile": {k: profile.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}},
+    resp = JSONResponse({"status": "ok", "email": email, "profile": {k: profile.get(k) for k in ("accepted_disclaimer_at", "kind", "tickers", "created")}},
                         headers={"Cache-Control": "no-store"})
+    # Sliding session: every visit renews the cookie, so the login stays active until the user signs out
+    # or stays away for SESSION_DAYS.
+    resp.set_cookie(SESSION_COOKIE, _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}"), max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
+    return resp
 
 
 @app.post("/api/profile")

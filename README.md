@@ -1,4 +1,4 @@
-# Market Update
+# Webex Market Update
 
 A live market dashboard for day and swing traders, written so that someone with a few
 years of market knowledge can read it without a glossary. Code fetches the data;
@@ -148,9 +148,13 @@ fewer "Not yet". Every line shows why it passed or failed.
 ## Sign-in, disclaimer and picks
 
 The page opens on a sign-in card. In server mode the flow is passwordless: enter an email,
-`POST /api/auth/request` stores a one-time token (20 minutes, single use) and emails a
+`POST /api/auth/request` stores a one-time token (57 minutes, single use) and emails a
 link; opening `/auth/verify?token=…` sets a signed, HttpOnly session cookie (30 days,
-HMAC with `MU_SECRET`, generated into the data directory if unset). Email goes out over
+HMAC with `MU_SECRET`, generated into the data directory if unset). The cookie is renewed
+on every visit, so the session stays active until the user presses SIGN OUT (top bar or
+menu footer) or stays away for 30 days. Opening a link after its 57 minutes shows an
+"expired" page and automatically emails a fresh link to the same address (at most one a
+minute); a link that was already used says so and points back to sign-in. Email goes out over
 SMTP when `MU_SMTP_HOST`, `MU_SMTP_PORT`, `MU_SMTP_USER`, `MU_SMTP_PASS` and `MU_SMTP_FROM`
 are set; without a mail server the link is written to the server log and, unless
 `MU_DEV_LINKS=0`, handed back to the page so local use still works. `MU_PUBLIC_URL`
@@ -176,6 +180,14 @@ support and resistance, rates, money flows). Keys 1–6 switch views; the hash k
 current one. The slim top bar holds the ADD TICKER search, the market state and the
 refresh button. Dense tables scroll inside their own
 compartment. Below 900px the shell falls back to a single scrolling column.
+
+## Brand and sharing
+
+The mark is a gold neon fox in an open ring on black (`static/logo.svg`, with PNG
+favicons and a 1200×630 share card `static/og.png`). The page title is "Webex Market
+Update"; Open Graph and Twitter tags give bookmarks and shared links the title, a
+description and the card. The share image URL comes from `MU_PUBLIC_URL` (default: the
+GitHub Pages address) in exports and from the request host on the server.
 
 ## Design
 

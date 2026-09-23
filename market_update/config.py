@@ -17,7 +17,9 @@ OUTPUT_DIR = Path(os.environ.get("MU_DATA_DIR", PROJECT_ROOT / "output"))
 CACHE_DIR = Path(os.environ.get("MU_CACHE_DIR", OUTPUT_DIR / ".cache"))
 STATIC_DIR = PROJECT_ROOT / "market_update" / "static"
 WATCHLIST_FILE = Path(os.environ.get("MU_WATCHLIST", PROJECT_ROOT / "watchlist.txt"))
-WATCHLIST_STORE = OUTPUT_DIR / "watchlist_dynamic.json"   # tickers added from the page (server mode)
+WATCHLIST_STORE = OUTPUT_DIR / "watchlist_dynamic.json"
+SITE_NAME = "Webex Market Update"
+PUBLIC_URL = os.environ.get("MU_PUBLIC_URL", "https://shayan001-cell.github.io/market-update").rstrip("/")   # used in share links and sign-in emails   # tickers added from the page (server mode)
 
 # ---------------------------------------------------------------------------
 # Macro tape (yahoo symbol, display label, kind)

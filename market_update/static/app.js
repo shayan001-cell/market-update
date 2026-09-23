@@ -1087,38 +1087,42 @@
   }
   const gateNeeded = () => !user || !(user.profile && user.profile.accepted_disclaimer_at);
   const CRYPTO_PICKS = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "DOT-USD", "LTC-USD", "TRX-USD"];
+  const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
+  const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
   function loginHtml() {
-    return `<div class="gate-card">
-      <div class="gate-brand">${$(".side-brand .logo") ? $(".side-brand .logo").outerHTML : ""}<span>MARKET <b>UPDATE</b></span></div>
-      <h1>Sign in</h1>
-      <p>${STATIC_MODE ? "Enter your email to open your personal dashboard. This public copy has no mail server, so nothing is sent: your email and picks stay in this browser only. The hosted server version emails a one-time sign-in link."
-        : "Enter your email and we will send a one-time sign-in link. No password to remember."}</p>
-      <form id="login-form" class="gate-form"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus><button class="btn big" type="submit">${STATIC_MODE ? "Continue" : "Send sign-in link"}</button></form>
+    return `<div class="g-shell reveal"><div class="g-core">
+      ${gateBrand()}
+      <span class="eyebrow">Passwordless access</span>
+      <h1>Sign in to your desk</h1>
+      <p>${STATIC_MODE ? "Enter your email to open your personal dashboard. This public copy has no mail server, so nothing is sent: your email and picks stay in this browser only. The hosted server emails a one-time link."
+        : "Enter your email and we will send a one-time link. It works for 57 minutes and signs you in on the device you open it on. Your session then stays active until you sign out."}</p>
+      <form id="login-form" class="gate-form"><div class="field"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus></div>${pillBtn(STATIC_MODE ? "Continue" : "Email me a link", 'type="submit"')}</form>
       <div id="login-status" class="gate-status"></div>
-      <p class="meta2">Market data, model reads and scans on this site are information, not advice. You will be asked to confirm this after signing in.</p>
-    </div>`;
+      <p class="fine">Market data, model reads and scans here are information, not advice. You will confirm this once after signing in.</p>
+    </div></div>`;
   }
   function onboardingHtml() {
     const kind = (user.profile && user.profile.kind) || "stocks";
     const have = (user.profile && user.profile.tickers) || [];
-    return `<div class="gate-card wide">
-      <div class="gate-brand">${$(".side-brand .logo") ? $(".side-brand .logo").outerHTML : ""}<span>MARKET <b>UPDATE</b></span><span class="muted" style="margin-left:auto">${esc(user.email)}</span></div>
-      <div class="disc"><h2>This is not financial advice.</h2><p>Market Update shows market data, arithmetic over that data, and model reads produced by typed questions. None of it is a recommendation to buy or sell anything. Markets can move against you fast; low-float names can halt; you alone are responsible for any trade you make. If you need advice, talk to a licensed adviser.</p>
-        <label class="ck"><input type="checkbox" id="disc-ok"> I understand that nothing on this site is financial advice and that I trade at my own risk.</label></div>
-      <div class="picks-block"><h1>Build your dashboard</h1><p>Tell us what you follow. We will analyse each name and put it on your home page.</p>
-        <div class="picks-kind"><button class="tab ${kind === "stocks" ? "active" : ""}" data-kind="stocks">Top 5 stocks</button><button class="tab ${kind === "crypto" ? "active" : ""}" data-kind="crypto">Top 2 cryptocurrencies</button></div>
+    return `<div class="g-shell wide reveal"><div class="g-core">
+      ${gateBrand()}<span class="who">${esc(user.email)}</span>
+      <div class="disc"><span class="eyebrow warn">Read before you continue</span><h2>This is not financial advice.</h2><p>Market Update shows market data, arithmetic over that data, and model reads produced by typed questions. None of it is a recommendation to buy or sell anything. Markets move against you fast, low-float names halt, and you alone are responsible for any trade you make. If you need advice, talk to a licensed adviser.</p>
+        <label class="ck"><input type="checkbox" id="disc-ok"><span>I understand that nothing on this site is financial advice and that I trade at my own risk.</span></label></div>
+      <div class="picks-block"><span class="eyebrow">Personalise</span><h1>What do you follow?</h1><p>Give us your top five stocks or your top two cryptocurrencies. Each one is analysed on the spot and becomes your home page.</p>
+        <div class="picks-kind"><button class="kind ${kind === "stocks" ? "active" : ""}" data-kind="stocks">Top 5 stocks</button><button class="kind ${kind === "crypto" ? "active" : ""}" data-kind="crypto">Top 2 cryptocurrencies</button></div>
         <div class="picks" id="picks">${picksInputs(kind, have)}</div>
         <datalist id="sym-list"></datalist>
-        <div class="gate-actions"><button class="btn big" id="picks-go" disabled>Build my dashboard</button><span id="picks-status" class="gate-status"></span></div></div>
-    </div>`;
+        <div class="gate-actions">${pillBtn("Build my dashboard", 'id="picks-go" disabled')}<span id="picks-status" class="gate-status"></span></div></div>
+    </div></div>`;
   }
   function picksInputs(kind, have) {
     const n = kind === "crypto" ? 2 : 5;
     const ph = kind === "crypto" ? ["BTC-USD", "ETH-USD"] : ["NVDA", "AAPL", "TSLA", "SPY", "AMD"];
-    return Array.from({ length: n }, (_, i) => `<input class="pick" list="sym-list" placeholder="${ph[i]}" value="${esc((have[i] || "").toUpperCase())}" data-kind="${kind}" maxlength="12" autocomplete="off">`).join("");
+    return Array.from({ length: n }, (_, i) => `<div class="field"><input class="pick" list="sym-list" placeholder="${ph[i]}" value="${esc((have[i] || "").toUpperCase())}" data-kind="${kind}" maxlength="12" autocomplete="off"></div>`).join("");
   }
   function renderGate() {
     const g = $("#gate"); if (!g) return;
+    const lb = $("#logout-btn"); if (lb) lb.hidden = !user;
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
     g.hidden = false; g.innerHTML = user ? onboardingHtml() : loginHtml();
     wireGate();
@@ -1134,14 +1138,14 @@
         const res = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
         if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not send the link."; return; }
-        st.innerHTML = j.status === "sent" ? `<b>Check your email.</b> We sent a sign-in link to ${esc(email)}. It is valid for 20 minutes; open it on this device.`
+        st.innerHTML = j.status === "sent" ? `<b>Check your email.</b> We sent a sign-in link to ${esc(email)}. It works for ${j.expires_in_min || 57} minutes; open it on this device and you will land on your dashboard. If it runs out, opening it sends you a fresh one automatically.`
           : `<b>No mail server is configured on this machine</b>, so the link could not be emailed.${j.dev_link ? ` For local use, here it is: <a class="devlink" href="${esc(j.dev_link)}">Open my sign-in link</a>` : " Ask the site owner to set MU_SMTP_* on the server."}`;
       } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
     });
     const go = $("#picks-go"); if (!go) return;
     const state = () => { const ok = $("#disc-ok").checked; const vals = [...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean); go.disabled = !(ok && vals.length); return vals; };
     $("#disc-ok").addEventListener("change", state);
-    document.querySelectorAll("[data-kind]").forEach((b) => b.tagName === "BUTTON" && b.addEventListener("click", () => { document.querySelectorAll(".picks-kind .tab").forEach((x) => x.classList.toggle("active", x === b)); $("#picks").innerHTML = picksInputs(b.getAttribute("data-kind"), []); wirePicks(); state(); }));
+    document.querySelectorAll("[data-kind]").forEach((b) => b.tagName === "BUTTON" && b.addEventListener("click", () => { document.querySelectorAll(".picks-kind .kind").forEach((x) => x.classList.toggle("active", x === b)); $("#picks").innerHTML = picksInputs(b.getAttribute("data-kind"), []); wirePicks(); state(); }));
     function wirePicks() {
       document.querySelectorAll("#picks .pick").forEach((inp) => inp.addEventListener("input", () => {
         state();
@@ -1154,7 +1158,7 @@
     wirePicks();
     go.addEventListener("click", async () => {
       const vals = state(); if (!vals.length) return;
-      const kind = ($(".picks-kind .tab.active") || {}).getAttribute ? $(".picks-kind .tab.active").getAttribute("data-kind") : "stocks";
+      const kind = $(".picks-kind .kind.active") ? $(".picks-kind .kind.active").getAttribute("data-kind") : "stocks";
       const st = $("#picks-status"); st.className = "gate-status"; st.textContent = "Saving…";
       const profile = { accepted_disclaimer_at: new Date().toISOString(), kind, tickers: vals.slice(0, kind === "crypto" ? 2 : 5) };
       if (STATIC_MODE) { user.profile = profile; try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
@@ -1356,6 +1360,7 @@
     initTheme();
     addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; const gt = $("#gate"); if (gt && !gt.hidden) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
     wireSearch(); initSide();
+    const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
     addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
     $("#refresh-btn").addEventListener("click", onRefresh);

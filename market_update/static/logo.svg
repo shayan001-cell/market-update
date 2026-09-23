@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Webex Market Update">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE38A"/><stop offset=".55" stop-color="#F5C542"/><stop offset="1" stop-color="#B8860B"/></linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.4"/></filter>
+  </defs>
+  <circle cx="50" cy="50" r="49" fill="#050505"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#F5C542" opacity=".5" filter="url(#glow)">
+      <path d="M31 12 A40 40 0 1 0 69 12" stroke-width="5"/>
+      <path d="M26 58 L19 6 L37 46 L50 53 L63 46 L81 6 L74 58" stroke-width="7"/>
+      <path d="M27 64 Q33 76 43 80 L50 92 L57 80 Q67 76 73 64" stroke-width="5"/>
+      <path d="M36 69 L45 76 L50 82 L55 76 L64 69" stroke-width="5"/>
+    </g>
+    <g stroke="url(#gold)">
+      <path d="M31 12 A40 40 0 1 0 69 12" stroke-width="3"/>
+      <path d="M26 58 L19 6 L37 46 L50 53 L63 46 L81 6 L74 58" stroke-width="5.5"/>
+      <path d="M27 64 Q33 76 43 80 L50 92 L57 80 Q67 76 73 64" stroke-width="3.6"/>
+      <path d="M36 69 L45 76 L50 82 L55 76 L64 69" stroke-width="3.6"/>
+    </g>
+  </g>
+</svg>

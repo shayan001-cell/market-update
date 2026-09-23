@@ -3,15 +3,33 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Market Update</title>
-<meta name="description" content="Tactical market terminal for day and swing traders: mood, watchlist plans, theme screen, smart money, macro and technicals.">
+<title>Webex Market Update</title>
+<meta name="description" content="Webex Market Update: a live market desk for day and swing traders. Verdicts per stock, automatic volume scanner, low-float movers, smart money, options flow and the macro picture, refreshed every hour.">
+<meta name="application-name" content="Webex Market Update">
+<meta name="theme-color" content="#050505">
+<link rel="icon" type="image/svg+xml" href="static/logo.svg">
+<link rel="icon" type="image/png" sizes="512x512" href="static/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="static/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Webex Market Update">
+<meta property="og:title" content="Webex Market Update">
+<meta property="og:description" content="Live market desk for day and swing traders: verdicts per stock, automatic volume scanner, low-float movers, smart money, options flow and macro, refreshed hourly.">
+<meta property="og:url" content="__PUBLIC_URL__/">
+<meta property="og:image" content="__PUBLIC_URL__/static/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Webex Market Update">
+<meta name="twitter:description" content="Live market desk for day and swing traders: verdicts, volume scanner, low float, smart money, options flow, macro.">
+<meta name="twitter:image" content="__PUBLIC_URL__/static/og.png">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css">
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div class="shell" id="shell">
   <aside class="side" id="side">
-    <div class="side-brand"><svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="hexg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B9CFF"/><stop offset="1" stop-color="#3DDC84"/></linearGradient></defs><path d="M20 2.5 35.2 11.2v17.6L20 37.5 4.8 28.8V11.2Z" fill="url(#hexg)"/><path d="M20 6.5 31.7 13.2v13.6L20 33.5 8.3 26.8V13.2Z" fill="#0F1115" opacity=".92"/><path d="M11 25.5 15.5 17l4.5 5.5 4.5-8 4.5 11" fill="none" stroke="url(#hexg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="brand-text">MARKET <b>UPDATE</b></span><button class="side-toggle" id="side-toggle" title="Collapse the menu" aria-label="Collapse the menu">‹</button></div>
+    <div class="side-brand"><img class="logo" src="static/logo.svg" alt="Webex Market Update" width="30" height="30"><span class="brand-text"><small>WEBEX</small> <b>MARKET UPDATE</b></span><button class="side-toggle" id="side-toggle" title="Collapse the menu" aria-label="Collapse the menu">‹</button></div>
     <nav class="side-nav" id="nav" aria-label="Views"></nav>
     <div class="side-foot" id="side-foot"></div>
   </aside>
@@ -24,6 +42,7 @@
       <span class="readout" id="session-line">LOADING</span>
       <span class="readout" id="generated-line"></span>
       <button class="btn" id="refresh-btn" title="Rebuild the report now">REFRESH</button>
+      <button class="btn ghost logout" id="logout-btn" title="Sign out of this browser" hidden>SIGN OUT</button>
       <button class="btn ghost" id="theme-btn" hidden>THEME</button>
     </div>
     </header>

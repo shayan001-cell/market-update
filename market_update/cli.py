@@ -49,6 +49,12 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "report.json").write_text(json.dumps(report, indent=1, default=str))
     (out_dir / "symbols.json").write_text(json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")))
+    import shutil
+    (out_dir / "static").mkdir(exist_ok=True)
+    for name in ("logo.svg", "favicon.png", "apple-touch-icon.png", "og.png"):
+        src = config.STATIC_DIR / name
+        if src.exists() and src.resolve() != (out_dir / "static" / name).resolve():
+            shutil.copy(src, out_dir / "static" / name)
     html_path = out_dir / "index.html"
     html_path.write_text(render_html(report))
 
