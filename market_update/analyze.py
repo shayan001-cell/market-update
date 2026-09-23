@@ -362,6 +362,7 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
     history = fetch.fetch_history(all_symbols, "1y")
     snapshot = fetch.fetch_snapshot(all_symbols, history)
     macro = fetch.fetch_macro_tape()
+    world = fetch.fetch_world_tape()
     rates = fetch.fetch_fred_curve()
     live_yields = fetch.fetch_live_yields()
     calendar = fetch.fetch_calendar(session)
@@ -699,6 +700,7 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         "ai_stats": {"calls": judge.calls, "failures": judge.failures, "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens},
         "regime": regime,
         "macro": macro,
+        "world": world,
         "indices": indices,
         "rates": {**rates, "live": live_yields},
         "flows": {"gauges": gauges, "breadth": breadth, "sectors": sectors},

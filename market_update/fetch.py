@@ -275,6 +275,17 @@ def fetch_quotes(symbols: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def fetch_world_tape() -> list[dict[str, Any]]:
+    """Major world indices: last and change, for the around-the-world strip."""
+    symbols = [x[0] for x in config.WORLD_TAPE]
+    try:
+        quotes = fetch_quotes(symbols)
+    except Exception as e:  # noqa: BLE001
+        log.warning("world tape failed: %s", e)
+        quotes = {}
+    return [{"symbol": sym, "label": label, "region": region, **(quotes.get(sym) or {})} for sym, label, region in config.WORLD_TAPE]
+
+
 def fetch_macro_tape() -> list[dict[str, Any]]:
     symbols = [s for s, _, _ in config.MACRO_TAPE]
     bars = download(symbols, period="5d", interval="15m", prepost=True)

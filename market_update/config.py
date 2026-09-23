@@ -48,6 +48,11 @@ PUBLIC_URL = os.environ.get("MU_PUBLIC_URL", "https://shayan001-cell.github.io/m
 # ---------------------------------------------------------------------------
 # Macro tape (yahoo symbol, display label, kind)
 # ---------------------------------------------------------------------------
+WORLD_TAPE: list[tuple[str, str, str]] = [        # (symbol, label, region) for the "around the world" strip
+    ("^N225", "Nikkei 225", "Japan"), ("^HSI", "Hang Seng", "Hong Kong"), ("000001.SS", "Shanghai", "China"), ("^KS11", "KOSPI", "Korea"),
+    ("^NSEI", "Nifty 50", "India"), ("^AXJO", "ASX 200", "Australia"), ("^FTSE", "FTSE 100", "UK"), ("^GDAXI", "DAX", "Germany"),
+    ("^STOXX50E", "Euro Stoxx 50", "Europe"), ("^GSPTSE", "TSX", "Canada"), ("^BVSP", "Bovespa", "Brazil"), ("^MXX", "IPC", "Mexico"),
+]
 MACRO_TAPE: list[tuple[str, str, str]] = [
     ("ES=F", "S&P 500 fut", "index"),
     ("NQ=F", "Nasdaq 100 fut", "index"),

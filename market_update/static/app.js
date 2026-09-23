@@ -62,6 +62,7 @@
   const ICON_UP = '<svg class="ico" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2.5 10 8H2z"/></svg>';
   const ICON_DOWN = '<svg class="ico" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 9.5 2 4h8z"/></svg>';
   const ICON_FLAT = '<svg class="ico" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5.25" width="8" height="1.5" rx=".75"/></svg>';
+  const qchg = (x) => (x && isNum(x.chg_pct) ? x.chg_pct : x && isNum(x.change_pct) ? x.change_pct : null);
   const arrow = (x) => (!isNum(x) ? "" : x > 0 ? ICON_UP : x < 0 ? ICON_DOWN : ICON_FLAT);
   // Plain-English glossary: hover any underlined term.
   const G = {
@@ -309,7 +310,7 @@
 
   function plainFacts(r) {
     const out = [];
-    const m = (r.macro || []); const find = (re) => m.find((x) => re.test(x.label || "") || re.test(x.symbol || ""));
+    const m = (r.macro || []).map((x) => ({ ...x, chg_pct: qchg(x) })); const find = (re) => m.find((x) => re.test(x.label || "") || re.test(x.symbol || ""));
     const es = find(/S&P/i), vix = find(/VIX/i), tnx = find(/10Y|10-year/i), dxy = find(/Dollar/i), oil = find(/Oil|WTI|Crude/i), gold = find(/Gold/i);
     if (es && isNum(es.chg_pct)) out.push({ k: "S&P futures", v: fpct(es.chg_pct), c: cls(es.chg_pct), t: es.chg_pct >= 0.5 ? "Buyers are pressing before the open; dips are more likely to get bought." : es.chg_pct <= -0.5 ? "Sellers have the upper hand before the open; bounces are more likely to get sold." : "No lead from overnight; the open will set the tone." });
     if (vix && isNum(vix.last)) { const mv = vix.last / 15.9; out.push({ k: "VIX", v: fnum(vix.last, 1), c: vix.last < 15 ? "up" : vix.last < 20 ? "flat" : "down", t: (vix.last < 15 ? "The market is calm: a normal day moves about " : vix.last < 20 ? "Ordinary nerves: a normal day moves about " : vix.last < 30 ? "The market is nervous: expect swings of about " : "Fear is high: swings of about ") + mv.toFixed(1) + "% on the S&P." }); }
@@ -412,6 +413,41 @@
       <div class="wl-head"><div><b>Your watchlist</b><span class="muted"> · ${tickers.length} ${tickers.length === 1 ? "name" : "names"} · ${user ? "saved to your account" : "kept in this browser"}</span></div><span class="muted wl-hint">Type a ticker to add · press × to remove · click a name for its page</span></div>
       <div class="wl-chips">${chips}<div class="wl-add hud-search"><input id="search" type="search" placeholder="Add ticker or company" autocomplete="off" spellcheck="false" aria-label="Add a ticker to your watchlist"><div id="search-results" class="search-results" hidden></div></div></div>
     </div>`;
+  }
+  function secWorld(r) {
+    const W = (r.world || []).filter((x) => isNum(x.last)).map((x) => ({ ...x, chg_pct: qchg(x) }));
+    if (!W.length) return "";
+    const up = W.filter((x) => (x.chg_pct || 0) > 0.2).length, dn = W.filter((x) => (x.chg_pct || 0) < -0.2).length;
+    const asia = W.filter((x) => ["Japan", "Hong Kong", "China", "Korea", "India", "Australia"].includes(x.region)), eu = W.filter((x) => ["UK", "Germany", "Europe"].includes(x.region));
+    const tone = (g) => { const u = g.filter((x) => (x.chg_pct || 0) > 0.2).length, d = g.filter((x) => (x.chg_pct || 0) < -0.2).length; return u > d ? "up" : d > u ? "down" : "mixed"; };
+    const line = `Asia ${tone(asia)}, Europe ${tone(eu)}: ${up > dn + 2 ? "risk appetite abroad is firm; the US open has a tailwind." : dn > up + 2 ? "selling abroad; expect a defensive US open." : "no lead from abroad; the US sets its own tone."}`;
+    return `<section class="world"><h3>Around the world <span class="muted">${esc(line)}</span></h3><div class="world-grid">${W.map((x) => `<div class="wi ${cls(x.chg_pct)}"><span class="wi-r">${esc(x.region)}</span><b>${esc(x.label)}</b><span class="mono">${fnum(x.last, 0)}</span><span class="delta ${cls(x.chg_pct)}">${arrow(x.chg_pct)} ${fpct(x.chg_pct)}</span></div>`).join("")}</div></section>`;
+  }
+  function secThemes(r) {
+    const sec = ((r.flows || {}).sectors || []).filter((x) => isNum(x.chg_1d)).slice().sort((a, b) => b.chg_1d - a.chg_1d);
+    const T_ = r.theme || {}; const groups = (T_.groups || []).filter((g) => isNum(g.avg_ret_1m)).slice().sort((a, b) => b.avg_ret_1m - a.avg_ret_1m);
+    if (!sec.length && !groups.length) return "";
+    const mx = Math.max(0.1, ...sec.map((x) => Math.abs(x.chg_1d)));
+    const bar = (x) => `<div class="tb"><span class="tb-l">${esc(x.label)}</span><span class="tb-bar"><i class="${cls(x.chg_1d)}" style="width:${(Math.abs(x.chg_1d) / mx * 100).toFixed(0)}%"></i></span><span class="mono ${cls(x.chg_1d)}">${fpct(x.chg_1d, 1)}</span><span class="mono muted">${fpct(x.chg_5d, 1)} 5d</span></div>`;
+    const lead = sec[0], lag = sec[sec.length - 1];
+    const line = lead && lag ? `${esc(lead.label)} leads (${fpct(lead.chg_1d, 1)}), ${esc(lag.label)} lags (${fpct(lag.chg_1d, 1)}).` : "";
+    const tg = groups.slice(0, 4).map((g) => `<div class="tg"><b>${TH.group[g.group] || pretty(g.group)}</b><span class="mono ${cls(g.avg_ret_1m)}">${fpct(g.avg_ret_1m, 1)} 1m</span><span class="muted">${Math.round((g.share_in_uptrend || 0) * 100)}% in uptrend</span></div>`).join("");
+    const stage = T_.ai && T_.ai.stage ? `<span class="pill ${{ early: "up", building: "up2", crowded: "flat", broken: "down" }[T_.ai.stage.choice] || "flat"}">${pretty(T_.ai.stage.choice)}</span>` : "";
+    return `<section class="themes"><h3>What is moving <span class="muted">${line}</span></h3>
+      <div class="themes-grid"><div class="tb-list">${sec.map(bar).join("")}</div>
+      <div class="tg-list"><div class="tg-h">${esc(T_.name || "Theme")} ${stage}<span class="muted">${T_.ai && T_.ai.next_group ? "next leg: " + (TH.group[T_.ai.next_group.choice] || pretty(T_.ai.next_group.choice)) : ""}</span></div>${tg}</div></div></section>`;
+  }
+  function secAction(r) {
+    const rows = [];
+    const S = (!STATIC_MODE && liveScan && liveScan.rows) ? liveScan : r.scan;
+    ((S && S.rows) || []).filter((x) => x.qualifies !== false).slice(0, 12).forEach((x) => { const a = x.ai || {}; const rd = a.read ? a.read.choice : null; if (rd && !["breakout_with_volume", "selling_with_volume", "building_toward_breakout", "climax_or_exhaustion"].includes(rd)) return;
+      rows.push({ t: x.ticker, name: x.name, px: x.price, chg: x.chg_pct, vol: isNum(x.rvol_tod) ? x.rvol_tod : ((x.session || {}).rvol_time_of_day), why: rd ? SC.read[rd][0] : `volume build ${(x.score || 0).toFixed(0)}/100 on ${x.lead || x.lead_timeframe}`, cls: rd ? SC.read[rd][1] : (x.direction === "up" ? "up" : x.direction === "down" ? "down" : "flat"), play: a.play ? pretty(a.play.choice) : "", src: "scanner" }); });
+    ((r.low_float || {}).rows || []).filter((x) => isNum(x.float_turnover) && x.float_turnover >= 1).slice(0, 4).forEach((x) => { const a = x.ai || {}; rows.push({ t: x.ticker, name: x.name, px: x.price, chg: x.chg_pct, vol: x.rel_volume, why: `float traded ${x.float_turnover.toFixed(1)}× · ${(x.float / 1e6).toFixed(1)}M float${a.state ? " · " + LF.state[a.state.choice][0] : ""}`, cls: a.state ? LF.state[a.state.choice][1] : "flat", play: a.play ? pretty(a.play.choice) : "", src: "low float" }); });
+    (r.stocks || []).filter((x) => isNum(x.chg_pct) && Math.abs(x.chg_pct) >= 3 && x.ai && x.ai.stance).slice(0, 6).forEach((x) => { const st = x.ai.stance.choice; rows.push({ t: x.ticker, name: x.name, px: x.last_price, chg: x.chg_pct, vol: x.rel_volume, why: `${x.ai.setup ? pretty(x.ai.setup.choice) : "big move"} · ${x.ai.catalyst ? pretty(x.ai.catalyst.choice) : ""}`, cls: ST.cls[st], play: ST.stance[st][0], src: "mover" }); });
+    const seen = new Set(); const uniq = rows.filter((x) => { if (seen.has(x.t)) return false; seen.add(x.t); return true; }).sort((a, b) => Math.abs(b.chg || 0) - Math.abs(a.chg || 0)).slice(0, 12);
+    if (!uniq.length) return `<section class="action"><h3>Where the action is</h3><div class="empty">Nothing is qualifying right now. Quiet tape.</div></section>`;
+    return `<section class="action"><h3>Where the action is <span class="muted">names with a real signal now: volume breaks, float rotations, big moves with a verdict · click to open</span></h3>
+      <table class="tbl act-tbl"><thead><tr><th>Name</th><th>Move</th><th>Volume</th><th>Signal</th><th>Play</th><th></th></tr></thead><tbody>${uniq.map((x) => `<tr class="clickable" data-ticker-page="${esc(x.t)}"><td class="sym"><b>${esc(x.t)}</b><div class="meta2">${esc(x.name || "")} · ${x.src}</div></td><td class="num">${fnum(x.px)}<div class="delta ${cls(x.chg)}">${arrow(x.chg)} ${fpct(x.chg)}</div></td><td class="num"><b class="${isNum(x.vol) && x.vol >= 2 ? "up" : ""}">${isNum(x.vol) ? x.vol.toFixed(1) + "×" : "–"}</b></td><td><span class="pill ${x.cls}">${esc(x.why)}</span></td><td>${esc(x.play)}</td><td>${isWatched(x.t) ? '<span class="muted">on list</span>' : `<button class="btn sm ghost" data-add-ticker="${esc(x.t)}" data-stop>+ Watch</button>`}</td></tr>`).join("")}</tbody></table></section>`;
   }
   function secBoard(r) {
     const tickers = activeList();
@@ -1109,9 +1145,23 @@
     const foot = $("#side-foot");
     if (foot) foot.innerHTML = user ? `<div class="side-user"><span class="st-dot up"></span><b>${esc(user.name || user.email.split("@")[0])}</b>${user.role === "admin" ? ' <span class="tag acc">admin</span>' : ""}</div><div class="side-mail" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links">watchlist saved to your account · <button class="lnk" data-signout>Sign out</button></div>`
       : `<div class="side-links">Watchlist kept in this browser · <button class="lnk" data-signin>${STATIC_MODE ? "Sign in / sign up on the app" : "Sign in or sign up"}</button></div>`;
+    if (foot) foot.insertAdjacentHTML("beforeend", `<a class="lnk invite" href="https://wa.me/?text=${encodeURIComponent(inviteText())}" target="_blank" rel="noopener">Invite friends on WhatsApp</a>`);
     const si = foot && foot.querySelector("[data-signin]"); if (si) si.addEventListener("click", () => { gateOpen = true; renderGate(); });
     const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
     wireNav();
+  }
+  function inviteText() {
+    const link = APP_URL || ((document.querySelector('meta[property="og:url"]') || {}).content || location.origin + "/").replace(/\/$/, "") + "/";
+    return ["WEBEX MARKET UPDATE - free market desk for day and swing traders", "", link, "",
+      "Sign in with your email (one-time link, no password). Then you get:",
+      "- A verdict for every stock you follow: buy, buy the dip, wait, hold, avoid or short, with the reason",
+      "- Day trade, swing and long-term reads side by side on your watchlist",
+      "- A volume scanner that runs every minute on 15m and 30m bars",
+      "- Low-float movers with float, turnover and short interest",
+      "- Who is buying: insiders, institutions, Congress and options flow",
+      "- What today's numbers mean, in plain words: VIX, yields, breadth, the curve",
+      "- Markets around the world and the themes that are moving",
+      "", "Information only, not financial advice. You trade at your own risk."].join("\n");
   }
   function wireNav() {                       // the menu re-renders on its own, so it binds its own handlers (assignment, never duplicates)
     const root = $("#side"); if (!root) return;
@@ -1173,7 +1223,8 @@
       if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
     }
   }
-  const gateNeeded = () => (STATIC_MODE ? true : (!user || !(user.profile && user.profile.accepted_disclaimer_at) || !user.name));
+  const discThisSession = () => { try { return sessionStorage.getItem("mu-disc-s") === "1"; } catch (e) { return false; } };
+  const gateNeeded = () => (STATIC_MODE ? true : (!user || !user.name || !discThisSession()));
   function disclaimerHtml() {
     const needName = !STATIC_MODE && !(user && user.name);
     return `<div class="login-stage disc-stage"><canvas id="login-bg" aria-hidden="true"></canvas><div class="disc-wrap"><div class="g-shell wide disc-card reveal" id="lg-card"><div class="g-core disc-core">
@@ -1188,7 +1239,7 @@
       </div>
       ${needName ? `<div class="field"><input id="name-input" placeholder="Your name (shown in the menu)" maxlength="60" autocomplete="name" value="${esc(user.email.split("@")[0])}"></div>` : ""}
       <label class="ck"><input type="checkbox" id="disc-ok"><span>I have read this. I understand that nothing on Webex Market Update is financial advice and that I trade at my own risk.</span></label>
-      <div class="gate-actions">${pillBtn("I agree, take me to my dashboard", 'id="disc-go" disabled')}<span id="disc-status" class="gate-status"></span></div>
+      <div class="gate-actions">${pillBtn("I agree, take me to my dashboard", 'id="disc-go" disabled')}<button class="lnk decline" data-decline>I do not agree · sign out</button><span id="disc-status" class="gate-status"></span></div>
     </div></div></div><div class="lg-foot">© Webex Market Update · information, not advice</div></div>`;
   }
   function leaveGate(then) {
@@ -1210,7 +1261,7 @@
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
   function loginHero(r) {
-    const tape = ((r && r.macro) || []).slice(0, 8).map((m) => `<span class="lt-item"><b>${esc(m.label || m.symbol)}</b> <span class="mono">${fnum(m.last, m.last < 10 ? 3 : 2)}</span> <span class="delta ${cls(m.chg_pct)}">${fpct(m.chg_pct)}</span></span>`).join("");
+    const tape = ((r && r.macro) || []).slice(0, 8).map((m) => `<span class="lt-item"><b>${esc(m.label || m.symbol)}</b> <span class="mono">${fnum(m.last, m.last < 10 ? 3 : 2)}</span> <span class="delta ${cls(qchg(m))}">${fpct(qchg(m))}</span></span>`).join("");
     return `<div class="lg-hero">
       <div class="lg-mark"><img src="static/logo.svg" alt="" width="120" height="120"><i class="ring"></i><i class="ring r2"></i></div>
       <div class="lg-brand"><small>WEBEX</small><b>MARKET UPDATE</b></div>
@@ -1298,14 +1349,15 @@
     const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) lb.textContent = `SIGN OUT · ${(user.name || user.email.split("@")[0]).toUpperCase().slice(0, 14)}`; }
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
     const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
-    g.hidden = false; g.innerHTML = STATIC_MODE ? html.replace('<div class="g-core">', '<div class="g-core"><button class="g-close" data-gate-close title="Continue as a guest">×</button>') : html;
+    g.hidden = false; g.innerHTML = html;
     wireGate(); startLoginFx();
     document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; if (gateNeeded()) renderGate(); else leaveGate(() => renderGate()); }));
+    const dec = $("[data-decline]"); if (dec) dec.addEventListener("click", () => { try { sessionStorage.removeItem("mu-disc-s"); } catch (e) {} signOut(); });
     const dgo = $("#disc-go"); if (dgo) {
       const ok = $("#disc-ok"); ok.addEventListener("change", () => { dgo.disabled = !ok.checked; });
       dgo.addEventListener("click", async () => {
         const st = $("#disc-status"); st.textContent = "Saving…";
-        try { localStorage.setItem("mu-disc", "1"); } catch (e) {}
+        try { localStorage.setItem("mu-disc", "1"); sessionStorage.setItem("mu-disc-s", "1"); } catch (e) {}
         if (!STATIC_MODE && user) {
           const nm = $("#name-input") ? $("#name-input").value.trim() : "";
           try {
@@ -1383,7 +1435,7 @@
   async function signOut() {
     if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
     else { try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) {} }
-    user = null; lists = null;
+    user = null; lists = null; try { sessionStorage.removeItem("mu-disc-s"); } catch (e) {}
     if (report) { ensureLists(report); renderAll(); }        // fall back to the browser copy of the list
     renderGate();
   }
@@ -1397,7 +1449,7 @@
     $("#generated-line").textContent = `UPD ${r.generated_at.slice(11, 16)} ET · ${r.elapsed_s}S`;
     const app = $("#app");
     renderNav();
-    const tape = $("#tape"); if (tape) { const items = [...(r.indices || []).map((i) => ({ l: i.symbol, v: i.last, c: i.chg_pct })), ...(r.macro || []).map((m) => ({ l: m.label || m.symbol, v: m.last, c: m.chg_pct }))].filter((x) => isNum(x.v));
+    const tape = $("#tape"); if (tape) { const items = [...(r.indices || []).map((i) => ({ l: i.symbol, v: i.last, c: i.chg_pct })), ...(r.macro || []).map((m) => ({ l: m.label || m.symbol, v: m.last, c: qchg(m) })), ...(r.world || []).map((w) => ({ l: w.label, v: w.last, c: qchg(w) }))].filter((x) => isNum(x.v));
       const row = items.map((x) => `<span class="tp"><b>${esc(x.l)}</b><span class="mono">${fnum(x.v, x.v < 10 ? 3 : 2)}</span><span class="delta ${cls(x.c)}">${isNum(x.c) ? fpct(x.c) : "–"}</span></span>`).join("");
       tape.innerHTML = `<div class="tape-track">${row}${row}</div>`; tape.hidden = !items.length; }
     const ttl = $("#hud-title"), sub = $("#hud-sub");
@@ -1414,7 +1466,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secMeaning(r)}${secBoard(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main"><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secMeaning(r)}${secWorld(r)}${secThemes(r)}${secAction(r)}</div>${secToday(r)}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
       case "admin": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one admin-view">${secAdmin()}</div>`;
