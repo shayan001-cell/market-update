@@ -29,6 +29,7 @@
   let nextRefreshAt = 0;
   let tickerSel = (location.hash.match(/[&#]t=([A-Z0-9.\-^=]+)/i) || [])[1] || null;
   let mailStatus = null;
+  const APP_URL = ((document.querySelector('meta[name="mu-app-url"]') || {}).content || "").replace(/__APP_URL__/, "").replace(/\/$/, "");
   const USER_KEY = "mu-user";
   let user = null;                       // { email, profile: { accepted_disclaimer_at, kind, tickers } }
   let newsItems = [], newsSeen = new Set();
@@ -623,6 +624,7 @@
     const cal = (r.calendar || []).slice(0, 4).map((c) => `<li><samp>${esc(c.time_et)}</samp> ${esc(c.title)}</li>`).join("") || "<li class=\"muted\">no relevant events</li>";
     const earn = (r.earnings || []).slice(0, 5).map((e) => `<b>${esc(e.symbol)}</b> <span class="muted">${esc(e.report_time)}</span>`).join(" · ") || '<span class="muted">none</span>';
     return `<aside class="today">
+      ${discPanel()}
       <section class="panel"><h3>Today, ${esc(r.session_date)}</h3><ul class="list">${cal}</ul><div class="meta2" style="margin-top:6px">Earnings: ${earn}</div></section>
       <section class="panel feed-panel"><h3>News feed <span id="feed-stamp" class="muted" style="letter-spacing:0;text-transform:none">${STATIC_MODE ? "from the latest build" : "live · updates every minute"}</span></h3>
         <ul class="feed" id="feed">${feedHtml(r)}</ul></section>
@@ -1113,7 +1115,7 @@
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
     const foot = $("#side-foot");
     if (foot) foot.innerHTML = user ? `<div class="side-user" title="${esc(user.email)}"><span class="st-dot up"></span>${esc(user.email)}</div><div class="side-links">${STATIC_MODE ? "watchlist kept in this browser" : "signed in · watchlist saved to your account"} · <button class="lnk" data-signout>Sign out</button></div>`
-      : `<div class="side-links">Watchlist kept in this browser · <button class="lnk" data-signin>Sign in to sync it</button></div>`;
+      : `<div class="side-links">Watchlist kept in this browser · <button class="lnk" data-signin>${STATIC_MODE ? "Sign in / sign up on the app" : "Sign in or sign up"}</button></div>`;
     const si = foot && foot.querySelector("[data-signin]"); if (si) si.addEventListener("click", () => { gateOpen = true; renderGate(); });
     const so = foot && foot.querySelector("[data-signout]"); if (so) so.addEventListener("click", signOut);
   }
@@ -1144,7 +1146,7 @@
 
   // ---------------------------------------------------------------- sign-in gate + onboarding
   async function loadUser() {
-    if (STATIC_MODE) { try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch (e) { user = null; } }
+    if (STATIC_MODE) { user = null; try { localStorage.removeItem(USER_KEY); } catch (e) {} }
     else { try { const res = await fetch("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; } }
     lists = null;                                   // rebuild the watchlist from the account on every (re)load
     if (user && user.profile && !(user.profile.tickers || []).length) {   // first sign-in from this browser: keep what was built here
@@ -1159,21 +1161,31 @@
   function mailLine() {
     if (STATIC_MODE) return "";
     if (!mailStatus) return `<div class="mail-line muted">Checking the mail service…</div>`;
-    return mailStatus.configured ? `<div class="mail-line ok">Links are emailed from <b>${esc(mailStatus.from_name)}</b> &lt;${esc(mailStatus.from_address)}&gt; via ${esc(mailStatus.transport)}.</div>`
+    return mailStatus.configured ? `<div class="mail-line ok">Links are emailed by <b>${esc(mailStatus.from_name)}</b> (${esc(mailStatus.transport)}). Check your spam folder the first time.</div>`
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
   function loginHtml() {
+    if (STATIC_MODE) {
+      return `<div class="g-shell reveal"><div class="g-core">
+        ${gateBrand()}
+        ${hexSteps(0)}
+        <span class="eyebrow">Sign in or sign up</span>
+        <h1>Accounts live on the app server</h1>
+        <p>This address is the free public preview: it has no server behind it, so it cannot email a sign-in link or keep an account. Your watchlist here stays in this browser.</p>
+        ${APP_URL ? `<p>Sign in or create your account on the live app. One email link does both, no password.</p><div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Open the live app</span><i aria-hidden="true">↗</i></a></div>`
+          : `<p class="fine">The live app with email sign-in has not been published yet. Once it is running (Render blueprint in the repository), its address goes into the <code>MU_APP_URL</code> setting and this button opens it.</p>`}
+      </div></div>`;
+    }
     return `<div class="g-shell reveal"><div class="g-core">
       ${gateBrand()}
       ${hexSteps(0)}
-      <span class="eyebrow">Passwordless access</span>
+      <span class="eyebrow">Sign in or sign up · no password</span>
       <h1>Sign in to your desk</h1>
-      <p>${STATIC_MODE ? "Enter your email to open your personal dashboard. This public copy has no mail server, so nothing is sent: your email and watchlist stay in this browser only. The hosted server emails a one-time link."
-        : "Enter your email and we will send a one-time link. It works for 57 minutes and signs you in on the device you open it on. Your session then stays active until you sign out."}</p>
-      <form id="login-form" class="gate-form"><div class="field"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus></div>${pillBtn(STATIC_MODE ? "Continue" : "Email me a link", 'type="submit"')}</form>
+      <p>Enter your email and we send a one-time link. New here? The same link creates your account. It works for 57 minutes and signs you in on the device you open it on; your session then stays active until you sign out.</p>
+      <form id="login-form" class="gate-form"><div class="field"><input type="email" id="login-email" placeholder="you@example.com" required autocomplete="email" autofocus></div>${pillBtn("Email me a sign-in link", 'type="submit"')}</form>
       <div id="login-status" class="gate-status"></div>
       ${mailLine()}
-      <p class="fine">Market data, model reads and scans here are information, not advice. You will confirm this once after signing in.</p>
+      <p class="fine">Market data, model reads and scans here are information, not advice.</p>
     </div></div>`;
   }
   function onboardingHtml() {
@@ -1207,7 +1219,7 @@
     if (lf) lf.addEventListener("submit", async (e) => {
       e.preventDefault();
       const email = $("#login-email").value.trim().toLowerCase(), st = $("#login-status"); st.className = "gate-status";
-      if (STATIC_MODE) { user = { email, profile: {} }; try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (err) {} renderGate(); return; }
+      if (STATIC_MODE) return;
       st.textContent = "Sending…";
       try {
         const res = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
@@ -1245,10 +1257,12 @@
       applyProfile();
     });
   }
-  function disclaimerBanner() {
-    let seen = false; try { seen = localStorage.getItem("mu-disc") === "1"; } catch (e) {}
-    if (seen) return;
-    notice("This is not financial advice. Market Update shows data, arithmetic and model reads from typed questions; nothing here is a recommendation, and you trade at your own risk. ", true, "Got it", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} notice("", false); });
+  function disclaimerBanner() { /* replaced by the right-side panel */ }
+  const discAgreed = () => { try { return localStorage.getItem("mu-disc") === "1"; } catch (e) { return false; } };
+  function discPanel() {
+    return discAgreed()
+      ? `<section class="panel disc-panel agreed"><span class="disc-mini"><b>Not financial advice.</b> Data, arithmetic and model reads only. <span class="muted">Agreed</span></span></section>`
+      : `<section class="panel disc-panel"><h3>Not financial advice</h3><p>Everything on this page is market data, arithmetic over that data, and model reads from typed questions. None of it is a recommendation to buy or sell anything. You trade at your own risk.</p><button class="pill-btn small" data-agree><span>I agree</span><i aria-hidden="true">✓</i></button></section>`;
   }
   function applyProfile() {
     const picks = (user.profile && user.profile.tickers) || [];
@@ -1367,6 +1381,7 @@
       if (!row.hidden) { const el = row.querySelector("[data-chart-weekly]"); if (el && el.childElementCount === 0) { const a = report.horizons.assets.find((x) => x.symbol === sym); weeklyChart(el, a.weekly); } }
     }));
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.getAttribute("data-open"))));
+    const ag = $("[data-agree]"); if (ag) ag.addEventListener("click", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} if (user && !STATIC_MODE) fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: activeList() }) }).catch(() => {}); renderAll(); });
     document.querySelectorAll("[data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
@@ -1465,6 +1480,7 @@
     addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; const gt = $("#gate"); if (gt && !gt.hidden) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
     wireSearch(); initSide(); scheduleHourly(); setInterval(hourlyTick, 1000); hourlyTick();
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
+    if (/[?&]signin=1/.test(location.search)) { gateOpen = true; }
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
     addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; const t = (location.hash.match(/[&#]t=([A-Za-z0-9.\-^=]+)/) || [])[1];
       if (v === "ticker" && t) { if (currentView !== "ticker" || tickerSel !== t.toUpperCase()) { tickerSel = t.toUpperCase(); currentView = "ticker"; if (report) renderAll(); } return; }

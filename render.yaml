@@ -1,17 +1,36 @@
-# Render.com blueprint: one web service, persistent disk for the cached report.
+# Render.com blueprint for the live app (email sign-in, accounts, on-demand analysis).
+# Deploy: https://render.com/deploy?repo=https://github.com/shayan001-cell/market-update
+# The secret values (sync: false) are typed into the Render dashboard, never into this file.
 services:
   - type: web
-    name: market-update
+    name: webex-market-update
     runtime: docker
-    plan: starter
+    plan: starter          # $7/mo: always on, hourly builds keep running, 1 GB disk keeps the database.
+                           # "free" also works (sleeps when idle; the SQLite database is lost on each deploy).
     healthCheckPath: /healthz
     envVars:
       - key: TYPESAFE_API_KEY
-        sync: false          # set in the Render dashboard
+        sync: false
+      - key: MU_MAIL_FROM          # e.g. Webex Market Update <you@gmail.com>
+        sync: false
+      - key: MU_SMTP_HOST          # smtp.gmail.com
+        sync: false
+      - key: MU_SMTP_PORT
+        value: "587"
+      - key: MU_SMTP_USER          # the Gmail address
+        sync: false
+      - key: MU_SMTP_PASS          # the Gmail app password
+        sync: false
+      - key: MU_SECRET
+        generateValue: true
+      - key: MU_DEV_LINKS
+        value: "0"                 # never show sign-in links on the page in production
       - key: MU_DATA_DIR
         value: /data
       - key: MU_INTERVAL_MARKET
-        value: "300"
+        value: "3600"
+      - key: MU_INTERVAL_POST
+        value: "3600"
       - key: MU_INTERVAL_OFF
         value: "3600"
     disk:

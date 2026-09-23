@@ -138,7 +138,7 @@ async def _startup() -> None:
 async def index(request: Request) -> HTMLResponse:
     """Serve index.html with asset URLs versioned by file mtime, so a deploy never fights a browser cache."""
     html = (config.STATIC_DIR / "index.html").read_text()
-    html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request))
+    html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request)).replace("__APP_URL__", "")
     for name in ("app.js", "styles.css"):
         v = int((config.STATIC_DIR / name).stat().st_mtime)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")

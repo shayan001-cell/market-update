@@ -262,11 +262,25 @@ gh workflow run build.yml
 The site appears at `https://<your-user>.github.io/market-update/` after the first run.
 Free tier: about 2,000 Actions minutes a month; this schedule uses roughly 600.
 
-## Host the live server (Docker)
+## Publish the live app (accounts + email sign-in)
 
-`Dockerfile` and `render.yaml` are included. Set `TYPESAFE_API_KEY` in the host's
-environment. Optional tuning: `MU_INTERVAL_MARKET`, `MU_INTERVAL_POST`, `MU_INTERVAL_OFF`,
-`MU_REFRESH_COOLDOWN`, `MU_NO_AI=1`.
+GitHub Pages only serves the static preview. Accounts, emailed sign-in links, the
+database and on-demand analysis need the server running somewhere public. The quickest
+route is Render's blueprint, which reads `render.yaml`:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shayan001-cell/market-update)
+
+1. Click the button (a Render account is needed; sign in with GitHub).
+2. Render asks for the secret values: `TYPESAFE_API_KEY`, `MU_MAIL_FROM`, `MU_SMTP_HOST`,
+   `MU_SMTP_USER`, `MU_SMTP_PASS`. Use the same values as the local `.env`.
+3. Deploy. The app comes up at `https://webex-market-update.onrender.com` (or the name
+   Render assigns), builds its first report, and every sign-in link is emailed.
+4. Put that address into the GitHub repository variable `MU_APP_URL` (Settings → Secrets
+   and variables → Actions → Variables) so the public preview's sign-in card links to it.
+
+Any Docker host works the same way with the `Dockerfile`; set the same variables. Optional
+tuning: `MU_INTERVAL_MARKET`, `MU_INTERVAL_POST`, `MU_INTERVAL_OFF`, `MU_REFRESH_COOLDOWN`,
+`MU_NO_AI=1`.
 
 ## Release packaging
 

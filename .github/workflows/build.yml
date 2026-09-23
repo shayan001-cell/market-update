@@ -38,6 +38,7 @@ jobs:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MU_CACHE_DIR: .cache
           MU_WATCHLIST: watchlist.txt
+          MU_APP_URL: ${{ vars.MU_APP_URL }}     # repository variable: the hosted app's URL once it is published
         run: |
           mkdir -p site
           market-update --out site
