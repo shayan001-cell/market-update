@@ -29,7 +29,7 @@ from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -1036,3 +1036,8 @@ async def st_tools_api(request: Request) -> Any:
 async def st_call_api(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
     _require_admin(request)
     return await asyncio.to_thread(st_call, str(payload.get("tool")), dict(payload.get("arguments") or {}))
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    return FileResponse(config.STATIC_DIR / "brand" / "favicon.png", media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
