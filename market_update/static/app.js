@@ -636,8 +636,8 @@
       <div class="bc-chips">${chips}</div>
       <div class="bc-idx-row">${idx}</div>
       ${slot === "close" && b.scorecard ? (() => { const sc = b.scorecard; const mm = sc.morning_call ? (BRIEF_MOVE[sc.morning_call] || [pretty(sc.morning_call), "flat"])[0] : null; return `<div class="scorecard"><div class="sc-h">Scorecard <span class="muted">expectation vs what the market did</span></div>
-        <div class="sc-row"><span>Intraday reads</span><b>${sc.scored ? `${sc.hits} of ${sc.scored} right · ${sc.hit_rate}%` : (sc.reads ? "not scored" : "none today")}</b></div>
-        <div class="sc-row"><span>Morning call on SPY</span><b>${mm ? `${mm} → SPY ${fpct(sc.spy_day_pct, 2)} · ${sc.morning_hit === 1 ? '<i class="up">hit</i>' : sc.morning_hit === 0 ? '<i class="down">miss</i>' : "no direction"}` : "no call"}</b></div>
+        <div class="scr-row"><span>Intraday reads</span><b>${sc.scored ? `${sc.hits} of ${sc.scored} right · ${sc.hit_rate}%` : (sc.reads ? "not scored" : "none today")}</b></div>
+        <div class="scr-row"><span>Morning call on SPY</span><b>${mm ? `${mm} → SPY ${fpct(sc.spy_day_pct, 2)} · ${sc.morning_hit === 1 ? '<i class="up">hit</i>' : sc.morning_hit === 0 ? '<i class="down">miss</i>' : "no direction"}` : "no call"}</b></div>
         <div class="dir-strip">${(sc.timeline || []).map((r) => `<span class="dir-dot ${DIR[r.expected] ? DIR[r.expected][1] : "flat"} ${r.hit === 1 ? "hit" : r.hit === 0 ? "miss" : ""}" title="${new Date(r.at * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false })} ET: ${r.expected}, SPY then ${fpct(r.move_spy_pct, 2)} to the close">${r.expected === "higher" ? "▲" : r.expected === "lower" ? "▼" : "▬"}</span>`).join("")}</div>
         <div class="meta2">${esc(sc.how || "")}</div></div>`; })() : ""}
       <div class="bc-more">
