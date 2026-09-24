@@ -1039,3 +1039,10 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .ck-item { grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr); }
 @media (max-width: 1250px) { .view.stock { grid-template-columns: 280px minmax(0, 1fr); } .detail-grid { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .view.stock { display: block; } .view.stock .tbl-wrap { border-right: 0; max-height: 40vh; } }
+/* stocks list never scrolls sideways; price-action facts stack inside the analysis pane */
+.view.stock .tbl-wrap { overflow-x: hidden; }
+.stk-list td > * { max-width: 100%; } .stk-list td.sc2 { white-space: nowrap; } .stk-list td.sc2 .meta2 { white-space: nowrap; }
+.view.stock .tile .grid.c2 { grid-template-columns: 1fr; gap: 6px; background: transparent; border: 0; }
+.view.stock .tile .grid.c2 .kv { border-top: 1px dashed var(--line); padding-top: 6px; }
+.view.stock .tile .grid.c2 .kv:first-child { border-top: 0; padding-top: 0; }
+.view.stock .kv dd { text-align: right; overflow-wrap: anywhere; }

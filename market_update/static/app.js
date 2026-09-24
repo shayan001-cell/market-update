@@ -10,7 +10,7 @@
   let authToken = null; try { authToken = localStorage.getItem("mu-token"); } catch (e) {}
   const mst = (location.hash.match(/[#&]st=([A-Za-z0-9_\-.]+)/) || [])[1];
   if (mst) { authToken = mst; try { localStorage.setItem("mu-token", mst); } catch (e) {} try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
-  const api = (path, opts) => { const o = Object.assign({}, opts || {}); o.headers = Object.assign({}, o.headers || {}); if (API) { o.credentials = "include"; if (authToken) o.headers["Authorization"] = "Bearer " + authToken; } return fetch(API + path, o); };
+  const api = (path, opts) => { const o = Object.assign({}, opts || {}); o.headers = Object.assign({}, o.headers || {}); if (API) o.credentials = "include"; if (authToken) o.headers["Authorization"] = "Bearer " + authToken; return fetch(API + path, o); };
   let report = null;
   let selectedTicker = null;
   let stockTab = "all";
