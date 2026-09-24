@@ -825,26 +825,23 @@
   function secStocks(r) {
     const tabs = "";
     const th = (k, l) => `<th class="sortable ${sortKey === k ? "active" : ""}" data-sort="${k}">${l}${sortKey === k ? " ▾" : ""}</th>`;
-    const rows = stockRows(r).map((s) => {
+    const list = stockRows(r);
+    if (!list.some((s) => s.ticker === selectedTicker)) selectedTicker = list.length ? list[0].ticker : null;   // the detail always belongs to the group on screen
+    const rows = list.map((s) => {
       const a = s.ai || {}, t = s.technicals, c = cls(s.chg_pct);
-      const bias = a.bias ? `<span class="pill ${{ long: "up", short: "down" }[a.bias.choice] || "flat"}">${a.bias.choice}</span> ${conf(a.bias.confidence)}` : "–";
+      const bias = a.bias ? `<span class="pill ${{ long: "up", short: "down" }[a.bias.choice] || "flat"}">${a.bias.choice}</span>` : '<span class="muted">–</span>';
       return `<tr class="clickable ${selectedTicker === s.ticker ? "selected" : ""}" data-ticker="${esc(s.ticker)}">
         <td class="sym"><b>${esc(s.ticker)}</b><div class="meta2">${esc(s.name)}</div></td>
         <td class="num">${fnum(s.last_price)}<div class="delta ${c}">${arrow(s.chg_pct)} ${fpct(s.chg_pct)}</div></td>
-        <td class="num">${fpct(t.atr_pct, 1, false)}<div class="meta2">#${s.volatility_rank} of ${s.volatility_universe}</div></td>
-        <td class="num">${isNum(s.rel_volume) ? s.rel_volume.toFixed(2) + "×" : '<span class="muted">n/a</span>'}</td>
-        <td>${a.stance ? `<span class="pill ${ST.cls[a.stance.choice]}">${ST.stance[a.stance.choice][0]}</span>` : bias}</td>
-        <td>${a.setup ? `<span class="tag">${pretty(a.setup.choice)}</span> ${conf(a.setup.confidence)}` : "–"}</td>
-        <td class="num">${bar(s.scores.day, 1)}<span class="mono">${(s.scores.day * 100).toFixed(0)}</span></td>
-        <td class="num">${bar(s.scores.swing, 1)}<span class="mono">${(s.scores.swing * 100).toFixed(0)}</span></td>
-        <td>${s.tags.map(tagHtml).join("")}</td></tr>`;
-    }).join("") || `<tr><td colspan="9" class="muted">Nothing in this filter.</td></tr>`;
-    const sel = r.stocks.find((s) => s.ticker === selectedTicker);
+        <td>${a.stance ? `<span class="pill ${ST.cls[a.stance.choice]}">${ST.stance[a.stance.choice][0]}</span>` : bias}<div class="meta2">${a.setup ? pretty(a.setup.choice) : ""}</div></td>
+        <td class="num sc2"><span title="Swing score">S <b>${(s.scores.swing * 100).toFixed(0)}</b></span><span title="Day score">D <b>${(s.scores.day * 100).toFixed(0)}</b></span><div class="meta2">${fpct(t.atr_pct, 1, false)}/day${isNum(s.rel_volume) ? " · " + s.rel_volume.toFixed(1) + "× vol" : ""}</div></td></tr>`;
+    }).join("") || `<tr><td colspan="4" class="muted">Nothing in this group right now. Pick another group in the left menu.</td></tr>`;
+    const sel = list.find((s) => s.ticker === selectedTicker);
     const tabName = (SUBTABS.stock.find(([k]) => k === (subTab.stock || "all")) || ["", "All names"])[1];
     return `<section><h2>Stocks · ${esc(tabName)} <span class="muted">${stockRows(r).length} of ${r.stocks.length} analysed names (${r.stocks_scanned} liquid stocks scanned) · pick a group in the left menu · click a row for the full breakdown</span></h2>
       ${subTabs("stock")}
-      <div class="tbl-wrap"><table class="tbl" id="stocks-tbl"><thead><tr><th>Stock</th>${th("chg", "Price / change")}${th("atr", `Daily range`)}${th("rvol", "Volume vs normal")}<th>Verdict</th><th>Setup</th>${th("day", "Day score")}${th("swing", "Swing score")}<th>Flags</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div id="stock-detail" class="detail">${sel ? stockDetail(sel, r) : '<div class="card muted">Select a stock to see its chart, levels, fundamentals, news and model judgments.</div>'}</div></section>`;
+      <div class="tbl-wrap"><table class="tbl stk-list" id="stocks-tbl"><thead><tr><th>Stock</th>${th("chg", "Price")}<th>Verdict</th>${th("swing", "Swing · Day")}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div id="stock-detail" class="detail">${sel ? stockDetail(sel, r) : '<div class="card muted">Nothing to show for this group. Pick another group in the left menu.</div>'}</div></section>`;
   }
 
   function probRows(obj, labels) {
