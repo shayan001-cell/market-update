@@ -266,7 +266,7 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
     if marker.exists() or not mail.status().get("configured"):
         return
     report = state.get("report") or {}
-    site = os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL
+    site = (os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL) + "/#view=home&brief=1"   # opens the desk on the briefing
     sent = 0
     for u in db.brief_recipients():
         try:
@@ -881,3 +881,158 @@ async def brief_unsubscribe(t: str = "") -> HTMLResponse:
         return HTMLResponse(_PAGE.format(eyebrow="Link not valid", title="That link did not work", body="Open the latest briefing email and use its link, or sign in to the desk.", action="", foot="OneView"), status_code=400)
     db.set_brief_opt_out(email, True)
     return HTMLResponse(_PAGE.format(eyebrow="Done", title="No more briefing emails", body=f"{email} will not receive the morning briefing by email. The briefing stays on the desk every day at 07:00 ET.", action=f'<a class="pill" href="{config.PUBLIC_URL}">Back to OneView</a>', foot="Information, not advice."))
+
+
+# ---------------------------------------------------------------------------
+# StockTwits MCP connector: OAuth (dynamic registration + PKCE) done once by the admin,
+# tokens kept on disk, JSON-RPC calls to the MCP endpoint from the server.
+# ---------------------------------------------------------------------------
+ST_MCP = "https://mcp.stocktwits.com/mcp"
+ST_AUTH = "https://mcp.stocktwits.com"
+_ST_FILE = lambda: DATA_DIR / "stocktwits_oauth.json"   # noqa: E731
+_st_pending: dict[str, dict[str, Any]] = {}
+
+
+def _st_load() -> dict[str, Any]:
+    try:
+        return json.loads(_ST_FILE().read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _st_save(d: dict[str, Any]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _ST_FILE().write_text(json.dumps(d))
+
+
+def _st_callback_url() -> str:
+    return _api_root() + "/api/stocktwits/callback"
+
+
+def _st_register(redirect: str) -> dict[str, Any]:
+    import requests as rq
+    r = rq.post(f"{ST_AUTH}/register", json={"client_name": "OneView", "redirect_uris": [redirect], "grant_types": ["authorization_code", "refresh_token"],
+                                            "response_types": ["code"], "token_endpoint_auth_method": "none", "scope": "read"}, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+def _st_token_request(data: dict[str, Any]) -> dict[str, Any]:
+    import requests as rq
+    r = rq.post(f"{ST_AUTH}/token", data=data, headers={"Accept": "application/json"}, timeout=20)
+    if r.status_code >= 400:
+        raise RuntimeError(f"token endpoint {r.status_code}: {r.text[:200]}")
+    return r.json()
+
+
+def _st_access_token() -> str | None:
+    d = _st_load()
+    if not d.get("access_token"):
+        return None
+    if d.get("expires_at", 0) - 60 < time.time() and d.get("refresh_token"):
+        t = _st_token_request({"grant_type": "refresh_token", "refresh_token": d["refresh_token"], "client_id": d["client_id"]})
+        d.update(access_token=t["access_token"], refresh_token=t.get("refresh_token", d["refresh_token"]), expires_at=time.time() + int(t.get("expires_in", 3600)))
+        _st_save(d)
+    return d["access_token"]
+
+
+def _st_rpc(method: str, params: dict[str, Any] | None = None, session: str | None = None) -> tuple[dict[str, Any], str | None]:
+    import requests as rq
+    tok = _st_access_token()
+    if not tok:
+        raise RuntimeError("StockTwits is not connected")
+    headers = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    if session:
+        headers["Mcp-Session-Id"] = session
+    r = rq.post(ST_MCP, json={"jsonrpc": "2.0", "id": int(time.time() * 1000) % 100000, "method": method, "params": params or {}}, headers=headers, timeout=40)
+    if r.status_code >= 400:
+        raise RuntimeError(f"mcp {method} {r.status_code}: {r.text[:200]}")
+    sid = r.headers.get("Mcp-Session-Id") or session
+    body = r.text
+    if "text/event-stream" in r.headers.get("content-type", ""):
+        chunks = [ln[5:].strip() for ln in body.splitlines() if ln.startswith("data:")]
+        body = chunks[-1] if chunks else "{}"
+    return (json.loads(body) if body.strip() else {}), sid
+
+
+def st_call(tool: str, arguments: dict[str, Any]) -> Any:
+    """Initialize a session, call one tool, return its result content."""
+    init, sid = _st_rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "OneView", "version": "0.3"}})
+    try:
+        _st_rpc("notifications/initialized", {}, sid)
+    except Exception:  # noqa: BLE001
+        pass
+    res, _ = _st_rpc("tools/call", {"name": tool, "arguments": arguments}, sid)
+    return res.get("result", res)
+
+
+def st_tools() -> list[dict[str, Any]]:
+    init, sid = _st_rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "OneView", "version": "0.3"}})
+    try:
+        _st_rpc("notifications/initialized", {}, sid)
+    except Exception:  # noqa: BLE001
+        pass
+    res, _ = _st_rpc("tools/list", {}, sid)
+    return (res.get("result") or {}).get("tools", [])
+
+
+def _require_admin(request: Request) -> str:
+    email = _session_email(request)
+    if not email or email.lower() not in {e.lower() for e in config.ADMIN_EMAILS}:
+        raise HTTPException(status_code=403, detail="admin only")
+    return email
+
+
+@app.get("/api/stocktwits/status")
+async def st_status(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    d = _st_load()
+    return {"connected": bool(d.get("access_token")), "expires_at": d.get("expires_at"), "callback": _st_callback_url(), "scope": d.get("scope")}
+
+
+@app.get("/api/stocktwits/connect")
+async def st_connect(request: Request) -> RedirectResponse:
+    """Admin clicks: register this server as an OAuth client (once), then go sign in at StockTwits."""
+    import base64 as b64, hashlib as hl, secrets
+    _require_admin(request)
+    d = _st_load()
+    redirect = _st_callback_url()
+    if not d.get("client_id") or d.get("redirect_uri") != redirect:
+        reg = await asyncio.to_thread(_st_register, redirect)
+        d = {"client_id": reg["client_id"], "client_secret": reg.get("client_secret"), "redirect_uri": redirect}
+        _st_save(d)
+    verifier = b64.urlsafe_b64encode(secrets.token_bytes(48)).decode().rstrip("=")
+    challenge = b64.urlsafe_b64encode(hl.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    st = secrets.token_urlsafe(16)
+    _st_pending[st] = {"verifier": verifier, "at": time.time()}
+    from urllib.parse import urlencode
+    q = urlencode({"response_type": "code", "client_id": d["client_id"], "redirect_uri": redirect, "scope": "read", "state": st,
+                   "code_challenge": challenge, "code_challenge_method": "S256"})
+    return RedirectResponse(f"{ST_AUTH}/authorize?{q}")
+
+
+@app.get("/api/stocktwits/callback")
+async def st_callback(code: str = "", state: str = "", error: str = "") -> HTMLResponse:
+    pend = _st_pending.pop(state, None)
+    if error or not code or not pend:
+        return HTMLResponse(_PAGE.format(eyebrow="StockTwits", title="Connection did not complete", body=error or "The sign-in was cancelled or the link expired. Try again from the Admin page.", action="", foot="OneView"), status_code=400)
+    d = _st_load()
+    try:
+        t = await asyncio.to_thread(_st_token_request, {"grant_type": "authorization_code", "code": code, "redirect_uri": d["redirect_uri"], "client_id": d["client_id"], "code_verifier": pend["verifier"]})
+    except Exception as e:  # noqa: BLE001
+        return HTMLResponse(_PAGE.format(eyebrow="StockTwits", title="Token exchange failed", body=str(e)[:300], action="", foot="OneView"), status_code=400)
+    d.update(access_token=t["access_token"], refresh_token=t.get("refresh_token"), expires_at=time.time() + int(t.get("expires_in", 3600)), scope=t.get("scope"))
+    _st_save(d)
+    return HTMLResponse(_PAGE.format(eyebrow="StockTwits", title="Connected", body="OneView can now read StockTwits through its connector. Close this tab and return to the desk.", action=f'<a class="pill" href="{config.PUBLIC_URL}/#view=admin">Back to OneView</a>', foot="Information, not advice."))
+
+
+@app.get("/api/stocktwits/tools")
+async def st_tools_api(request: Request) -> Any:
+    _require_admin(request)
+    return await asyncio.to_thread(st_tools)
+
+
+@app.post("/api/stocktwits/call")
+async def st_call_api(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
+    _require_admin(request)
+    return await asyncio.to_thread(st_call, str(payload.get("tool")), dict(payload.get("arguments") or {}))

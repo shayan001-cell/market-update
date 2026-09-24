@@ -567,10 +567,19 @@
   let brief = null;
   async function pollBrief() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status === "ok" && (!brief || brief.generated_at !== j.generated_at)) { brief = j; if (currentView === "home" && report) { const el = $(".brief"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const cm = $(".view.home .col-main"); if (cm) cm.prepend(tmp.firstElementChild); } wireStocks(); } } } catch (e) { /* server restarting */ }
+    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status === "ok" && (!brief || brief.generated_at !== j.generated_at)) { brief = j; if (currentView === "home" && report) { const el = $(".brief"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const cm = $(".view.home .col-main"); if (cm) cm.prepend(tmp.firstElementChild); } wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
   }
   const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
   const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
+  function jumpToBrief() {                       // email link "#view=home&brief=1": open the briefing and bring it into view
+    let want = /brief=1/.test(location.hash); try { if (sessionStorage.getItem("mu-open-brief") === "1") { want = true; } } catch (e) {}
+    if (!want) return;
+    try { sessionStorage.removeItem("mu-open-brief"); } catch (e) {}
+    const el = $(".brief"); if (!el) return;
+    const d = el.querySelector("details"); if (d) d.open = true;
+    el.scrollIntoView({ block: "start", behavior: "smooth" });
+    try { history.replaceState(null, "", "#view=home"); } catch (e) {}
+  }
   function secBrief(r) {
     const b = brief; if (!b) return "";
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
@@ -1682,6 +1691,7 @@
     $("#footer").innerHTML = `<div class="foot">Prices: Yahoo Finance, 15-minute delayed · change is versus the prior close · report built ${r.generated_at.slice(11, 16)} ET${r.ai_enabled ? "" : " · model reads off this build"} · OneView is information, not advice.</div>`;
     mountCharts();
     wireStocks();
+    if (currentView === "home") jumpToBrief();
   }
 
   function viewHtml(r) {
@@ -1737,6 +1747,7 @@
   async function pollAdmin() {
     if (STATIC_MODE || !user || user.role !== "admin") return;
     try { const res = await api("/api/admin/overview", { cache: "no-store" }); if (res.ok) { adminData = await res.json(); if (currentView === "admin") renderAll(); } } catch (e) {}
+    try { const r2 = await api("/api/stocktwits/status", { cache: "no-store" }); if (r2.ok) { const j = await r2.json(); const el = $("#st-status"); if (el) el.textContent = j.connected ? `Connected · token renews itself · callback ${j.callback}` : `Not connected yet. The sign-in returns to ${j.callback}.`; } } catch (e) {}
   }
   const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() / 1000) - t); return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
   function secAdmin() {
@@ -1749,6 +1760,9 @@
     const recent = A.recent.map((x) => `<tr><td class="num">${new Date(x.at * 1000).toTimeString().slice(0, 8)}</td><td>${esc(x.email || "–")}</td><td><span class="tag ${{ login: "ok", logout: "", link_requested: "acc", watchlist: "acc", analyzed: "warn" }[x.action] || ""}">${pretty(x.action)}</span></td><td class="hl small">${esc(x.detail || "")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No activity yet.</td></tr>';
     return `<section class="admin"><h2>Admin dashboard <span class="muted">${esc(A.admin)} · refreshed ${new Date(A.as_of * 1000).toTimeString().slice(0, 8)} · sessions table in market_update.db</span></h2>
       <div class="grid c6" style="margin-bottom:12px">${tile("Signed in now", A.online.length, "distinct users")}${tile("Active sessions", A.active_sessions, "browsers with a live login")}${tile("Requests, last hour", T.requests_last_hour, `${T.requests_24h} in 24 h`)}${tile("Page loads, 24 h", T.pages_24h, "")}${tile("Logins, 24 h", T.logins_24h, "")}${tile("Accounts", A.users_total, `build ${A.build.build_id || "–"}${A.build.building ? " · building" : ""}`)}</div>
+      <div class="card" style="margin-bottom:12px"><h3>StockTwits connector <span class="muted">reads crowd sentiment through StockTwits' official connector; sign in once as the owner</span></h3>
+        <div id="st-status" class="meta2">Checking…</div>
+        <div class="wc-actions" style="margin-top:8px"><a class="btn sm" href="${esc(API || "")}/api/stocktwits/connect">Connect StockTwits</a></div></div>
       <div class="card" style="margin-bottom:12px"><h3>Traffic flow <span class="muted">requests per minute, last two hours · lighter bars include page loads</span></h3><svg class="traffic" viewBox="0 0 ${T.series.length * 6} 62" preserveAspectRatio="none">${bars}</svg></div>
       <div class="admin-grid">
         <div class="card"><h3>Logged-in users</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>User</th><th>Last seen</th><th>Signed in</th><th>Sessions</th><th>Browser</th></tr></thead><tbody>${online}</tbody></table></div></div>
@@ -1919,6 +1933,7 @@
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
     if (/[?&]signin=1/.test(location.search)) { gateOpen = true; }
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
+    try { if (/brief=1/.test(location.hash)) sessionStorage.setItem("mu-open-brief", "1"); } catch (e) {}
     addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; const t = (location.hash.match(/[&#]t=([A-Za-z0-9.\-^=]+)/) || [])[1];
       if (v === "ticker" && t) { if (currentView !== "ticker" || tickerSel !== t.toUpperCase()) { tickerSel = t.toUpperCase(); currentView = "ticker"; if (report) renderAll(); } return; }
       if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
