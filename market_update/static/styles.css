@@ -1645,3 +1645,15 @@ footer { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--
 .day-verdict { font-size: 12.5px; line-height: 1.45; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); } .day-verdict b { margin-right: 4px; }
 tr.day-detail td { background: var(--surface-2); }
 .side-item.v-record { --vc: #85A7FF; }
+
+/* StockTwits crowd strip */
+.crowd { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.crowd h3 { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin: 0 0 6px; font-size: 15px; font-weight: 600; } .crowd h3 .muted { font-size: 11px; font-weight: 400; }
+.crowd h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.cw-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 16px; align-items: start; margin-top: 8px; }
+.cw-moods { display: grid; gap: 8px; }
+.cw-mood { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--surface-2); cursor: pointer; display: grid; gap: 3px; }
+.cw-mood.up { border-color: color-mix(in srgb, var(--up) 45%, var(--line)); } .cw-mood.down { border-color: color-mix(in srgb, var(--down) 45%, var(--line)); }
+.cw-h { display: flex; gap: 8px; align-items: baseline; } .cw-h b { font-size: 15px; }
+.cw-l { font-weight: 700; font-size: 14px; } .cw-l.up { color: var(--up); } .cw-l.down { color: var(--down); }
+@media (max-width: 1100px) { .cw-grid { grid-template-columns: 1fr; } }

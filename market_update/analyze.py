@@ -1159,6 +1159,8 @@ def _intraday_inputs(report: dict[str, Any]) -> dict[str, Any]:
     cutoff = (datetime.now(tz=config.ET) - timedelta(hours=6)).isoformat()[:19]
     posts = [p for p in ((social.get("trump") or {}).get("posts") or []) if p.get("ai") and ((p["ai"].get("market_relevance") or {}).get("p", 0) >= 0.5) and (p.get("posted") or "") >= cutoff]
     leans = [((p["ai"].get("direction") or {}).get("choice")) for p in posts]
+    st_snap = fetch._cache_get("stocktwits_snapshot", 3 * 3600) or {}
+    st_m = st_snap.get("moods") or {}
     trump_lean = "none" if not leans else ("bullish" if leans.count("bullish_for_stocks") > leans.count("bearish_for_stocks") else "bearish" if leans.count("bearish_for_stocks") > leans.count("bullish_for_stocks") else "mixed")
     B = (report.get("flows") or {}).get("breadth") or {}
     now = datetime.now(tz=config.ET)
@@ -1169,6 +1171,8 @@ def _intraday_inputs(report: dict[str, Any]) -> dict[str, Any]:
     return {"time_et": now.strftime("%H:%M"), "minutes_to_close": max(0, 16 * 60 - (now.hour * 60 + now.minute)), "history": hist,
             "spy": out["SPY"], "qqq": out["QQQ"], "breadth_pct_above_20d": _r(B["above20"] / B["n"] * 100, 0) if B.get("n") else None,
             "sentiment": {"reddit_spy": (crowd.get("SPY") or {}).get("wsb_sentiment") or "none", "reddit_qqq": (crowd.get("QQQ") or {}).get("wsb_sentiment") or "none",
+                          "stocktwits_spy": {"label": (st_m.get("SPY") or {}).get("label"), "score_0_100": (st_m.get("SPY") or {}).get("score"), "bullish_pct": (st_m.get("SPY") or {}).get("bullish_pct")} if st_m.get("SPY") else "not connected",
+                          "stocktwits_qqq": {"label": (st_m.get("QQQ") or {}).get("label"), "score_0_100": (st_m.get("QQQ") or {}).get("score"), "bullish_pct": (st_m.get("QQQ") or {}).get("bullish_pct")} if st_m.get("QQQ") else "not connected",
                           "trump_lean_recent": trump_lean, "trump_posts_6h": len(posts)}}
 
 

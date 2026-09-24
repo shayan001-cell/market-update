@@ -68,6 +68,15 @@ CREATE TABLE IF NOT EXISTS verdicts (
 );
 CREATE INDEX IF NOT EXISTS verdicts_open ON verdicts(eval_ts, ts);
 CREATE UNIQUE INDEX IF NOT EXISTS verdicts_once ON verdicts(ticker, kind, build_id);
+CREATE TABLE IF NOT EXISTS crowd_reads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    day TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    score REAL, label TEXT, bullish_pct REAL, volume_label TEXT,
+    price REAL, change_pct REAL
+);
+CREATE INDEX IF NOT EXISTS crowd_day ON crowd_reads(day, symbol);
 CREATE TABLE IF NOT EXISTS analysis_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -508,3 +517,9 @@ def day_detail(day: str) -> dict[str, Any]:
                 r["facts"] = None
         morning = [dict(r) for r in con.execute("SELECT ts, symbol, price, read, confidence, outcome_pct, hit FROM analysis_log WHERE day = ? AND kind = 'morning_index' ORDER BY symbol", (day,))]
     return {"day": day, "reads": reads, "morning": morning}
+
+
+def log_crowd(day: str, rows: list[dict[str, Any]]) -> None:
+    with connect() as con:
+        con.executemany("INSERT INTO crowd_reads(ts, day, symbol, score, label, bullish_pct, volume_label, price, change_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [(time.time(), day, r["symbol"], r.get("score"), r.get("label"), r.get("bullish_pct"), r.get("volume_label"), r.get("price"), r.get("change_pct")) for r in rows])

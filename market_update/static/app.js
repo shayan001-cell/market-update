@@ -586,7 +586,7 @@
     if (!d || d.status !== "ok" || !d.latest) return `<article class="bcard pending" data-brief-slot="direction"><div class="bcard-h"><b>Intraday direction</b><span class="muted">every 15 min</span></div><div class="muted">${d && d.market_state === "open" ? "First read of the session arrives within 15 minutes." : "Runs every 15 minutes while the market is open (09:30 to 16:00 ET): technicals plus the crowd's mood, scored after the close."}</div></article>`;
     const L = d.latest, f = L.facts || {}, sp = f.spy || {}, qq = f.qqq || {}, sm = f.sentiment || {};
     const m = DIR[L.expected] || ["No read", "flat"];
-    const facts = f.spy ? `<div class="meta2">SPY ${fnum(sp.last)} · ${sp.above_vwap == null ? "" : sp.above_vwap ? "above" : "below"} the day's average price · ${isNum(sp.range_pos) ? Math.round(sp.range_pos * 100) + "% of the day's range" : ""} · 1-hour RSI ${fnum((sp.hourly || {}).rsi_1h, 0)}</div><div class="meta2">QQQ ${fnum(qq.last)} · ${qq.above_vwap == null ? "" : qq.above_vwap ? "above" : "below"} the day's average price · RSI ${fnum((qq.hourly || {}).rsi_1h, 0)}${isNum(f.breadth_pct_above_20d) ? ` · breadth ${f.breadth_pct_above_20d}% above the 20-day` : ""}</div><div class="meta2">Mood: Reddit on SPY ${esc(sm.reddit_spy || "none")}, on QQQ ${esc(sm.reddit_qqq || "none")} · the President's recent posts ${esc(sm.trump_lean_recent || "none")}</div>` : "";
+    const facts = f.spy ? `<div class="meta2">SPY ${fnum(sp.last)} · ${sp.above_vwap == null ? "" : sp.above_vwap ? "above" : "below"} the day's average price · ${isNum(sp.range_pos) ? Math.round(sp.range_pos * 100) + "% of the day's range" : ""} · 1-hour RSI ${fnum((sp.hourly || {}).rsi_1h, 0)}</div><div class="meta2">QQQ ${fnum(qq.last)} · ${qq.above_vwap == null ? "" : qq.above_vwap ? "above" : "below"} the day's average price · RSI ${fnum((qq.hourly || {}).rsi_1h, 0)}${isNum(f.breadth_pct_above_20d) ? ` · breadth ${f.breadth_pct_above_20d}% above the 20-day` : ""}</div><div class="meta2">Mood: Reddit on SPY ${esc(sm.reddit_spy || "none")}, on QQQ ${esc(sm.reddit_qqq || "none")}${sm.stocktwits_spy && sm.stocktwits_spy.label ? ` · StockTwits on SPY ${esc(String(sm.stocktwits_spy.label).toLowerCase().replace(/_/g, " "))} (${sm.stocktwits_spy.score_0_100}/100)` : ""} · the President's recent posts ${esc(sm.trump_lean_recent || "none")}</div>` : "";
     const strip = (d.today || []).map((r) => { const k = DIR[r.expected] ? DIR[r.expected][1] : "flat"; const t = new Date(r.ts * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }); return `<span class="dir-dot ${k} ${r.hit === 1 ? "hit" : r.hit === 0 ? "miss" : ""}" title="${t} ET: ${r.expected || "–"}${r.hit == null ? "" : r.hit ? " · hit" : " · miss"}">${r.expected === "higher" ? "▲" : r.expected === "lower" ? "▼" : "▬"}</span>`; }).join("");
     const st = (d.stats || {}).totals || {};
     const scoredToday = (d.today || []).filter((r) => r.hit != null); const hitsToday = scoredToday.filter((r) => r.hit === 1).length;
@@ -655,6 +655,26 @@
     const isToday = j.date === today;
     const cards = BRIEF_SLOTS.map(([slot, label, at]) => slot === "direction" ? directionCard() : briefCard((j.briefs || {})[slot], slot, label, at, isToday)).join("");
     return `<section class="briefs"><div class="briefs-h"><h3>Briefings <span class="muted">${isToday ? "today" : esc(j.date || "")} · morning at 07:00, a direction read every 15 minutes of the session, after the close at 16:30 ET · monitoring only, not advice</span></h3></div><div class="briefs-row">${cards}</div></section>`;
+  }
+  let crowd = null;
+  async function pollCrowd() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/stocktwits", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); crowd = j;
+      if (currentView === "home" && report) { const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
+  }
+  const ST_LABEL = { BULLISH: ["Bullish", "up"], EXTREMELY_BULLISH: ["Extremely bullish", "up"], BEARISH: ["Bearish", "down"], EXTREMELY_BEARISH: ["Extremely bearish", "down"], NEUTRAL: ["Neutral", "flat"] };
+  function secCrowd(r) {
+    const c = crowd; if (!c || c.status !== "ok") return "";
+    const m = c.moods || {};
+    const mood = (sym, name) => { const x = m[sym]; if (!x) return ""; const L = ST_LABEL[x.label] || [pretty(x.label || "–"), "flat"]; return `<div class="cw-mood ${L[1]}" data-ticker-page="${esc(sym)}"><div class="cw-h"><b>${esc(sym)}</b><span class="muted">${esc(name)}</span></div><div class="cw-l ${L[1]}">${L[0]}</div><div class="meta2">crowd score <b>${isNum(x.score) ? x.score : "–"}</b>/100 · ${isNum(x.bullish_pct) ? x.bullish_pct.toFixed(0) + "% bullish" : ""}${isNum(x.bullish_delta) ? ` (${x.bullish_delta >= 0 ? "+" : ""}${x.bullish_delta.toFixed(0)} pts today)` : ""}${x.volume_label ? ` · chatter ${esc(String(x.volume_label).toLowerCase().replace(/_/g, " "))}` : ""}</div></div>`; };
+    const bigs = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "TSLA", "GOOGL", "AVGO"].map((sym) => { const x = m[sym]; if (!x) return ""; const L = ST_LABEL[x.label] || [pretty(x.label || "–"), "flat"]; return `<span class="bf-mega" data-ticker-page="${esc(sym)}"><b>${esc(sym)}</b><i class="${L[1]}">${L[0].toLowerCase()}</i><span class="muted">${isNum(x.score) ? x.score : "–"}</span></span>`; }).join("");
+    const trend = (c.trending || []).slice(0, 10).map((t) => `<span class="bf-mega" data-ticker-page="${esc(t.symbol)}"><b>${esc(t.symbol)}</b><span class="delta ${cls(t.change_pct)}">${fpct(t.change_pct, 1)}</span><span class="muted">${isNum(t.watchers) ? fvol(t.watchers) + " watching" : ""}</span></span>`).join("");
+    return `<section class="crowd"><h3>StockTwits crowd <span class="muted">what the retail crowd is saying · refreshed every 10 minutes in market hours · ${esc(etTime(c.as_of))} ET</span></h3>
+      ${explain("The crowd's mood on the market and the biggest names, from StockTwits' own sentiment score (0 to 100, from posts tagged bullish or bearish), plus the names trending right now. A crowd that is extremely bullish or bearish is a crowding signal, not a forecast; it also feeds the desk's 15-minute direction read and is logged every day so it can be scored.")}
+      <div class="cw-grid"><div class="cw-moods">${mood("SPY", "S&P 500")}${mood("QQQ", "Nasdaq 100")}</div>
+        <div><h4>Big caps: crowd mood</h4><div class="bf-megas">${bigs || '<span class="muted">no data</span>'}</div></div>
+        <div><h4>Trending on StockTwits right now</h4><div class="bf-megas">${trend || '<span class="muted">no data</span>'}</div></div></div>
+    </section>`;
   }
   let social = null, socialAll = false;
   const TP = {
@@ -1746,7 +1766,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
@@ -2028,6 +2048,8 @@
     setTimeout(pollBrief, 2000);
     setInterval(pollDirection, 60000);
     setTimeout(pollDirection, 3000);
+    setInterval(pollCrowd, 300000);
+    setTimeout(pollCrowd, 3500);
     setInterval(pollLiveScan, 60000);
     setTimeout(pollLiveScan, 2500);
     setInterval(pollAdmin, 30000);

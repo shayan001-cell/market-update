@@ -427,6 +427,7 @@ async def _startup() -> None:
     asyncio.create_task(scheduler())
     asyncio.create_task(brief_scheduler())
     asyncio.create_task(direction_loop())
+    asyncio.create_task(stocktwits_loop())
     asyncio.create_task(live_scanner())
 
 
@@ -1088,6 +1089,76 @@ def _require_admin(request: Request) -> str:
     if not email or email.lower() not in {e.lower() for e in config.ADMIN_EMAILS}:
         raise HTTPException(status_code=403, detail="admin only")
     return email
+
+
+ST_BIG = ["SPY", "QQQ", "NVDA", "AAPL", "MSFT", "AMZN", "META", "TSLA", "GOOGL", "AVGO"]
+
+
+def _st_text(res: Any) -> Any:
+    if isinstance(res, dict) and res.get("structuredContent"):
+        return res["structuredContent"]
+    if isinstance(res, dict) and isinstance(res.get("content"), list):
+        for c in res["content"]:
+            if c.get("type") == "text":
+                try:
+                    return json.loads(c["text"])
+                except Exception:  # noqa: BLE001
+                    return {"text": c["text"]}
+    return res
+
+
+def _stocktwits_sync() -> dict[str, Any]:
+    """One crowd snapshot: market mood (SPY, QQQ), trending names, the big caps' mood. About a dozen calls."""
+    out: dict[str, Any] = {"as_of": time.time(), "moods": {}, "trending": [], "source": "StockTwits (official connector)"}
+    for sym in ST_BIG:
+        try:
+            s = _st_text(st_call("get_sentiment", {"symbol": sym})) or {}
+            out["moods"][sym] = {"symbol": sym, "score": s.get("score"), "label": s.get("label"), "bullish_pct": s.get("bullish_pct"), "bullish_delta": s.get("bullish_delta")}
+        except Exception as e:  # noqa: BLE001
+            log.warning("stocktwits sentiment %s: %s", sym, e)
+    for sym in ("SPY", "QQQ"):
+        try:
+            v = _st_text(st_call("get_message_volume", {"symbol": sym})) or {}
+            now = next((x for x in v.get("series", []) if x.get("timeframe") == "now"), None)
+            if now and sym in out["moods"]:
+                out["moods"][sym]["volume_label"] = now.get("normalized_label") or now.get("label"); out["moods"][sym]["volume_score"] = now.get("normalized_value")
+        except Exception as e:  # noqa: BLE001
+            log.warning("stocktwits volume %s: %s", sym, e)
+    try:
+        t = _st_text(st_call("get_trending_symbols", {"limit": 12, "asset_class": "equities"})) or {}
+        out["trending"] = [{"symbol": x.get("symbol"), "title": x.get("title"), "price": x.get("price"), "change_pct": x.get("change"), "watchers": x.get("watchers"), "rank": x.get("rank")} for x in t.get("symbols", [])]
+    except Exception as e:  # noqa: BLE001
+        log.warning("stocktwits trending: %s", e)
+    quotes = (state.get("live_scan") or {}).get("quotes") or {}
+    day = fetch.now_et().date().isoformat()
+    try:
+        db.log_crowd(day, [{**m, "price": (quotes.get(sym) or {}).get("last"), "change_pct": (quotes.get(sym) or {}).get("chg_pct")} for sym, m in out["moods"].items()])
+    except Exception:  # noqa: BLE001
+        log.exception("crowd log failed")
+    fetch._cache_put("stocktwits_snapshot", out)
+    return out
+
+
+async def stocktwits_loop() -> None:
+    while True:
+        try:
+            if _st_load().get("access_token"):
+                interval = 600 if fetch.market_state() in ("pre", "open", "post") else 3600
+                if time.time() - state.get("stocktwits_at", 0) >= interval:
+                    state["stocktwits"] = await asyncio.to_thread(_stocktwits_sync); state["stocktwits_at"] = time.time()
+        except Exception:  # noqa: BLE001
+            log.exception("stocktwits loop error")
+        await asyncio.sleep(60)
+
+
+@app.get("/api/stocktwits")
+async def api_stocktwits(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    snap = state.get("stocktwits") or fetch._cache_get("stocktwits_snapshot", 6 * 3600)
+    if not snap:
+        return JSONResponse({"status": "not_connected" if not _st_load().get("access_token") else "warming"}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", **snap}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/stocktwits/status")
