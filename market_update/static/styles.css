@@ -1184,3 +1184,98 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .home-hero .tbl td.num .qx .px { font-size: 11.5px; } .home-hero .tbl td.num .qx .delta { font-size: 10px; }
 .home-hero .tb-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 1250px) { .view.home { grid-template-columns: minmax(0, 2.1fr) minmax(300px, 1fr); } }
+
+/* =====================================================================================
+   PHONE LAYOUT (<= 700px): one column, normal page scroll, compact sticky menu, tables
+   that scroll inside their own box instead of pushing the page sideways.
+   ===================================================================================== */
+@media (max-width: 700px) {
+  html, body { overflow: auto; height: auto; }
+  body { -webkit-text-size-adjust: 100%; }
+  .shell { display: block; height: auto; grid-template-rows: none; }
+  .shell > .hud, .shell > .side { height: auto; }
+  /* menu: brand + a swipeable icon row, sticky at the top, nothing else */
+  .side { position: sticky; top: 0; z-index: 30; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto; align-items: center; gap: 0; padding: 0; background: var(--surface); border-bottom: 1px solid var(--line-2); }
+  .side-brand { padding: 6px 8px 6px 10px; height: auto; gap: 6px; } .side-brand .logo { width: 26px; height: 26px; } .brand-text { display: none; }
+  .side-nav { display: flex; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 6px 6px; gap: 4px; }
+  .side-nav::-webkit-scrollbar { display: none; }
+  .side-item { flex: none; width: auto; padding: 6px 10px; gap: 6px; font-size: 12px; border-radius: 999px; } .side-item .nav-ico { width: 22px; height: 22px; }
+  .side-item .side-label .cnt { display: none; }
+  .side-group, .side-sub, .side-item kbd, .side-foot, .side-toggle { display: none !important; }
+  /* top bar: one row that wraps, no long readouts */
+  .hud { display: block; height: auto; }
+  .hud-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; border-bottom: 1px solid var(--line-2); }
+  .hud-context { padding: 0; } .hud-context b { font-size: 13px; } .hud-context span { display: none; }
+  .hud-spacer { display: none; }
+  .hud-status { border: 0; padding: 0; gap: 6px; margin-left: auto; flex-wrap: wrap; white-space: normal; }
+  #generated-line, #session-line, .readout.count { display: none; }
+  .hud-status .btn { padding: 6px 10px; font-size: 10.5px; min-height: 32px; }
+  .tape-bar { display: none; }
+  .notice { padding: 6px 10px; font-size: 12px; }
+  /* content: normal flow, 12px gutters, nothing wider than the screen */
+  main { overflow: visible; height: auto; min-height: 0; }
+  #app { overflow-x: hidden; }
+  .view, .view.one, .view.home, .view.stock, .view.sub, .view.news { display: block; height: auto; min-height: 0; overflow: visible; }
+  .view.home .col-main, .view.one > section, .view.one > .card, .view.news > div, .subview, .today .panel { padding: 10px 12px; overflow: visible; min-width: 0; }
+  .view.home .col-main > section, .view.home .col-main > .home-top, .view.home .col-main > .home-hero { margin-bottom: 10px; }
+  .today { display: block; overflow: visible; } .feed { max-height: none; overflow: visible; }
+  .home-hero, .home-top, .bm-two, .voices-grid, .pgrid, .detail-grid, .grid, .grid.c2, .grid.c3, .grid.c4, .grid.c5, .grid.c6, .themes-grid, .idx-grid, .hz-cross, .th-cross, .regime, .judg, .facts, .mean-grid, .playbook, .admin-grid, .sm-board { grid-template-columns: 1fr !important; }
+  .home-hero > section { padding: 10px 12px; } .home-hero > section > .explain { min-height: 0; } .home-hero > section > h3 { min-height: 0; }
+  .bm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .bm-tile { padding: 8px 9px; } .bm-h b { font-size: 14px; } .bm-tile .px { font-size: 14px; }
+  .bm-act, .bm-side { font-size: 11px; }
+  /* tables: readable size, scroll sideways inside their own box when they must */
+  .tbl-wrap, .home-hero .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-height: none; border-right: 0; }
+  .tbl { font-size: 11.5px; } .tbl th { padding: 6px 6px; font-size: 9.5px; } .tbl td { padding: 6px 6px; }
+  .home-hero .tbl { table-layout: fixed; }
+  .home-hero .bm-tbl th:nth-child(3), .home-hero .bm-tbl td:nth-child(3) { display: none; }         /* dollars traded: one tap away on the name */
+  .home-hero .cr-tbl th:nth-child(4), .home-hero .cr-tbl td:nth-child(4) { display: none; }         /* price column; the change shows on the name's page */
+  .home-hero .bm-tbl th:nth-child(1), .home-hero .bm-tbl td:nth-child(1), .home-hero .cr-tbl th:nth-child(1), .home-hero .cr-tbl td:nth-child(1) { width: 34%; }
+  .act-tbl, .sc-tbl, .lf-tbl, .th-tbl, .hz-tbl, .op-tbl, .ideas-tbl, .stk-list { min-width: 640px; }
+  .act-tbl { min-width: 520px; }
+  /* mood, verdicts, cards */
+  .mood-tone { font-size: 26px; } .facts { grid-template-columns: repeat(2, 1fr) !important; }
+  .vrow { grid-template-columns: 52px 1fr auto; gap: 6px 8px; } .vrow .v-intra, .vrow .v-why { display: none; }
+  .panel.verdicts h3 { flex-wrap: wrap; } .v-record { margin-left: 0; }
+  .pcard-h, .wc-head, .tk-hero { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .tk-hero { padding: 12px; } .tk-sym { font-size: 26px; } .tk-actions { flex-wrap: wrap; }
+  .pcol { padding: 10px; } .pverdict { font-size: 18px; }
+  .verdict-word { font-size: 17px; } .why { font-size: 11.5px; }
+  .wl-strip .wl-lists { overflow-x: auto; flex-wrap: nowrap; } .wl-chips { gap: 5px; } .wl-add { width: 100%; } #search { width: 100%; }
+  .search-results { position: fixed; left: 8px; right: 8px; top: 120px; width: auto; max-height: 55vh; }
+  .voices .tp-text { font-size: 12px; } .tp-post { padding: 8px 9px; }
+  .stk-list tbody tr td:last-child { display: none; } .stk-list thead th:last-child { display: none; }
+  #stock-detail { margin-top: 10px; } .detail-head { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+  .chart, .chart.tall, .chart.wk { height: 220px; }
+  .subtabs, .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+  .tab, .btn, .btn.sm, .lnk, .chip-t button, .ltab { min-height: 34px; }
+  .meaning .mean-row { grid-template-columns: 1fr; gap: 2px; }
+  footer { position: static; white-space: normal; overflow: visible; text-overflow: clip; padding: 8px 12px; line-height: 1.5; border-top: 1px solid var(--line); }
+  /* sign-in and disclaimer on a phone */
+  .gate { left: 0; padding: 12px; overflow-x: hidden; place-items: start center; }
+  .login-split { grid-template-columns: 1fr; gap: 12px; } .lg-hero { padding: 6px 4px; } .lg-mark img { width: 72px; height: 72px; }
+  .lg-h { font-size: 22px; } .lg-feats { display: none; } .lg-tape { display: none; }
+  .wa-join { grid-template-columns: auto minmax(0, 1fr); margin: 10px 0; padding: 10px 12px; } .wa-join i { grid-column: 2; justify-self: start; }
+  .g-shell, .g-shell.wide, .disc-card, .lg-card { width: 100%; max-width: 100%; }
+  .g-core, .disc-core { padding: 18px 16px; } .gate h1, .disc-h { font-size: 22px; } .disc-body p { font-size: 13px; }
+  .hexflow { transform: scale(.85); transform-origin: left center; }
+  .gate-x { top: 8px; right: 8px; }
+}
+@media (max-width: 700px) {
+  .action, .ideas, .sm-section, .op-section, .th-section, .sc-section, .lf-section, .hz-section, .idx-section, .record { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .bigmoney .tb-list { grid-template-columns: 1fr; }
+  .home-hero .tbl .meta2 { white-space: normal; }
+}
+@media (max-width: 700px) {
+  .lg-foot { position: static; transform: none; margin: 14px 0 4px; text-align: center; font-size: 11px; }
+  .login-stage, .disc-stage { display: grid; align-content: start; }
+}
+@media (max-width: 700px) {
+  .login-stage { grid-template-rows: auto auto; min-height: 100dvh; }
+  .login-split { height: auto; min-height: 0; align-items: start; }
+  .lg-card, .g-shell.lg-card { position: relative; }
+}
+@media (max-width: 700px) {
+  .gate { align-items: start; justify-items: stretch; align-content: start; }
+  .login-stage, .disc-stage { height: auto; align-self: start; }
+  .login-split { align-self: start; }
+}
