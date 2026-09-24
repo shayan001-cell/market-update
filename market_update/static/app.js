@@ -1538,7 +1538,7 @@
   const gateNeeded = () => (STATIC_MODE ? true : (!user || !user.name || !discThisSession()));
   function disclaimerHtml() {
     const needName = !STATIC_MODE && !(user && user.name);
-    return `<div class="ov-login disc-stage"><section class="ov-formpanel disc-panel-wrap"><div class="ov-form ov-form-wide disc-card" id="lg-card">
+    return `<div class="ov-login disc-stage"><section class="ov-formpanel disc-panel-wrap"><div class="disc-logo-wrap">${brandLogo(190)}</div><div class="ov-form ov-form-wide disc-card" id="lg-card">
       ${brandLogo(170)}<button class="gate-x" data-decline title="Close without agreeing (signs you out)" aria-label="Close">×</button>
       ${user ? `<div class="ov-eyebrow">Signed in as ${esc(user.email)} · step 2 of 2</div>` : ""}
       <h1 class="disc-h">Before you continue: this is not financial advice.</h1>
@@ -1568,7 +1568,7 @@
   }
   const WA_GROUP = "https://chat.whatsapp.com/C4NROWURa0SI1hoegnfHOc?mode=gi_t";
   const waJoin = () => `<a class="wa-join" href="${WA_GROUP}" target="_blank" rel="noopener"><span class="wa-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3l-2-1c-.3-.1-.5-.1-.7.1l-.9 1.1c-.2.2-.3.2-.6.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.6-1.2.1-.2 0-.4 0-.5l-.9-2.1c-.2-.6-.5-.5-.7-.5z"/></svg></span><span class="wa-t"><b>Join the OneView group on WhatsApp</b><span>The team's latest moves, posted as they happen: what we are watching, buying and stepping away from.</span></span><i aria-hidden="true">Join ›</i></a>`;
-  const brandLogo = (w) => `<img class="ov-logo" src="static/brand/oneview-logo.png" alt="OneView" width="${w || 190}" height="${Math.round((w || 190) * 480 / 1560)}">`;
+  const brandLogo = (w) => `<img class="ov-logo" src="static/brand/oneview-logo.png?v=6" alt="OneView" width="${w || 190}" style="height:auto">`;
   function loginHtml() {
     const form = STATIC_MODE
       ? `<div class="ov-form" id="login-core"><h1>Welcome to OneView</h1><p>Sign-in runs on the app server; this copy is not connected to one yet.</p>

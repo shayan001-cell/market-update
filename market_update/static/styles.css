@@ -1579,3 +1579,63 @@ footer { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--
 .sc-h { font-size: 12.5px; font-weight: 600; } .sc-h .muted { font-weight: 400; font-size: 11.5px; }
 .sc-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; } .sc-row i { font-style: normal; font-weight: 700; }
 .theme-toggle { display: none !important; }
+
+
+/* =====================================================================================
+   SIGN-IN AND DISCLAIMER, refreshed: gradient navy with soft light, Sora display type, glass cards,
+   everything centred and on one screen.
+   ===================================================================================== */
+.gate { --g-font: "Sora", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-family: var(--g-font); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  background: radial-gradient(1100px 700px at 12% 8%, rgba(36,91,255,.32), transparent 62%), radial-gradient(900px 600px at 92% 96%, rgba(133,167,255,.22), transparent 60%), radial-gradient(600px 400px at 60% 40%, rgba(102,217,166,.07), transparent 60%), linear-gradient(160deg, #050A17 0%, #0A1330 52%, #050A17 100%); }
+.ov-login, .disc-stage.ov-login { background: transparent; min-height: 100dvh; }
+.ov-login::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(800px 600px at 30% 40%, #000 20%, transparent 75%); -webkit-mask-image: radial-gradient(800px 600px at 30% 40%, #000 20%, transparent 75%); }
+.ov-lines i { background: linear-gradient(90deg, transparent, rgba(133,167,255,.45), transparent); height: 1px; }
+.ov-brand { border-right: 0; padding: 48px 64px; justify-content: center; gap: 28px; }
+.gate .ov-brand .ov-tagline { font-family: var(--g-font); font-size: clamp(44px, 4.8vw, 68px); font-weight: 700; letter-spacing: -0.04em; line-height: 1.02; }
+.gate .ov-brand .ov-tagline span { background: linear-gradient(90deg, #85A7FF, #B9CCFF 60%, #66D9A6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.gate .ov-statement p { font-size: 17px; color: #C7D0E0; max-width: 460px; }
+.ov-badge { background: linear-gradient(90deg, #FFD66B, #FFB454); }
+.ov-formpanel { padding: 40px; }
+.gate .ov-form { max-width: 420px; padding: 32px 30px; border-radius: 20px; background: rgba(16,26,43,.62); border: 1px solid rgba(133,167,255,.22); box-shadow: 0 30px 80px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.gate .ov-form h1 { font-family: var(--g-font); font-size: 30px; font-weight: 700; letter-spacing: -0.035em; }
+.gate .ov-form > p { font-size: 15px; }
+.gate .ov-fields label { font-size: 13.5px; }
+.gate .ov-fields input { background: rgba(8,14,29,.7); border-color: rgba(133,167,255,.35); min-height: 50px; border-radius: 12px; font-family: var(--g-font); }
+.gate .ov-fields input:focus { border-color: #85A7FF; box-shadow: 0 0 0 4px rgba(133,167,255,.18); outline: 0; }
+.ov-primary, a.ov-primary { background: linear-gradient(90deg, #245BFF, #3B7BFF); border-radius: 12px; min-height: 50px; font-family: var(--g-font); font-weight: 700; letter-spacing: -0.01em; box-shadow: 0 10px 30px rgba(36,91,255,.35); }
+.ov-primary:hover { background: linear-gradient(90deg, #1747D1, #2E6BF5); }
+.wa-join { background: rgba(37,211,102,.06); border-color: rgba(37,211,102,.28); border-radius: 14px; }
+.mail-line { font-size: 12px; }
+/* disclaimer: centred card, same glass */
+.disc-stage.ov-login { display: grid; grid-template-columns: 1fr; place-items: center; padding: 32px 20px; }
+.disc-stage .ov-formpanel { padding: 0; width: 100%; display: grid; place-items: center; }
+.gate .ov-form-wide.disc-card { max-width: 680px; width: 100%; padding: 36px 36px 30px; border-radius: 22px; background: rgba(16,26,43,.66); border: 1px solid rgba(133,167,255,.22); box-shadow: 0 30px 80px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.08); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.gate .disc-card .disc-h { font-family: var(--g-font); font-size: 30px; font-weight: 700; letter-spacing: -0.035em; line-height: 1.12; margin: 4px 0 6px; }
+.gate .disc-body p { font-size: 14px; line-height: 1.6; color: #C7D0E0; }
+.gate .disc-card .ck { background: rgba(8,14,29,.5); border: 1px solid rgba(133,167,255,.2); border-radius: 12px; padding: 12px 14px; }
+.gate .disc-card .gate-actions { grid-template-columns: 1fr auto; align-items: center; gap: 12px; }
+.gate .disc-card .lnk.decline { text-align: right; }
+.gate .disc-card .ov-eyebrow { color: #85A7FF; }
+.gate .disc-card .ov-logo { width: 160px; }
+@media (max-width: 700px) {
+  .ov-brand { padding: 24px 20px 6px; justify-content: start; gap: 16px; }
+  .gate .ov-brand .ov-tagline { font-size: 38px; }
+  .gate .ov-statement p { font-size: 15px; }
+  .ov-formpanel { padding: 8px 16px 32px; }
+  .gate .ov-form { padding: 22px 18px; border-radius: 16px; }
+  .disc-stage.ov-login { padding: 16px 12px; }
+  .gate .ov-form-wide.disc-card { padding: 22px 18px; }
+  .gate .disc-card .gate-actions { grid-template-columns: 1fr; } .gate .disc-card .lnk.decline { text-align: left; }
+}
+
+/* the raster logo must blend with the page gradient, not with a translucent panel: no stacking contexts around it */
+.ov-brand, .ov-formpanel { z-index: auto; isolation: auto; }
+.ov-login::before { z-index: -1; }
+.ov-login { isolation: isolate; }
+.ov-lines { z-index: -1; }
+.disc-logo-wrap { display: grid; justify-items: center; margin-bottom: 14px; }
+.disc-logo-wrap .ov-logo { width: 190px; margin: 0; }
+.gate .disc-card .ov-logo { display: none; }
+
+/* the logo is transparent now: no blend tricks, no padded box */
+.brand-logo, .ov-logo, .disc-logo-wrap .ov-logo { mix-blend-mode: normal; background: transparent !important; padding: 0 !important; border-radius: 0; filter: none; }
