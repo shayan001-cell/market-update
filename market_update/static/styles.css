@@ -1146,3 +1146,41 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .tp-text { font-size: 12.5px; line-height: 1.4; color: var(--text); }
 .cr-tbl td { padding: 6px 8px; } .cr-tbl .px { font-family: var(--mono); font-weight: 600; margin-right: 6px; }
 @media (max-width: 1100px) { .voices-grid { grid-template-columns: 1fr; } }
+
+/* ---- home hero: big money and voices side by side, same frame, same rhythm ---- */
+.home-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 0 0 14px; align-items: stretch; }
+.home-hero > section { margin: 0; display: grid; grid-template-rows: auto auto 1fr; align-content: start; gap: 0; min-width: 0; border-radius: 8px; padding: 12px 14px; }
+.home-hero > section > h3 { min-height: 34px; align-items: center; margin: 0 0 4px; }
+.home-hero > section > .explain { min-height: 92px; }
+.home-hero .bigmoney { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.home-hero .voices { border-color: var(--line); }
+.bm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 6px 0 10px; }
+.bm-tile { padding: 8px 10px; } .bm-tile .px { font-size: 15px; }
+.bm-two { gap: 10px; }
+.bigmoney .tb-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 14px; }
+.voices-grid { grid-template-columns: 1fr; gap: 10px; margin-top: 6px; }
+.tp-post { padding: 7px 10px; } .tp-text { font-size: 12px; }
+/* price + change stack inside table cells (as they always did); stay inline in tiles */
+.tbl td .qx { display: grid; justify-items: end; gap: 1px; } .tbl td .qx .px { margin: 0; font-family: var(--mono); font-weight: 600; } .tbl td .qx .delta { font-size: 11px; }
+.tbl td.sym { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-hero .tbl th, .home-hero .tbl td { padding: 5px 6px; }
+@media (max-width: 1250px) { .home-hero { grid-template-columns: 1fr; } }
+/* hero fit: give the two panels room, keep every table inside its column */
+.view.home { grid-template-columns: minmax(0, 2.7fr) minmax(280px, 0.85fr); }
+.home-hero .tbl { width: 100%; table-layout: fixed; font-size: 11.5px; }
+.home-hero .tbl th { font-size: 9.5px; letter-spacing: .05em; padding: 5px 5px; white-space: normal; }
+.home-hero .tbl td { padding: 5px 5px; overflow: hidden; text-overflow: ellipsis; }
+.home-hero .tbl td.sym { max-width: none; } .home-hero .tbl td.sym b { display: block; }
+.home-hero .tbl .meta2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-hero .tbl .pill { white-space: normal; line-height: 1.2; display: inline-block; font-size: 10px; }
+.home-hero .bm-tbl th:nth-child(1), .home-hero .bm-tbl td:nth-child(1) { width: 27%; }
+.home-hero .bm-tbl th:nth-child(2), .home-hero .bm-tbl td:nth-child(2) { width: 18%; }
+.home-hero .bm-tbl th:nth-child(3), .home-hero .bm-tbl td:nth-child(3) { width: 16%; }
+.home-hero .bm-tbl th:nth-child(4), .home-hero .bm-tbl td:nth-child(4) { width: 17%; }
+.home-hero .cr-tbl th:nth-child(1), .home-hero .cr-tbl td:nth-child(1) { width: 26%; }
+.home-hero .cr-tbl th:nth-child(2), .home-hero .cr-tbl td:nth-child(2) { width: 17%; }
+.home-hero .cr-tbl th:nth-child(3), .home-hero .cr-tbl td:nth-child(3) { width: 17%; }
+.home-hero .cr-tbl th:nth-child(4), .home-hero .cr-tbl td:nth-child(4) { width: 18%; }
+.home-hero .tbl td.num .qx .px { font-size: 11.5px; } .home-hero .tbl td.num .qx .delta { font-size: 10px; }
+.home-hero .tb-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1250px) { .view.home { grid-template-columns: minmax(0, 2.1fr) minmax(300px, 1fr); } }
