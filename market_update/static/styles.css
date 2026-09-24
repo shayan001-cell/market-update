@@ -1059,3 +1059,5 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .th-fl .tag { margin: 1px 2px 1px 0; }
 .th-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 11.5px; color: var(--text-2); margin: 0 0 8px; } .th-legend b { color: var(--text); }
 @media (max-width: 1250px) { .th-tbl th:nth-child(8), .th-tbl td.th-fl { display: none; } }
+.th-tbl td { overflow: hidden; } .th-tbl th:nth-child(3) { width: 16%; } .th-tbl th:nth-child(8) { width: 11%; }
+.th-fl { white-space: normal; } .th-fl .tag { display: inline-block; white-space: normal; max-width: 100%; line-height: 1.25; font-size: 9.5px; }
