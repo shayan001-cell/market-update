@@ -1061,3 +1061,23 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 @media (max-width: 1250px) { .th-tbl th:nth-child(8), .th-tbl td.th-fl { display: none; } }
 .th-tbl td { overflow: hidden; } .th-tbl th:nth-child(3) { width: 16%; } .th-tbl th:nth-child(8) { width: 11%; }
 .th-fl { white-space: normal; } .th-fl .tag { display: inline-block; white-space: normal; max-width: 100%; line-height: 1.25; font-size: 9.5px; }
+
+/* ---- theme group strip: a scoreboard you cannot miss ---- */
+.gstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin: 10px 0 10px; }
+.gsel { position: relative; text-align: left; font: inherit; cursor: pointer; padding: 9px 10px 8px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--surface-2); color: var(--text-2); display: grid; gap: 3px; min-width: 0; transition: transform .35s cubic-bezier(.16,1,.3,1), border-color .35s, background .35s; }
+.gsel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--line-2); }
+.gsel.up::before { background: var(--up); } .gsel.down::before { background: var(--down); }
+.gsel:hover { transform: translateY(-1px); border-color: var(--accent); color: var(--text); }
+.gsel.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent), 0 8px 24px rgba(245,197,66,.25); }
+.gsel.active::before { background: var(--accent-ink); }
+.gsel-n { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gsel-v { font-size: 16px; font-weight: 700; } .gsel.active .gsel-v { color: var(--accent-ink); }
+.gsel-s { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; } .gsel.active .gsel-s { color: rgba(10,13,20,.75); }
+.gsel-bar { display: inline-block; width: 40px; height: 4px; background: rgba(255,255,255,.12); border-radius: 2px; overflow: hidden; } .gsel-bar b { display: block; height: 100%; background: var(--up); } .gsel.active .gsel-bar { background: rgba(10,13,20,.25); } .gsel.active .gsel-bar b { background: var(--accent-ink); }
+/* ---- home mood card: playbook fills the space when the verdict list is long ---- */
+.panel.mood { grid-template-rows: auto auto auto auto 1fr; }
+.playbook { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-top: 10px; border-top: 1px solid var(--line); align-self: end; }
+.pb-col h4 { margin: 0 0 6px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.pb-col ul { margin: 0; padding-left: 14px; display: grid; gap: 4px; } .pb-col li { font-size: 12px; line-height: 1.4; color: var(--text-2); }
+.vlist { max-height: 420px; overflow: auto; }
+@media (max-width: 1250px) { .playbook { grid-template-columns: 1fr; } }

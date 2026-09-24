@@ -333,8 +333,28 @@
     const f = plainFacts(r); if (!f.length) return "";
     return `<section class="meaning"><h3>What today's numbers mean</h3><div class="mean-grid">${f.map((x) => `<div class="mean-row"><span class="mean-k">${esc(x.k)}</span><span class="mean-v mono ${x.c}">${x.v}</span><span class="mean-t">${esc(x.t)}</span></div>`).join("")}</div></section>`;
   }
+  function playbook(r) {
+    const g = r.regime; if (!g) return "";
+    const tone = g.tone.choice, vol = Math.round(g.volatility.score), lead = g.leadership.choice, rates = g.rates_read.choice;
+    const B = (r.flows || {}).breadth; const bp = B && B.n ? Math.round(B.above20 / B.n * 100) : null;
+    const S = (!STATIC_MODE && liveScan) || r.scan; const nq = S && isNum(S.qualified) ? S.qualified : null;
+    const vix = (r.macro || []).find((x) => /VIX/i.test(x.label || "")); const mv = vix && isNum(vix.last) ? (vix.last / 15.9).toFixed(1) : null;
+    const day = [
+      tone === "risk_on" ? "Buy strength: longs through yesterday's high on above-normal volume; avoid shorting dips." : tone === "risk_off" ? "Sell strength: short pops into resistance and fade gaps; do not buy the first dip." : "No lead: trade the range between yesterday's high and low, and wait for the first 30 minutes.",
+      mv ? `Size for a ${mv}% day on the S&P${vol >= 2 ? "; ranges will be wide, so stops need room" : "; ranges should stay ordinary"}.` : "",
+      nq != null ? `${nq} names have unusual volume right now: start in SCAN, take the ones above VWAP with a breakout read.` : "",
+      lead && lead !== "unclear" ? `Leadership: ${pretty(lead)}. Trade in that group first.` : "",
+    ].filter(Boolean);
+    const swing = [
+      tone === "risk_on" ? "Add to the strongest names on pullbacks to the 20-day average; let winners run." : tone === "risk_off" ? "Cut losers, hold cash, and only take setups with a tight stop and 2× reward." : "Keep size small until the tone resolves; favour names with a clear level.",
+      rates === "headwind" ? "Rates are a headwind: lean away from long-duration growth, toward names with earnings now." : rates === "tailwind" ? "Rates are a tailwind: growth and tech setups get the benefit of the doubt." : rates === "growth_scare" ? "Growth scare: defensives and bonds first; wait on cyclicals." : "Rates are not the story this week.",
+      bp != null ? (bp >= 60 ? `Breadth is broad (${bp}% above the 20-day): setups outside the leaders can work too.` : bp <= 40 ? `Breadth is narrow (${bp}% above the 20-day): stay with leaders; laggards keep lagging.` : `Breadth is middling (${bp}%): pick names, not the market.`) : "",
+      "Check the verdicts on the right: buy-the-dip means wait for the pullback, not chase.",
+    ].filter(Boolean);
+    return `<div class="playbook"><div class="pb-col"><h4>Day trader</h4><ul>${day.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div><div class="pb-col"><h4>Swing trader</h4><ul>${swing.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div></div>`;
+  }
   function moodPanel(r) {
-    const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">Model read unavailable this build.</div></section>`;
+    const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">Model read unavailable this build.</div>${activeList().length > 4 ? playbook(r) : ""}</section>`;
     const volL = ["quiet", "normal", "elevated", "extreme"];
     const tone = g.tone.choice, cl = { risk_on: "up", risk_off: "down", mixed: "flat" }[tone];
     const fact = (label, value, c) => `<div class="fact"><span class="fact-l">${label}</span><span class="fact-v ${c || ""}">${value}</span></div>`;
@@ -581,10 +601,14 @@
     const head = ai ? `<div class="hz-cross th-cross">
         <div class="tile"><div class="tile-label">Where the theme is</div><div class="tile-value small">${pretty(ai.stage.choice)}</div>${explain(TH.stage[ai.stage.choice] || "")}<div class="tile-sub">${(ai.stage.confidence * 100).toFixed(0)}% confidence ${conf(ai.stage.confidence)}</div></div>
         <div class="tile"><div class="tile-label">Likely next leg</div><div class="tile-value small">${TH.group[ai.next_group.choice] || pretty(ai.next_group.choice)}</div>${explain("The part of the stack whose relative strength is turning while the leaders rest.")}<div class="tile-sub">${(ai.next_group.confidence * 100).toFixed(0)}% confidence ${conf(ai.next_group.confidence)}</div></div>
-        <div class="tile"><div class="tile-label">Group scoreboard, 1 month vs SPY</div><div class="th-groups">${T_.groups.slice().sort((a, b) => (b.avg_rel_vs_spy_1m || 0) - (a.avg_rel_vs_spy_1m || 0)).map((g) => `<div class="th-g"><span>${TH.group[g.group] || g.group}</span><span class="num ${cls(g.avg_rel_vs_spy_1m)}">${fpct(g.avg_rel_vs_spy_1m, 1)}</span><span class="muted">${(g.share_in_uptrend * 100).toFixed(0)}% in uptrend</span></div>`).join("")}</div></div>
+        <div class="tile"><div class="tile-label">How to read the strip below</div><div class="tile-value small">Pick a part of the stack</div>${explain("Each box is one part of the data-center build-out. The number is how the group did against the S&P over one month; the bar is how many of its names are in an uptrend. Money rotates through these boxes: the leaders run first, then the next ones. Click a box to see its names.")}</div>
       </div>` : "";
     const groups = ["all", ...Object.keys(TH.group).filter((k) => T_.rows.some((x) => x.group === k))];
-    const tabs = groups.map((k) => `<button class="tab ${themeGroup === k ? "active" : ""}" data-theme-group="${k}">${k === "all" ? "All" : TH.group[k]}</button>`).join("");
+    const gstat = (k) => (T_.groups || []).find((g) => g.group === k) || {};
+    const allRel = (T_.groups || []).filter((g) => isNum(g.avg_rel_vs_spy_1m)); const allAvg = allRel.length ? allRel.reduce((n, g) => n + g.avg_rel_vs_spy_1m, 0) / allRel.length : null;
+    const tabs = groups.map((k) => { const g = k === "all" ? { avg_rel_vs_spy_1m: allAvg, share_in_uptrend: allRel.length ? allRel.reduce((n, x) => n + (x.share_in_uptrend || 0), 0) / allRel.length : null, n: T_.rows.length } : gstat(k);
+      const rel = g.avg_rel_vs_spy_1m, up = g.share_in_uptrend, c = cls(rel);
+      return `<button class="gsel ${themeGroup === k ? "active" : ""} ${c}" data-theme-group="${k}"><span class="gsel-n">${k === "all" ? "All names" : TH.group[k]}</span><span class="gsel-v mono ${c}">${isNum(rel) ? fpct(rel, 1) : "–"}</span><span class="gsel-s"><i class="gsel-bar"><b style="width:${isNum(up) ? (up * 100).toFixed(0) : 0}%"></b></i>${isNum(up) ? Math.round(up * 100) + "% in uptrend" : ""}${isNum(g.n) ? ` · ${g.n}` : ""}</span></button>`; }).join("");
     const rows = T_.rows.filter((x) => themeGroup === "all" || x.group === themeGroup).map((x) => {
       const a = x.ai || {}, t = x.technicals, f = x.fundamentals || {};
       const ph = a.phase ? a.phase.choice : "";
@@ -605,7 +629,7 @@
     const legend = `<div class="th-legend"><span><b>Run score</b> how likely the name is to move if the theme runs: strong, good, modest or weak.</span><span><b>Phase</b> where it is in its own move.</span><span><b>Theme tie</b> how much of its business is the theme (dots: one to three).</span><span><b>Move size</b> how big its moves tend to be.</span></div>`;
     return `<section class="th-section"><h2>${esc(T_.name)}: who can run <span class="muted">${T_.rows.length} names by role in the stack · ranked by theme leverage × move potential × trend × volatility × relative strength · SPY ${fpct(T_.spy_ret_1m, 1)} / ${fpct(T_.spy_ret_3m, 1)} over 1 / 3 months</span></h2>
       ${head}
-      <div class="tabs">${tabs}</div>
+      <div class="gstrip">${tabs}</div>
       ${legend}
       <div class="tbl-wrap"><table class="tbl th-tbl"><thead><tr><th>Name</th><th>Run score</th><th>Phase</th><th>Theme tie</th><th>Move size</th><th>Price</th><th>1 month</th><th>Flags</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
   }
