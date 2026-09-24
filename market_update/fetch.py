@@ -12,6 +12,7 @@ import io
 import json
 import re
 import logging
+import time as _clock
 import warnings
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -151,8 +152,12 @@ def fetch_snapshot(tickers: list[str], history: pd.DataFrame | None = None) -> d
         d = d.dropna(subset=["Close"])
         if d.empty:
             continue
-        prev_close = _to_float(d["Close"].iloc[-1])
-        prev_date = d.index[-1].date()
+        # The daily frame can already carry TODAY's partial bar during and after the session; the
+        # prior close must be the last COMPLETED session, or every change reads 0.00%.
+        today_et = now_et().date()
+        k = -2 if (len(d) >= 2 and d.index[-1].date() >= today_et) else -1
+        prev_close = _to_float(d["Close"].iloc[k])
+        prev_date = d.index[k].date()
         avg_volume = _to_float(d["Volume"].tail(10).mean()) or 0.0
 
         m = frame_for(minute, t)
@@ -214,14 +219,36 @@ INFO_FIELDS = {
 }
 
 
+_INFO_KEEP = 30 * 86400          # a company profile that is a month old beats an empty one
+
+
 def fetch_info(tickers: list[str]) -> dict[str, dict[str, Any]]:
+    """Company profile per ticker. Yahoo's profile endpoint is rate-limited and sometimes blocked
+    outright; when it returns nothing, reuse the last good profile for that name (marked stale)
+    and take the market cap from the lighter fast_info feed."""
     out = {}
+    store = _cache_get("info_last_good", _INFO_KEEP) or {}
+    dirty = False
     for t in tickers:
+        stale = False
         try:
             info = yf.Ticker(t).info or {}
         except Exception as e:  # noqa: BLE001
             log.warning("info failed for %s: %s", t, e)
             info = {}
+        if info.get("marketCap") or info.get("sector") or info.get("quoteType"):
+            store[t] = {"info": info, "at": _clock.time()}
+            dirty = True
+        elif store.get(t):
+            info = dict(store[t]["info"])
+            stale = True
+        if not info.get("marketCap"):
+            try:
+                mc = yf.Ticker(t).fast_info.get("marketCap")
+                if mc:
+                    info["marketCap"] = mc
+            except Exception:  # noqa: BLE001
+                pass
         qt = info.get("quoteType")
         earn_ts = info.get("earningsTimestampStart") or info.get("earningsTimestamp")
         next_earnings = None
@@ -251,7 +278,11 @@ def fetch_info(tickers: list[str]) -> dict[str, dict[str, Any]]:
             "next_earnings": next_earnings,
             "days_to_earnings": days_to_earnings,
             "quote_type": qt,
+            "profile_stale": stale,
+            "profile_as_of": (store.get(t) or {}).get("at"),
         }
+    if dirty:
+        _cache_put("info_last_good", store)
     return out
 
 

@@ -53,6 +53,29 @@ CREATE TABLE IF NOT EXISTS activity (
     action TEXT NOT NULL,
     detail TEXT
 );
+CREATE TABLE IF NOT EXISTS verdicts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    kind TEXT NOT NULL,                 -- swing | intraday | long_term
+    verdict TEXT NOT NULL,
+    price REAL,
+    ts REAL NOT NULL,
+    horizon_days INTEGER NOT NULL,
+    build_id TEXT,
+    eval_price REAL,
+    eval_ts REAL,
+    hit INTEGER                          -- 1 hit, 0 miss, NULL not evaluated / not directional
+);
+CREATE INDEX IF NOT EXISTS verdicts_open ON verdicts(eval_ts, ts);
+CREATE UNIQUE INDEX IF NOT EXISTS verdicts_once ON verdicts(ticker, kind, build_id);
+CREATE TABLE IF NOT EXISTS alerts (
+    email TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    rvol_threshold REAL NOT NULL DEFAULT 3.0,
+    min_price REAL NOT NULL DEFAULT 2.0,
+    channel TEXT NOT NULL DEFAULT 'email',
+    updated REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS watchlist (
     email TEXT NOT NULL,
     ticker TEXT NOT NULL,
@@ -284,3 +307,81 @@ def import_legacy_json(users_path: Path) -> int:
     except OSError:
         pass
     return n
+
+
+# ---- verdict ledger: every call the model makes, with the price at the time, evaluated later --------
+BULLISH = {"buy_now", "buy_the_dip", "long_momentum", "buy_dip_to_support", "accumulate", "trend_up", "momentum_up", "drifting_up", "pullback_in_uptrend", "buying_today"}
+BEARISH = {"short_setup", "short_momentum", "trim", "avoid", "fade_the_gap", "trend_down", "momentum_down", "drifting_down", "selling_today"}
+HORIZON = {"swing": 7, "intraday": 1, "long_term": 90}          # calendar days until a call is scored
+
+
+def log_verdicts(rows: list[dict[str, Any]]) -> int:
+    """rows: {ticker, kind, verdict, price, build_id}. Ignores duplicates for the same build."""
+    now = time.time()
+    n = 0
+    with connect() as con:
+        for r in rows:
+            if not r.get("verdict") or r.get("price") is None:
+                continue
+            horizon = HORIZON.get(r["kind"], 7)
+            # A call counts once: the same verdict on the same name inside an open window is the same call, not a new one.
+            same = con.execute("SELECT 1 FROM verdicts WHERE ticker = ? AND kind = ? AND verdict = ? AND eval_ts IS NULL AND ts > ? LIMIT 1",
+                               (r["ticker"], r["kind"], r["verdict"], now - horizon * 86400)).fetchone()
+            if same:
+                continue
+            cur = con.execute("INSERT OR IGNORE INTO verdicts(ticker, kind, verdict, price, ts, horizon_days, build_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                              (r["ticker"], r["kind"], r["verdict"], float(r["price"]), now, horizon, r.get("build_id")))
+            n += cur.rowcount
+    return n
+
+
+def evaluate_verdicts(prices: dict[str, float]) -> int:
+    """Score every call whose horizon has passed, using today's price for that ticker."""
+    now = time.time()
+    n = 0
+    with connect() as con:
+        due = con.execute("SELECT id, ticker, verdict, price, horizon_days FROM verdicts WHERE eval_ts IS NULL AND ts + horizon_days * 86400 <= ?", (now,)).fetchall()
+        for r in due:
+            px = prices.get(r["ticker"])
+            if px is None or not r["price"]:
+                continue
+            move = px / r["price"] - 1
+            v = r["verdict"]
+            hit = None
+            if v in BULLISH:
+                hit = 1 if move > 0 else 0
+            elif v in BEARISH:
+                hit = 1 if move <= 0 else 0
+            con.execute("UPDATE verdicts SET eval_price = ?, eval_ts = ?, hit = ? WHERE id = ?", (px, now, hit, r["id"]))
+            n += 1
+    return n
+
+
+def track_record() -> dict[str, Any]:
+    with connect() as con:
+        by_verdict = [dict(r) for r in con.execute(
+            "SELECT kind, verdict, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, "
+            "AVG(CASE WHEN eval_price IS NOT NULL THEN (eval_price / price - 1) * 100 END) AS avg_move_pct "
+            "FROM verdicts GROUP BY kind, verdict ORDER BY kind, n DESC")]
+        by_ticker = [dict(r) for r in con.execute(
+            "SELECT ticker, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, "
+            "AVG(CASE WHEN eval_price IS NOT NULL THEN (eval_price / price - 1) * 100 END) AS avg_move_pct "
+            "FROM verdicts GROUP BY ticker HAVING scored > 0 ORDER BY scored DESC, hits DESC LIMIT 60")]
+        recent = [dict(r) for r in con.execute("SELECT ticker, kind, verdict, price, ts, eval_price, eval_ts, hit FROM verdicts ORDER BY ts DESC LIMIT 80")]
+        totals = dict(con.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, MIN(ts) AS since FROM verdicts").fetchone())
+    return {"by_verdict": by_verdict, "by_ticker": by_ticker, "recent": recent, "totals": totals, "as_of": time.time()}
+
+
+# ---- alerts (settings only for now; delivery comes later) -----------------------------------------
+def get_alert(email: str) -> dict[str, Any]:
+    with connect() as con:
+        r = con.execute("SELECT * FROM alerts WHERE email = ?", (email,)).fetchone()
+        return dict(r) if r else {"email": email, "enabled": 0, "rvol_threshold": 3.0, "min_price": 2.0, "channel": "email", "updated": None}
+
+
+def set_alert(email: str, enabled: bool, rvol_threshold: float, min_price: float, channel: str) -> dict[str, Any]:
+    with connect() as con:
+        con.execute("INSERT INTO alerts(email, enabled, rvol_threshold, min_price, channel, updated) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(email) DO UPDATE SET enabled = excluded.enabled, rvol_threshold = excluded.rvol_threshold, min_price = excluded.min_price, channel = excluded.channel, updated = excluded.updated",
+                    (email, 1 if enabled else 0, float(rvol_threshold), float(min_price), channel, time.time()))
+    return get_alert(email)

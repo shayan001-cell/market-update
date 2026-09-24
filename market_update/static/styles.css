@@ -1081,3 +1081,43 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .pb-col ul { margin: 0; padding-left: 14px; display: grid; gap: 4px; } .pb-col li { font-size: 12px; line-height: 1.4; color: var(--text-2); }
 .vlist { max-height: 420px; overflow: auto; }
 @media (max-width: 1250px) { .playbook { grid-template-columns: 1fr; } }
+
+/* ---- P0/P1 (2026-09-24): one quote store, conviction words, why bullets, big-money panel, gate offset ---- */
+.qx { display: contents; }
+.conv { display: inline-flex; align-items: center; font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; line-height: 1.5; vertical-align: middle; }
+.conv-high { color: var(--up); } .conv-med { color: var(--accent); } .conv-low { color: var(--muted); border-style: dashed; }
+.why { margin: 6px 0 0; padding: 0 0 0 14px; font-size: 12px; line-height: 1.4; color: var(--text-2); display: grid; gap: 2px; }
+.why li::marker { color: var(--accent); }
+.verdict-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.pverdict .conv { margin-left: 6px; font-size: 9px; }
+.v-record { margin-left: auto; font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--accent); }
+.panel.verdicts h3 { display: flex; align-items: baseline; gap: 8px; }
+.bigmoney { margin: 0 0 14px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 8px; background: var(--surface); }
+.bigmoney h3 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.bigmoney h3 .muted { font-size: 10px; letter-spacing: 0; text-transform: none; margin-left: auto; font-family: var(--mono); }
+.bigmoney h4 { margin: 0 0 6px; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.bm-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 8px 0 12px; }
+.bm-tile { background: var(--surface-2); padding: 9px 12px; display: grid; gap: 3px; cursor: pointer; border-top: 2px solid transparent; }
+.bm-tile.up { border-top-color: var(--up); } .bm-tile.down { border-top-color: var(--down); }
+.bm-tile:hover { background: var(--hi-bg); }
+.bm-h { display: flex; gap: 8px; align-items: baseline; } .bm-h b { font-family: var(--macro); font-size: 15px; } .bm-h .muted { font-size: 10.5px; }
+.bm-tile .px { font-family: var(--mono); font-size: 16px; font-weight: 600; margin-right: 8px; } .bm-tile .delta { font-size: 12px; }
+.bm-act, .bm-side { font-size: 11.5px; color: var(--text-2); } .bm-act b { font-family: var(--mono); }
+.bm-two { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.bigmoney .tb-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 3px 16px; }
+.bigmoney .tbl-wrap, .bm-tbl { width: 100%; }
+.bm-tbl td { padding: 6px 8px; } .bm-tbl .px { font-family: var(--mono); font-weight: 600; margin-right: 6px; }
+.bigmoney .tb { cursor: pointer; } .bigmoney .tb:hover .tb-l { color: var(--accent); }
+.src-line { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 0 0 10px; padding: 6px 10px; border-left: 2px solid var(--line-2); }
+.src-line b { color: var(--text-2); }
+.record h3 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.tk-price { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tk-verdict .why { max-width: 60ch; }
+/* the overlay covers the working area only, so the menu stays clickable behind the sign-in and the disclaimer */
+.gate { left: 236px; }
+.shell.collapsed ~ .gate { left: 64px; }
+.gate-x { position: absolute; top: 14px; right: 16px; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--g-hair, rgba(255,255,255,.12)); background: transparent; color: var(--g-dim, #A3ADBF); font: inherit; font-size: 20px; line-height: 1; cursor: pointer; z-index: 2; }
+.gate-x:hover { color: var(--g-text, #E6EAF2); border-color: var(--g-text, #E6EAF2); }
+.disc-card { position: relative; }
+@media (max-width: 1100px) { .bm-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 900px) { .gate, .shell.collapsed ~ .gate { left: 0; } }

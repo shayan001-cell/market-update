@@ -128,7 +128,7 @@ def _stock_record(t: str, s: dict[str, Any], f: pd.DataFrame | None, meta: dict[
     tech = s["technicals"]
     fundamentals = {k: meta.get(k) for k in ("market_cap", "beta", "short_float", "trailing_pe", "forward_pe", "ps",
                                               "rev_growth", "eps_growth", "margins", "analyst", "target",
-                                              "next_earnings", "days_to_earnings")}
+                                              "next_earnings", "days_to_earnings", "profile_stale", "profile_as_of")}
     return {
         "ticker": t, "name": meta.get("name", t), "sector": meta.get("sector", ""), "industry": meta.get("industry", ""),
         "kind": {"ETF": "ETF", "CRYPTOCURRENCY": "Crypto", "INDEX": "Index", "MUTUALFUND": "Fund"}.get(meta.get("quote_type"), "Stock"),
@@ -278,6 +278,135 @@ def _checklist(s: dict[str, Any], tone: str) -> dict[str, Any] | None:
     ]
     return {"passed": sum(ok for _, ok in items), "total": len(items), "failed": [n for n, ok in items if not ok]}
 
+
+
+LARGE_CAP = 10e9
+_ETF_KINDS = {"ETF", "Index", "Fund"}
+
+
+def _num(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x
+
+
+def _why_bullets(s: dict[str, Any], with_model_reason: bool = True) -> list[str]:
+    """Two to four plain-word reasons behind the verdict, from the data itself. The model's own
+    'main reason' only makes sense under the model's stance, so funds and large caps (which show a
+    trend or momentum read instead) skip it."""
+    t = s.get("technicals") or {}
+    f = s.get("fundamentals") or {}
+    a = s.get("ai") or {}
+    sc = s.get("scan") or {}
+    sm = s.get("smart") or {}
+    out: list[str] = []
+    reason = ((a.get("main_reason") or {}).get("choice")) if with_model_reason else None
+    bearish = ((a.get("stance") or {}).get("choice")) in ("avoid", "short_setup", "hold_dont_add")
+    reason_words = {"trend_and_entry": "The trend and the entry point argue against buying here." if bearish else "The trend and the entry point line up.", "extended": "It has run a long way from its usual range, so chasing is risky.",
+                    "resistance": "There is a price ceiling just overhead where sellers showed up before.", "event_risk": "A dated event (earnings or a decision) is close and can move it either way.",
+                    "smart_money": "What insiders and big holders are doing matters here.", "options_flow": "Options traders are placing unusually large bets.",
+                    "volume": "Today's trading activity is the tell.", "market_tone": "The overall market mood is doing most of the work.", "poor_reward": "The potential gain is small next to what you would risk."}
+    if reason in reason_words:
+        out.append(reason_words[reason])
+    tr = t.get("trend")
+    if tr == "up" and t.get("above_sma50"):
+        out.append("Trend up: it trades above its 20- and 50-day averages.")
+    elif tr == "down" and t.get("above_sma50") is False:
+        out.append("Trend down: it trades below its 20- and 50-day averages.")
+    elif tr:
+        out.append("The trend is mixed: short and medium averages disagree.")
+    d20 = t.get("dist_sma20_pct")
+    if _num(d20) and abs(d20) >= 8:
+        out.append(f"{'Stretched' if d20 > 0 else 'Oversold'}: {abs(d20):.0f}% {'above' if d20 > 0 else 'below'} its 20-day average.")
+    rv = sc.get("rvol_tod") if _num(sc.get("rvol_tod")) else s.get("rel_volume")
+    if _num(rv) and rv >= 1.5:
+        vw = " and it is holding above the day's average price" if sc.get("above_vwap") else (" but it is below the day's average price" if sc.get("above_vwap") is False else "")
+        out.append(f"Trading activity is {rv:.1f}x normal for this time of day{vw}.")
+    elif _num(rv) and rv < 0.6:
+        out.append("Trading activity is light: fewer shares than usual are changing hands.")
+    ins = (sm.get("insider") or {})
+    buys = len(ins.get("open_market_buys_90d") or [])
+    sells = len(ins.get("open_market_sales_90d") or [])
+    if buys and not sells:
+        out.append(f"Insiders bought shares with their own money ({buys} purchase{'s' if buys > 1 else ''} in 90 days).")
+    elif sells and not buys and (ins.get("sell_value_90d") or 0) > 0:
+        out.append("Insiders have been selling, beyond routine sales.")
+    de = f.get("days_to_earnings")
+    if isinstance(de, int) and 0 <= de <= 10:
+        out.append(f"Earnings in {de} day{'s' if de != 1 else ''}: expect a big move either way.")
+    pl = s.get("plan") or {}
+    rr = pl.get("reward_to_risk")
+    if _num(rr) and len(out) < 4:
+        out.append(f"Potential gain is {rr:.1f}x the amount at risk {'(good odds)' if rr >= 2 else '(thin odds)' if rr < 1.2 else '(fair odds)'}.")
+    seen: list[str] = []
+    for x in out:
+        if x not in seen:
+            seen.append(x)
+    if len(seen) < 2:
+        r5, r1 = t.get("ret_5d"), t.get("ret_1m")
+        if _num(r5):
+            month = f", {'up' if r1 >= 0 else 'down'} {abs(r1):.0f}% over the month" if _num(r1) else ""
+            seen.append(f"{'Up' if r5 >= 0 else 'Down'} {abs(r5):.1f}% over the past week{month}.")
+        elif _num(s.get("rel_volume")):
+            seen.append(f"Trading activity is {s['rel_volume']:.1f}x its normal level.")
+    return seen[:4]
+
+
+def _conviction(c: Any) -> str:
+    return "high" if _num(c) and c >= 0.7 else "med" if _num(c) and c >= 0.5 else "low"
+
+
+def _verdict(s: dict[str, Any]) -> dict[str, Any]:
+    """One verdict per name, chosen by what the thing is. ETFs and indexes never get AVOID:
+    they get a trend or range bias. Large caps get a momentum-plus-volume read. Everything
+    else keeps the model's stance."""
+    t = s.get("technicals") or {}
+    f = s.get("fundamentals") or {}
+    a = s.get("ai") or {}
+    st = (a.get("stance") or {})
+    kind = s.get("kind") or "Stock"
+    ticker = s.get("ticker")
+    is_etf = kind in _ETF_KINDS or ticker in config.INDEX_ETFS or ticker in config.SECTOR_ETFS
+    mcap = f.get("market_cap")
+    tr = t.get("trend")
+    d20 = t.get("dist_sma20_pct")
+    if is_etf:
+        if tr == "up":
+            code, word, cls, plain = "trend_up", "TREND UP", "up", "Rising trend. Buying dips toward the 20-day average has worked; do not chase a spike."
+        elif tr == "down":
+            code, word, cls, plain = "trend_down", "TREND DOWN", "down", "Falling trend. Bounces have been sold; wait for it to reclaim its averages."
+        else:
+            code, word, cls, plain = "range", "RANGE", "flat", "Moving sideways. Buy near the low end of the range, sell near the top, or wait for a break."
+        return {"kind": "etf", "code": code, "word": word, "cls": cls, "plain": plain, "conviction": "high" if tr in ("up", "down") else "med", "why": _why_bullets(s, False)}
+    adv = s.get("avg_dollar_volume")
+    if (_num(mcap) and mcap >= LARGE_CAP) or (not _num(mcap) and _num(adv) and adv >= 2e9):   # no market cap from the feed: $2B+ traded a day is large by any measure
+        r5 = t.get("ret_5d"); today = s.get("chg_pct")
+        rv = max([x for x in (s.get("rel_volume"), (s.get("scan") or {}).get("rvol_tod")) if _num(x)], default=None)   # same activity number the bullets quote
+        strong_vol = _num(rv) and rv >= 1.3
+        if _num(today) and today <= -3 and strong_vol:
+            code, word, cls, plain = "selling_today", "HEAVY SELLING TODAY", "down", "Down hard today on far more trading than usual: sellers are in charge right now, whatever the longer trend says."
+        elif _num(today) and today >= 3 and strong_vol:
+            code, word, cls, plain = "buying_today", "HEAVY BUYING TODAY", "up", "Up hard today on far more trading than usual: buyers are in charge right now."
+        elif _num(r5) and r5 >= 2 and tr != "down":
+            code, word, cls = ("momentum_up", "MOMENTUM UP", "up") if strong_vol else ("drifting_up", "DRIFTING UP", "up2")
+            plain = "Moving up on heavy trading: buyers are committed." if strong_vol else "Moving up on light trading: fine to hold, not a reason to chase."
+        elif _num(r5) and r5 <= -2 and tr != "up":
+            code, word, cls = ("momentum_down", "MOMENTUM DOWN", "down") if strong_vol else ("drifting_down", "DRIFTING DOWN", "flat")
+            plain = "Falling on heavy trading: sellers are committed." if strong_vol else "Falling on light trading: a drift, not a rush for the exits."
+        elif _num(d20) and d20 < -3 and tr == "up":
+            code, word, cls, plain = "pullback_in_uptrend", "PULLBACK", "up2", "A dip inside a rising trend. The usual spot where buyers step back in."
+        else:
+            code, word, cls, plain = "flat", "FLAT", "flat", "Going nowhere in particular. No edge either way right now."
+        conv = "high" if (strong_vol and code in ("momentum_up", "momentum_down", "selling_today", "buying_today")) else "med" if code != "flat" else "low"
+        why = _why_bullets(s, False)
+        if _num(r5):
+            why.insert(0, f"{'Up' if r5 >= 0 else 'Down'} {abs(r5):.1f}% over the past five sessions on {'heavy' if strong_vol else 'ordinary'} trading.")
+        return {"kind": "large", "code": code, "word": word, "cls": cls, "plain": plain, "conviction": conv, "why": why[:4], "model": st.get("choice")}
+    if st.get("choice"):
+        words = {"buy_now": ("BUY", "up", "Trend, chart and entry all agree, with room to run to the next level."), "buy_the_dip": ("BUY THE DIP", "up2", "Strong stock that has run too far to chase. Wait for a pullback toward its 20-day average."),
+                 "wait_for_breakout": ("WAIT FOR BREAKOUT", "flat", "Looks constructive but is capped under a price ceiling. A close above it is the trigger."), "hold_dont_add": ("HOLD, DON'T ADD", "flat", "If you own it, keep it with a stop. New money has no edge here."),
+                 "avoid": ("AVOID", "down", "The reads conflict, an event is near, or informed money is selling. No trade."), "short_setup": ("SHORT SETUP", "down", "Falling trend with sellers in control and a clean entry for a short.")}
+        w, cls, plain = words.get(st["choice"], (st["choice"].upper(), "flat", ""))
+        return {"kind": "stock", "code": st["choice"], "word": w, "cls": cls, "plain": plain, "conviction": _conviction(st.get("confidence")), "why": _why_bullets(s)}
+    return {"kind": "stock", "code": None, "word": "NO VERDICT", "cls": "none", "plain": "The model returned no stance for this build.", "conviction": "low", "why": _why_bullets(s)}
 
 
 def _stance_state(s: dict[str, Any], tone_now: str, mstate: str) -> dict[str, Any]:
@@ -688,6 +817,7 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         oa = ((s.get("options") or {}).get("ai") or {})
         if oa and oa["intensity"]["score"] >= J.OPTIONS_INTENSITY_FLAG and "heavy_options" not in s["tags"]:
             s["tags"].append("heavy_options")
+        s["verdict"] = _verdict(s)
 
 
     return _clean({
@@ -792,6 +922,7 @@ async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool =
     oa = ((s.get("options") or {}).get("ai") or {})
     if oa and oa["intensity"]["score"] >= J.OPTIONS_INTENSITY_FLAG:
         s["tags"].append("heavy_options")
+    s["verdict"] = _verdict(s)
     s["analyzed_at"] = datetime.now(tz=config.ET).isoformat()
     s["ai_stats"] = {"calls": judge.calls, "failures": judge.failures}
     return _clean(s)

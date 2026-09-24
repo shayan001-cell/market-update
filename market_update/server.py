@@ -106,6 +106,10 @@ async def do_build(reason: str) -> bool:
             state["report"] = report
             state["last_error"] = None
             state["builds"] += 1
+            try:
+                await asyncio.to_thread(_ledger_from_report, report)
+            except Exception:  # noqa: BLE001
+                log.exception("verdict ledger failed")
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             REPORT_PATH.write_text(json.dumps(report, default=str))
             log.info("build done in %ss: %s calls, %s stocks", report["elapsed_s"], report["ai_stats"]["calls"], len(report["stocks"]))
@@ -121,23 +125,41 @@ async def do_build(reason: str) -> bool:
 def _live_scan_sync() -> dict[str, Any]:
     r = state["report"] or {}
     watch = config.load_watchlist()
-    universe = list(dict.fromkeys(config.UNIVERSE + watch + [x["ticker"] for x in (r.get("low_float") or {}).get("rows", [])]))
+    universe = list(dict.fromkeys(list(config.INDEX_ETFS) + list(config.SECTOR_ETFS) + config.UNIVERSE + watch + [x["ticker"] for x in (r.get("low_float") or {}).get("rows", [])]
+                                  + [s["ticker"] for s in r.get("stocks", [])] + [k for k in state["adhoc"]]))
     mstate = fetch.market_state()
     sc = scanner.scan(fetch.fetch_intraday(universe), {}, universe, mstate)
+    # One quote map for every view: last 15-minute bar for the scan universe, fast quotes for the tape symbols.
+    now_ts = time.time()
+    quotes: dict[str, Any] = {}
+    for t, rec in sc["by_ticker"].items():
+        ses = rec.get("session") or {}
+        if rec.get("price") is not None:
+            vol = ses.get("session_volume")
+            quotes[t] = {"last": rec["price"], "chg_pct": rec.get("chg_pct"), "ts": now_ts, "src": "bars", "rvol": ses.get("rvol_time_of_day"),
+                         "above_vwap": ses.get("above_vwap"), "dollar_vol": round(vol * rec["price"]) if vol else None, "vol": vol,
+                         "score": rec.get("score"), "direction": rec.get("direction"), "range_pos": ses.get("range_pos")}
+    tape_syms = [m["symbol"] for m in r.get("macro", [])] + [w["symbol"] for w in r.get("world", [])]
+    try:
+        for sym, q in fetch.fetch_quotes(tape_syms).items():
+            if q.get("last") is not None:
+                quotes[sym] = {"last": q["last"], "chg_pct": q.get("change_pct"), "ts": now_ts, "src": "quote"}
+    except Exception as e:  # noqa: BLE001
+        log.warning("tape quotes failed: %s", e)
     if not state.get("sym_names"):
         state["sym_names"] = {row[0]: row[1] for row in fetch.fetch_symbol_index()}
     names = dict(state["sym_names"])
     names.update({t: q["name"] for t, q in (r.get("lite") or {}).items() if q.get("name")})
     reads = {x["ticker"]: x.get("ai") for x in (r.get("scan") or {}).get("rows", []) if x.get("ai")}
     rows = []
-    for x in sorted(sc["by_ticker"].values(), key=lambda v: -v["score"])[:40]:
+    for x in sorted(sc["by_ticker"].values(), key=lambda v: (not v["qualifies"], -v["score"]))[:40]:   # every qualifying name first, so the count on the page matches the rows
         slim = _scan_slim(x)
         slim.update(ticker=x["ticker"], name=names.get(x["ticker"], x["ticker"]), price=x["price"], chg_pct=x["chg_pct"], qualifies=x["qualifies"],
                     session={k: x["session"].get(k) for k in ("rvol_time_of_day", "above_vwap", "range_pos", "chg_from_open_pct", "session_volume", "avg_session_volume", "bars_today", "session_date")},
                     ai=reads.get(x["ticker"]))
         rows.append(slim)
     return _clean({"rows": rows, "scanned": sc["scanned"], "qualified": sc["qualified"], "as_of": time.time(), "last_bar": sc["last_bar"], "market_state": mstate,
-                   "settings": sc["settings"]})
+                   "settings": sc["settings"], "quotes": quotes, "quotes_at": now_ts})
 
 
 def _live_interval() -> int:
@@ -162,6 +184,27 @@ async def api_scan_live() -> JSONResponse:
         return JSONResponse({"status": "warming"}, status_code=202, headers={"Cache-Control": "no-store"})
     nxt = max(0, int(_live_interval() - (time.time() - state["live_scan_at"])))
     return JSONResponse({**ls, "next_in_s": nxt, "interval_s": _live_interval()}, headers={"Cache-Control": "no-store"})
+
+
+def _ledger_from_report(report: dict[str, Any]) -> None:
+    """Log every stance the build produced and score the ones whose horizon has passed."""
+    rows = []
+    for s in report.get("stocks", []):
+        a = s.get("ai") or {}
+        v = s.get("verdict") or {}
+        if v.get("code"):
+            rows.append({"ticker": s["ticker"], "kind": "swing", "verdict": v["code"], "price": s.get("last_price"), "build_id": report["build_id"]})
+        elif a.get("stance"):
+            rows.append({"ticker": s["ticker"], "kind": "swing", "verdict": a["stance"]["choice"], "price": s.get("last_price"), "build_id": report["build_id"]})
+        if a.get("intraday"):
+            rows.append({"ticker": s["ticker"], "kind": "intraday", "verdict": a["intraday"]["choice"], "price": s.get("last_price"), "build_id": report["build_id"]})
+        if a.get("long_term"):
+            rows.append({"ticker": s["ticker"], "kind": "long_term", "verdict": a["long_term"]["choice"], "price": s.get("last_price"), "build_id": report["build_id"]})
+    n = db.log_verdicts(rows)
+    prices = {t: q["last_price"] for t, q in (report.get("lite") or {}).items() if q.get("last_price")}
+    prices.update({s["ticker"]: s["last_price"] for s in report.get("stocks", []) if s.get("last_price")})
+    scored = db.evaluate_verdicts(prices)
+    log.info("verdict ledger: %d logged, %d scored", n, scored)
 
 
 async def scheduler() -> None:
@@ -281,6 +324,12 @@ async def api_stock(ticker: str, request: Request) -> JSONResponse:
         raise HTTPException(status_code=404, detail=f"no price history for {t}")
     state["adhoc"][t] = {"build_id": (r or {}).get("build_id"), "stock": rec}
     db.log_activity(_session_email(request), "analyzed", t)
+    a = rec.get("ai") or {}
+    rows = [{"ticker": t, "kind": k, "verdict": a[q]["choice"], "price": rec.get("last_price"), "build_id": (r or {}).get("build_id")}
+            for k, q in (("intraday", "intraday"), ("long_term", "long_term")) if a.get(q)]
+    if (rec.get("verdict") or {}).get("code"):
+        rows.append({"ticker": t, "kind": "swing", "verdict": rec["verdict"]["code"], "price": rec.get("last_price"), "build_id": (r or {}).get("build_id")})
+    db.log_verdicts(rows)
     return JSONResponse({"status": "ok", "source": "adhoc", "stock": rec}, headers={"Cache-Control": "no-store"})
 
 
@@ -631,3 +680,62 @@ async def auth_logout(request: Request) -> JSONResponse:
     resp = JSONResponse({"status": "ok", "logged_in": False})
     resp.delete_cookie(SESSION_COOKIE)
     return resp
+
+
+@app.get("/api/track-record")
+async def api_track_record() -> JSONResponse:
+    """Public: every verdict the model has made, scored after its horizon against the later price."""
+    return JSONResponse(await asyncio.to_thread(db.track_record), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/alerts")
+async def api_alerts_get(request: Request) -> dict[str, Any]:
+    email = _session_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="sign in first")
+    return db.get_alert(email)
+
+
+@app.put("/api/alerts")
+async def api_alerts_put(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    email = _session_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="sign in first")
+    try:
+        rv = max(1.5, min(20.0, float(payload.get("rvol_threshold", 3.0))))
+        mp = max(0.5, min(1000.0, float(payload.get("min_price", 2.0))))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="bad threshold")
+    channel = payload.get("channel") if payload.get("channel") in ("email", "whatsapp") else "email"
+    out = db.set_alert(email, bool(payload.get("enabled")), rv, mp, channel)
+    db.log_activity(email, "alerts", f"{'on' if out['enabled'] else 'off'} · RVOL ≥ {rv}×")
+    return out
+
+
+_TRACK_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Track record · Webex Market Update</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/styles.css">
+<style>body{background:var(--bg);color:var(--text);margin:0;padding:24px;font-family:var(--sans,system-ui)} .tr-wrap{max-width:1100px;margin:0 auto;display:grid;gap:18px}
+.tr-h{display:flex;align-items:center;gap:12px} .tr-h img{width:34px;height:34px} .tr-h b{font-size:20px} .tr-note{color:var(--text-2);font-size:13px;line-height:1.5;max-width:70ch}
+.tr-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)} .tr-tiles .tile{background:var(--surface-2)}
+table.tbl{width:100%} .hit{color:var(--up)} .miss{color:var(--down)} .open{color:var(--muted)}</style></head><body><div class="tr-wrap">
+<div class="tr-h"><img src="/static/logo.svg" alt=""><div><b>Track record</b><div class="muted" style="font-size:12px">Every verdict the model has made, scored against the price after its time window</div></div></div>
+<p class="tr-note">How this works: each time the desk publishes a verdict on a name, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. A bullish call counts as a hit if the price went up, a bearish call if it went down. Calls with no direction (wait, hold, range, flat) are listed but not scored. Nothing here is advice; it is the desk keeping itself honest.</p>
+<div id="tiles" class="tr-tiles"></div>
+<h3>By verdict</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Window</th><th>Verdict</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byv"></tbody></table></div>
+<h3>By name</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byt"></tbody></table></div>
+<h3>Most recent calls</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Name</th><th>Window</th><th>Verdict</th><th>Price then</th><th>Price after</th><th>Result</th></tr></thead><tbody id="recent"></tbody></table></div>
+<p class="muted" style="font-size:11px">Prices from Yahoo Finance, delayed. Information, not advice.</p></div>
+<script>
+(async()=>{const j=await (await fetch("/api/track-record",{cache:"no-store"})).json();const e=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const pretty=k=>String(k||"").replace(/_/g," ");const pct=x=>x==null?"–":(x>0?"+":"")+x.toFixed(1)+"%";const rate=(h,n)=>n?Math.round(h/n*100)+"%":"–";
+const T=j.totals||{};document.getElementById("tiles").innerHTML=[["Calls logged",T.n||0,T.since?"since "+new Date(T.since*1000).toLocaleDateString():""],["Scored so far",T.scored||0,"windows that have closed"],["Hit rate",rate(T.hits||0,T.scored||0),(T.hits||0)+" hits"]].map(([l,v,s])=>`<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${s}</div></div>`).join("");
+document.getElementById("byv").innerHTML=(j.by_verdict||[]).map(r=>`<tr><td>${e(r.kind)}</td><td><b>${e(pretty(r.verdict))}</b></td><td class="num">${r.n}</td><td class="num">${r.scored||0}</td><td class="num">${r.hits||0}</td><td class="num">${rate(r.hits||0,r.scored||0)}</td><td class="num">${pct(r.avg_move_pct)}</td></tr>`).join("")||'<tr><td colspan="7" class="muted">No calls scored yet. Check back after the first windows close.</td></tr>';
+document.getElementById("byt").innerHTML=(j.by_ticker||[]).map(r=>`<tr><td><b>${e(r.ticker)}</b></td><td class="num">${r.n}</td><td class="num">${r.scored||0}</td><td class="num">${r.hits||0}</td><td class="num">${rate(r.hits||0,r.scored||0)}</td><td class="num">${pct(r.avg_move_pct)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">Nothing scored yet.</td></tr>';
+document.getElementById("recent").innerHTML=(j.recent||[]).map(r=>`<tr><td>${new Date(r.ts*1000).toLocaleString()}</td><td><b>${e(r.ticker)}</b></td><td>${e(r.kind)}</td><td>${e(pretty(r.verdict))}</td><td class="num">${r.price!=null?r.price.toFixed(2):"–"}</td><td class="num">${r.eval_price!=null?r.eval_price.toFixed(2):"–"}</td><td class="${r.hit===1?"hit":r.hit===0?"miss":"open"}">${r.hit===1?"hit":r.hit===0?"miss":r.eval_ts?"not directional":"open"}</td></tr>`).join("");})();
+</script></body></html>"""
+
+
+@app.get("/track-record")
+async def track_record_page() -> HTMLResponse:
+    """Public: no sign-in needed. The desk's scored history."""
+    return HTMLResponse(_TRACK_HTML, headers={"Cache-Control": "no-store"})
