@@ -196,3 +196,45 @@ def brief_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
   <p style="margin:18px 0 0;font-size:11.5px;line-height:1.6;color:#8A93A6">OneView is information, not advice. Reads come from public data and textbook technicals, never a guarantee. You receive this because you signed in to OneView. <a href="{e(unsubscribe_url)}" style="color:#8A93A6">Stop these emails</a>.</p>
 </td></tr></table></td></tr></table></body></html>"""
     return subject, text, html
+
+
+def announcement_email(name: str, site_url: str, group_url: str, unsubscribe_url: str) -> tuple[str, str, str]:
+    """One-time announcement: Webex Traders is now OneView. Bold, colourful, still professional."""
+    e = lambda x: html_mod.escape(str(x))
+    hi = f"Hi {e(name)}," if name else "Hi,"
+    subject = "Webex Traders is now OneView: your desk just got a serious upgrade"
+    changes = [
+        ("Three briefings a day", "07:00 morning briefing, 13:00 midday check, 16:30 after the close. Futures, oil, gold, bitcoin, the 10- and 5-year yields, the mega caps, and a possible next move for SPY and QQQ from the 1-hour chart."),
+        ("A briefing in your inbox", "Every morning at 7:00, short and personal: the numbers, the reads on the names you follow, one link to the desk."),
+        ("Reads in plain words", "Every name gets a verdict with two to four reasons and a LOW, MED or HIGH conviction. No percentages, no jargon."),
+        ("Where the big money is moving", "SPY, QQQ, DIA and IWM activity against normal, the largest companies trading unusually heavily, and the groups leading or lagging."),
+        ("Voices moving the tape", "The President's market-relevant posts, read once each, and where the Reddit crowd is piling in."),
+        ("Only news that can move prices", "Every headline is read once; the noise is dropped before you see it."),
+        ("A public track record", "Every verdict is logged with its price and scored later. The desk keeps itself honest."),
+        ("Day, swing or long term", "One switch changes the analysis horizon on your watchlist and the stocks table."),
+    ]
+    text = "\n".join([hi, "", "Webex Traders is now OneView: same team, new name, and a rebuilt desk.", "", "What changed:"] + [f"- {t}: {d}" for t, d in changes] +
+                      ["", f"Open OneView: {site_url}", f"Join the OneView WhatsApp group: {group_url}", "", "OneView is information, not advice.", f"Stop these emails: {unsubscribe_url}"])
+    cards = "".join(f"""<tr><td style="padding:0 0 10px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:14px;overflow:hidden;background:#101A2B;border:1px solid #29364C"><tr>
+      <td style="width:6px;background:{c}"></td><td style="padding:14px 16px"><div style="font-size:15px;font-weight:800;color:#F5F7FC;letter-spacing:-.01em">{e(t)}</div><div style="font-size:13.5px;line-height:1.5;color:#A8B4C8;margin-top:4px">{e(d)}</div></td></tr></table></td></tr>"""
+                    for (t, d), c in zip(changes, ["#245BFF", "#66D9A6", "#E8BD68", "#FF8F9B", "#85A7FF", "#66D9A6", "#245BFF", "#E8BD68"]))
+    html = f"""<!doctype html><html><body style="margin:0;background:#080E1D;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#F5F7FC">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#080E1D"><tr><td align="center" style="padding:28px 14px">
+<table role="presentation" width="600" style="max-width:600px" cellpadding="0" cellspacing="0">
+<tr><td style="padding:0 0 14px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#245BFF 0%,#1747D1 45%,#0B1220 100%);background-color:#245BFF"><tr><td style="padding:34px 30px">
+  <div style="display:inline-block;background:#FFD66B;color:#0A1220;font-size:11px;font-weight:800;letter-spacing:.16em;padding:6px 10px;border-radius:999px">NEW NAME · NEW DESK</div>
+  <h1 style="margin:16px 0 8px;font-size:34px;line-height:1.05;letter-spacing:-.04em;color:#FFFFFF">Webex Traders is now <span style="color:#FFD66B">OneView</span>.</h1>
+  <p style="margin:0;font-size:16px;line-height:1.55;color:#DCE6FF">{hi} same team, sharper tools. Read the market in one glance, then own your next move.</p>
+  <p style="margin:22px 0 0"><a href="{e(site_url)}" style="display:inline-block;background:#FFFFFF;color:#0A1220;text-decoration:none;font-weight:800;padding:13px 22px;border-radius:10px;font-size:15px">Open OneView →</a></p>
+</td></tr></table></td></tr>
+<tr><td style="padding:6px 4px 12px"><div style="font-size:12px;letter-spacing:.16em;color:#85A7FF;font-weight:800">WHAT CHANGED, AND WHY IT HELPS</div></td></tr>
+{cards}
+<tr><td style="padding:8px 0 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:14px;overflow:hidden;background:#12332A;border:1px solid #1F5A46"><tr><td style="padding:16px 18px">
+  <div style="font-size:15px;font-weight:800;color:#66D9A6">Same crew, one group</div>
+  <div style="font-size:13.5px;line-height:1.5;color:#CFE9DD;margin-top:4px">The team's moves, posted as they happen, live in the OneView WhatsApp group.</div>
+  <p style="margin:12px 0 0"><a href="{e(group_url)}" style="display:inline-block;background:#25D366;color:#06110B;text-decoration:none;font-weight:800;padding:11px 18px;border-radius:10px;font-size:14px">Join the group</a></p>
+</td></tr></table></td></tr>
+<tr><td style="padding:22px 4px 0"><p style="margin:0;font-size:13px;line-height:1.6;color:#A8B4C8">Your sign-in and your watchlists carry over. Nothing to set up: open the desk, sign in with your email, and your names are there.</p>
+<p style="margin:14px 0 0;font-size:11.5px;line-height:1.6;color:#6B7690">OneView is information, not advice. Reads come from public data and typed questions to a model; nothing here is a recommendation or a guarantee. You receive this because you signed in to the desk. <a href="{e(unsubscribe_url)}" style="color:#6B7690">Stop these emails</a>.</p></td></tr>
+</table></td></tr></table></body></html>"""
+    return subject, text, html
