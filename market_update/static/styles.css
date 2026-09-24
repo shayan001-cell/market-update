@@ -1046,3 +1046,5 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .view.stock .tile .grid.c2 .kv { border-top: 1px dashed var(--line); padding-top: 6px; }
 .view.stock .tile .grid.c2 .kv:first-child { border-top: 0; padding-top: 0; }
 .view.stock .kv dd { text-align: right; overflow-wrap: anywhere; }
+.stk-list th:nth-child(1) { width: 36%; } .stk-list th:nth-child(2) { width: 19%; } .stk-list th:nth-child(3) { width: 25%; } .stk-list th:nth-child(4) { width: 20%; }
+.stk-list td.sc2 span { display: block; margin: 0; line-height: 1.25; }
