@@ -8,3 +8,5 @@ dist/
 .claude/skills/
 .claude/agents/
 .DS_Store
+
+.venv
