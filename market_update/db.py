@@ -68,6 +68,21 @@ CREATE TABLE IF NOT EXISTS verdicts (
 );
 CREATE INDEX IF NOT EXISTS verdicts_open ON verdicts(eval_ts, ts);
 CREATE UNIQUE INDEX IF NOT EXISTS verdicts_once ON verdicts(ticker, kind, build_id);
+CREATE TABLE IF NOT EXISTS analysis_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    day TEXT NOT NULL,
+    kind TEXT NOT NULL,                 -- morning_index | close_index
+    symbol TEXT NOT NULL,
+    price REAL,
+    read TEXT,                          -- the chosen answer
+    confidence REAL,
+    facts TEXT,                         -- JSON inputs
+    outcome_pct REAL,
+    hit INTEGER,
+    scored_at REAL
+);
+CREATE INDEX IF NOT EXISTS analysis_day ON analysis_log(day);
 CREATE TABLE IF NOT EXISTS direction_reads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -451,3 +466,45 @@ def direction_stats(days: int = 30) -> dict[str, Any]:
         by_expected = [dict(r) for r in con.execute("SELECT expected, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, AVG(move_spy_pct) AS avg_move FROM direction_reads WHERE ts >= ? GROUP BY expected", (since,))]
         tot = dict(con.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored FROM direction_reads WHERE ts >= ?", (since,)).fetchone())
     return {"by_day": by_day, "by_expected": by_expected, "totals": tot, "days": days}
+
+
+def log_analysis(day: str, kind: str, symbol: str, price: Any, read: str | None, confidence: Any, facts: dict[str, Any]) -> None:
+    import json as _json
+    with connect() as con:
+        con.execute("INSERT INTO analysis_log(ts, day, kind, symbol, price, read, confidence, facts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (time.time(), day, kind, symbol, price, read, confidence, _json.dumps(facts)))
+
+
+def score_analysis(day: str, closes: dict[str, float], scorer) -> None:
+    with connect() as con:
+        rows = [dict(r) for r in con.execute("SELECT id, symbol, price, read FROM analysis_log WHERE day = ? AND kind = 'morning_index' AND scored_at IS NULL", (day,))]
+        for r in rows:
+            c = closes.get(r["symbol"])
+            if not c or not r.get("price"):
+                continue
+            mv = (c / r["price"] - 1) * 100
+            exp = {"push_higher": "higher", "rebound": "higher", "break_lower": "lower", "pullback_then_higher": "lower", "range_bound": "sideways"}.get(r.get("read"))
+            con.execute("UPDATE analysis_log SET outcome_pct = ?, hit = ?, scored_at = ? WHERE id = ?", (mv, scorer(exp, mv) if exp else None, time.time(), r["id"]))
+
+
+def analysis_days(days: int = 60) -> list[dict[str, Any]]:
+    since = time.time() - days * 86400
+    with connect() as con:
+        return [dict(r) for r in con.execute("""SELECT day,
+            SUM(CASE WHEN kind = 'morning_index' AND symbol = 'SPY' THEN 1 ELSE 0 END) AS morning_calls,
+            SUM(CASE WHEN kind = 'morning_index' AND hit = 1 THEN 1 ELSE 0 END) AS morning_hits,
+            SUM(CASE WHEN kind = 'morning_index' AND hit IS NOT NULL THEN 1 ELSE 0 END) AS morning_scored
+            FROM analysis_log WHERE ts >= ? GROUP BY day ORDER BY day DESC""", (since,))]
+
+
+def day_detail(day: str) -> dict[str, Any]:
+    import json as _json
+    with connect() as con:
+        reads = [dict(r) for r in con.execute("SELECT ts, spy, qqq, expected, confidence, driver, move_spy_pct, hit, facts FROM direction_reads WHERE day = ? ORDER BY ts", (day,))]
+        for r in reads:
+            try:
+                f = _json.loads(r.pop("facts") or "{}"); r["facts"] = {"spy": {k: (f.get("spy") or {}).get(k) for k in ("above_vwap", "range_pos", "chg_day_pct")}, "sentiment": f.get("sentiment")}
+            except Exception:  # noqa: BLE001
+                r["facts"] = None
+        morning = [dict(r) for r in con.execute("SELECT ts, symbol, price, read, confidence, outcome_pct, hit FROM analysis_log WHERE day = ? AND kind = 'morning_index' ORDER BY symbol", (day,))]
+    return {"day": day, "reads": reads, "morning": morning}

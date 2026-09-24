@@ -994,9 +994,44 @@ def _hourly_read(sym: str, f: pd.DataFrame | None) -> dict[str, Any] | None:
         "structure": sp.get("structure"), "nearest_support": _r(sup), "nearest_resistance": _r(res),
         "dist_support_pct": _r((last / sup - 1) * 100) if sup else None, "dist_resistance_pct": _r((res / last - 1) * 100) if res else None,
         "range_24_bars": [_r(float(d["Low"].tail(24).min())), _r(float(d["High"].tail(24).max()))],
+        "prev_high": _r(float(d[d.index.date == days[-2]]["High"].max())) if len(days) >= 2 else None,
+        "prev_low": _r(float(d[d.index.date == days[-2]]["Low"].min())) if len(days) >= 2 else None,
         "bars": [{"t": ts.isoformat(), "o": _r(float(o)), "h": _r(float(h)), "l": _r(float(lo)), "c": _r(float(c))} for ts, o, h, lo, c in
                  zip(d.index[-48:], d["Open"].tail(48), d["High"].tail(48), d["Low"].tail(48), d["Close"].tail(48))],
     }
+
+
+def _index_plan(x: dict[str, Any]) -> dict[str, Any]:
+    """What we see, what we think, what could happen in the next 1-4 hours: written from the levels, in plain words."""
+    last, sup, res = x.get("last"), x.get("nearest_support"), x.get("nearest_resistance")
+    ph, pl = x.get("prev_high"), x.get("prev_low")
+    a = x.get("ai") or {}
+    see = []
+    if x.get("above_20_bar_avg") is not None:
+        see.append(f"price is {'above' if x['above_20_bar_avg'] else 'below'} its 20-bar average" + (f" and {'above' if x['above_50_bar_avg'] else 'below'} the 50-bar" if x.get("above_50_bar_avg") is not None else ""))
+    if x.get("structure"):
+        see.append({"uptrend_hh_hl": "higher highs and higher lows on the 1-hour chart", "downtrend_lh_ll": "lower highs and lower lows on the 1-hour chart"}.get(x["structure"], str(x["structure"]).replace("_", " ")))
+    if isinstance(x.get("rsi_1h"), (int, float)):
+        r = x["rsi_1h"]; see.append(f"1-hour RSI {r:.0f}" + (" (overbought)" if r >= 70 else " (oversold)" if r <= 30 else ""))
+    if ph and pl:
+        see.append(f"yesterday's range {pl:,.2f} to {ph:,.2f}")
+    levels = []
+    if res:
+        levels.append(f"Above {res:,.2f}: the ceiling gives way and a push toward the next high is on.")
+    if ph and res and abs(ph - res) / (last or 1) > 0.002:
+        levels.append(f"Yesterday's high {ph:,.2f} is the first test on the way up.")
+    if sup:
+        levels.append(f"Below {sup:,.2f}: the trend read flips lower and sellers get the ball.")
+    if pl and sup and abs(pl - sup) / (last or 1) > 0.002:
+        levels.append(f"Yesterday's low {pl:,.2f} is the line the bulls must hold.")
+    if sup and res:
+        levels.append(f"Between {sup:,.2f} and {res:,.2f}: expect two-way trade until one side breaks.")
+    nh = (a.get("next_hours") or {}).get("choice")
+    shape = {"push_and_extend": "the likelier shape for the first hours is an open above the prior high that keeps going",
+             "fade_after_open": "the likelier shape is an early push that fails at resistance and gives the gain back",
+             "chop_then_trend": "the likelier shape is two-way trade inside yesterday's range, then a move once a level breaks",
+             "sell_off_early": "the likelier shape is an open under support with sellers pressing from the start"}.get(nh)
+    return {"see": see, "levels": levels, "shape": shape, "next_hours": nh}
 
 
 def _brief_inputs(report: dict[str, Any]) -> dict[str, Any]:
@@ -1096,6 +1131,7 @@ async def morning_brief(report: dict[str, Any], judge: "Judge", slot: str = "mor
     for st, a in zip(states, ans):
         if b["indexes"].get(st["symbol"]) is not None:
             b["indexes"][st["symbol"]]["ai"] = a
+            b["indexes"][st["symbol"]]["plan"] = _index_plan(b["indexes"][st["symbol"]])
     now = datetime.now(tz=config.ET)
     b["date"] = now.date().isoformat()
     b["generated_at"] = now.isoformat()
@@ -1126,7 +1162,11 @@ def _intraday_inputs(report: dict[str, Any]) -> dict[str, Any]:
     trump_lean = "none" if not leans else ("bullish" if leans.count("bullish_for_stocks") > leans.count("bearish_for_stocks") else "bearish" if leans.count("bearish_for_stocks") > leans.count("bullish_for_stocks") else "mixed")
     B = (report.get("flows") or {}).get("breadth") or {}
     now = datetime.now(tz=config.ET)
-    return {"time_et": now.strftime("%H:%M"), "minutes_to_close": max(0, 16 * 60 - (now.hour * 60 + now.minute)),
+    from . import db as _db
+    st = _db.direction_stats(30)
+    hist = {"reads_scored": (st.get("totals") or {}).get("scored") or 0,
+            "hit_rate_by_answer": {x["expected"]: (round(x["hits"] / x["scored"] * 100) if x.get("scored") else None) for x in st.get("by_expected", []) if x.get("expected")}}
+    return {"time_et": now.strftime("%H:%M"), "minutes_to_close": max(0, 16 * 60 - (now.hour * 60 + now.minute)), "history": hist,
             "spy": out["SPY"], "qqq": out["QQQ"], "breadth_pct_above_20d": _r(B["above20"] / B["n"] * 100, 0) if B.get("n") else None,
             "sentiment": {"reddit_spy": (crowd.get("SPY") or {}).get("wsb_sentiment") or "none", "reddit_qqq": (crowd.get("QQQ") or {}).get("wsb_sentiment") or "none",
                           "trump_lean_recent": trump_lean, "trump_posts_6h": len(posts)}}

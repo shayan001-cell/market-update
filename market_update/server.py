@@ -240,6 +240,12 @@ async def make_brief(day: str, slot: str = "morning") -> None:
     state["brief_building"] = True
     try:
         b = await morning_brief(state["report"], Judge(enabled=USE_AI), slot)
+        if slot == "morning":
+            for sym in ("SPY", "QQQ"):
+                x = (b.get("indexes") or {}).get(sym) or {}
+                a = (x.get("ai") or {}).get("next_move") or {}
+                if a.get("choice"):
+                    db.log_analysis(day, "morning_index", sym, x.get("last"), a["choice"], a.get("confidence"), {k: v for k, v in x.items() if k not in ("bars", "ai")})
         if slot == "close":
             try:
                 b["scorecard"] = await asyncio.to_thread(_score_day, day, b)
@@ -320,6 +326,8 @@ def _score_day(day: str, close_brief: dict[str, Any]) -> dict[str, Any]:
     if not close_qqq:
         close_qqq = (ses.get("QQQ") or {}).get("last")
     tot = db.score_day_directions(day, close_spy or 0, close_qqq or 0, score_direction) if close_spy and close_qqq else {"n": 0, "hits": 0, "scored": 0}
+    if close_spy and close_qqq:
+        db.score_analysis(day, {"SPY": close_spy, "QQQ": close_qqq}, score_direction)
     reads = db.day_directions(day)
     morning = (state.get("briefs") or {}).get("morning") or {}
     m_call = (((morning.get("indexes") or {}).get("SPY") or {}).get("ai") or {}).get("next_move", {}).get("choice")
@@ -347,6 +355,12 @@ async def direction_loop() -> None:
         except Exception:  # noqa: BLE001
             log.exception("direction read failed")
         await asyncio.sleep(60)
+
+
+@app.get("/api/direction/day")
+async def api_direction_day(day: str = "") -> JSONResponse:
+    day = day or fetch.now_et().date().isoformat()
+    return JSONResponse(await asyncio.to_thread(db.day_detail, day), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/direction")
@@ -879,6 +893,7 @@ async def api_track_record() -> JSONResponse:
     """Public: every verdict the model has made, scored after its horizon against the later price."""
     tr = await asyncio.to_thread(db.track_record)
     tr["direction"] = await asyncio.to_thread(db.direction_stats, 60)
+    tr["analysis_days"] = await asyncio.to_thread(db.analysis_days, 60)
     return JSONResponse(tr, headers={"Cache-Control": "no-store"})
 
 

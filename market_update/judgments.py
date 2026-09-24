@@ -900,6 +900,17 @@ BRIEF_INDEX_QUESTIONS = {
             "rebound": "Oversold (RSI under 30) or sitting on clear support inside an uptrend or range.",
         },
     ),
+    "next_hours": Choice(
+        instructions=(
+            "From the same 1-hour facts plus `prev_high`, `prev_low` and `range_24_bars`, what is the likeliest shape of the next one to four hours of trading? Price action only, monitoring read."
+        ),
+        criteria={
+            "push_and_extend": "Opens above the prior high or resistance and keeps going: momentum day.",
+            "fade_after_open": "An early push that fails at resistance or the prior high and gives back the gain.",
+            "chop_then_trend": "Two-sided trade inside the prior range for the first hours, then a move once a level breaks.",
+            "sell_off_early": "Opens under support or the prior low and sellers press from the start.",
+        },
+    ),
     "driver": Choice(
         instructions="The single chart fact that matters most for that read.",
         criteria={
@@ -921,8 +932,9 @@ INTRADAY_DIRECTION_QUESTIONS = {
         instructions=(
             "Using the intraday facts for SPY (S&P 500) and QQQ (Nasdaq 100): price against the day's average price (VWAP), position in "
             "the day's range, the 1-hour trend, RSI and structure, the nearest support and resistance, the day's breadth, the minutes "
-            "left in the session, and the crowd's stated mood in `sentiment`. Which way is the market likelier to move from now until "
-            "the close? A monitoring read, not advice."
+            "left in the session, and the crowd's stated mood in `sentiment`. `history` is this desk's own scorecard: the hit rate of "
+            "each answer over recent sessions; lean toward answers that have been right and away from ones that have been wrong. "
+            "Which way is the market likelier to move from now until the close? A monitoring read, not advice."
         ),
         criteria={
             "higher": "Above VWAP and holding the upper part of the range with an intact 1-hour uptrend, or reclaiming VWAP with breadth improving and no resistance right overhead.",
