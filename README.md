@@ -297,6 +297,21 @@ gh workflow run build.yml
 The site appears at `https://<your-user>.github.io/market-update/` after the first run.
 Free tier: about 2,000 Actions minutes a month; this schedule uses roughly 600.
 
+## Make the public link work now (tunnel)
+
+The public page can run against the app on your own machine. `scripts/go_live.sh` starts
+the server if needed, opens a free Cloudflare quick tunnel to it, publishes the tunnel's
+HTTPS address to the repository variables `MU_API_URL` and `MU_APP_URL`, and rebuilds the
+page. From then on visitors of the public link get the real sign-in: the emailed link
+lands on the tunnel, which sends them back to the public page with a session token in
+the URL fragment; the page keeps it as a bearer token, so it also works where third-party
+cookies are blocked (Safari). The server only accepts calls from `MU_CORS_ORIGINS`
+(default: the GitHub Pages origin) and sends users back to `MU_SITE_URL`.
+
+Limits: the tunnel only works while your Mac, the server and the tunnel are running, and
+a quick tunnel gets a new random address each time it starts (rerun the script; the
+public page updates in a few minutes). For a permanent address use Render below.
+
 ## Publish the live app (accounts + email sign-in)
 
 GitHub Pages only serves the static preview. Accounts, emailed sign-in links, the
