@@ -1563,3 +1563,7 @@ footer { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--
 @media (prefers-reduced-motion: reduce) { .ov-lines i { animation: none; } }
 .ov-brand, .ov-formpanel { position: relative; z-index: 1; }
 @media (max-width: 700px) { .theme-toggle { margin-right: 2px; } .tt-track { width: 40px; height: 22px; } .tt-knob { width: 16px; height: 16px; } .theme-toggle.light .tt-knob { transform: translateX(18px); } }
+/* the section row must never hide an item: wrap onto a second line when the screen is narrow */
+.topbar { height: auto; min-height: 58px; flex-wrap: wrap; row-gap: 0; padding-top: 4px; padding-bottom: 4px; }
+.topnav { overflow: visible; flex-wrap: wrap; row-gap: 2px; }
+@media (max-width: 700px) { .topnav { flex-wrap: nowrap; overflow-x: auto; } }
