@@ -597,10 +597,26 @@ async def api_profile_tickers(request: Request, payload: dict[str, Any] = Body(.
     email = _session_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="sign in first")
+    db.ensure_user(email)
+    raw_lists = payload.get("lists")
+    if isinstance(raw_lists, dict) and raw_lists:
+        lists: dict[str, list[str]] = {}
+        for name, ticks in list(raw_lists.items())[:12]:
+            name = re.sub(r"[^\w .&'\-]", "", str(name)).strip()[:30]
+            if name:
+                lists[name] = _clean_tickers(ticks)[:40]
+        if not lists:
+            raise HTTPException(status_code=400, detail="a list needs a name")
+        active = str(payload.get("active") or "")
+        db.set_watchlists(email, lists, active if active in lists else None)
+        every = [t for ticks in lists.values() for t in ticks]
+        db.log_activity(email, "watchlist", f"{len(lists)} lists · " + ", ".join(dict.fromkeys(every))[:150])
+        if every:
+            config.save_dynamic_watchlist(config.load_dynamic_watchlist() + every)
+        return JSONResponse({"status": "ok", "lists": lists, "active": active if active in lists else next(iter(lists))})
     tickers = _clean_tickers(payload.get("tickers"))
     if len(tickers) > 40:
         raise HTTPException(status_code=400, detail="at most forty tickers")
-    db.ensure_user(email)
     db.set_watchlist(email, tickers)
     db.log_activity(email, "watchlist", ", ".join(tickers[:12]))
     if tickers:

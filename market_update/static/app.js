@@ -414,8 +414,12 @@
     const tickers = activeList();
     const chips = tickers.map((t) => { const s = stockFor(t); const q = s || (r.lite || {})[t] || {}; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
       return `<span class="chip-t ${analyzing.has(t) ? "busy" : ""}"><button class="chip-open" data-ticker-page="${esc(t)}" title="Open ${esc(t)}"><i class="st-dot ${st ? ST.cls[st] : "none"}"></i><b>${esc(t)}</b><span class="delta ${cls(q.chg_pct)}">${isNum(q.chg_pct) ? fpct(q.chg_pct, 1) : ""}</span></button><button class="chip-x" data-remove="${esc(t)}" title="Remove ${esc(t)} from your watchlist" aria-label="Remove ${esc(t)}">×</button></span>`; }).join("");
+    const names = Object.keys(lists.lists);
+    const tabs = names.map((n) => `<button class="ltab ${n === lists.active ? "active" : ""}" data-list="${esc(n)}">${esc(n)}<span class="cnt">${lists.lists[n].length}</span></button>`).join("");
     return `<div class="wl-strip">
-      <div class="wl-head"><div><b>Your watchlist</b><span class="muted"> · ${tickers.length} ${tickers.length === 1 ? "name" : "names"} · ${user ? "saved to your account" : "kept in this browser"}</span></div><span class="muted wl-hint">Type a ticker to add · press × to remove · click a name for its page</span></div>
+      <div class="wl-lists">${tabs}<button class="ltab ghost" data-newlist title="Create another list">+ New list</button><span class="wl-lists-actions"><button class="lnk" data-renamelist>Rename</button><button class="lnk" data-deletelist>Delete</button></span></div>
+      <div class="wl-newbar" id="list-new" hidden><input class="wl-newinput" placeholder="Name the list, then press Enter" maxlength="30"><button class="lnk" data-newcancel>cancel</button></div>
+      <div class="wl-head"><div><b>${esc(lists.active)}</b><span class="muted"> · ${tickers.length} ${tickers.length === 1 ? "name" : "names"} · ${user ? "saved to your account" : "kept in this browser"}</span></div><span class="muted wl-hint">Type a ticker to add · press × to remove · click a name for its page</span></div>
       <div class="wl-chips">${chips}<div class="wl-add hud-search"><input id="search" type="search" placeholder="Add ticker or company" autocomplete="off" spellcheck="false" aria-label="Add a ticker to your watchlist"><div id="search-results" class="search-results" hidden></div></div></div>
     </div>`;
   }
@@ -913,19 +917,39 @@
   function loadLists() { try { const j = JSON.parse(localStorage.getItem(LISTS_KEY)); if (j && j.lists && j.active in j.lists) return j; } catch (e) {} return null; }
   function ensureLists(r) {
     if (lists) return;
-    const fromProfile = user && user.profile && Array.isArray(user.profile.tickers) && user.profile.tickers.length ? user.profile.tickers.slice() : null;
+    const P = user && user.profile;
+    if (P && P.lists && Object.keys(P.lists).length) { lists = { active: P.active in P.lists ? P.active : Object.keys(P.lists)[0], lists: Object.fromEntries(Object.entries(P.lists).map(([k, v]) => [k, v.slice()])) }; return; }
+    const fromProfile = P && Array.isArray(P.tickers) && P.tickers.length ? P.tickers.slice() : null;
     const saved = loadLists();
-    const tickers = fromProfile || (saved && saved.lists[saved.active]) || (r.default_watchlist || r.watchlist || []).slice(0, 7);
+    if (!fromProfile && saved && saved.lists && Object.keys(saved.lists).length) { lists = saved; if (!(lists.active in lists.lists)) lists.active = Object.keys(lists.lists)[0]; return; }
+    const tickers = fromProfile || (r.default_watchlist || r.watchlist || []).slice(0, 7);
     lists = { active: "My watchlist", lists: { "My watchlist": tickers } };
+  }
+  function newList() {
+    const bar = $("#list-new"); if (!bar) return;
+    bar.hidden = false; const inp = bar.querySelector("input"); inp.value = ""; inp.focus();
+  }
+  function createList(name) {
+    const n = (name || "").trim().slice(0, 30); if (!n || lists.lists[n]) return;
+    lists.lists[n] = []; lists.active = n; saveLists(); renderAll();
+  }
+  function renameList(name) {
+    const n = (name || "").trim().slice(0, 30); if (!n || n === lists.active || lists.lists[n]) return;
+    const out = {}; Object.entries(lists.lists).forEach(([k, v]) => { out[k === lists.active ? n : k] = v; }); lists.lists = out; lists.active = n; saveLists(); renderAll();
+  }
+  function deleteList() {
+    const names = Object.keys(lists.lists); if (names.length <= 1) { notice("You need at least one list. Create another before deleting this one.", true); return; }
+    if (!confirm(`Delete the list "${lists.active}" and its ${lists.lists[lists.active].length} names?`)) return;
+    delete lists.lists[lists.active]; lists.active = Object.keys(lists.lists)[0]; saveLists(); renderAll();
   }
   let profileTimer = null;
   function saveLists() {
     try { localStorage.setItem(LISTS_KEY, JSON.stringify(lists)); } catch (e) {}
     syncServerWatchlist();
-    if (!STATIC_MODE && user && user.profile) {           // the watchlist lives with the account, so it follows the user to any browser
-      user.profile.tickers = activeList().slice();
+    if (!STATIC_MODE && user && user.profile) {           // every list lives with the account, so they follow the user to any browser
+      user.profile.tickers = activeList().slice(); user.profile.lists = Object.fromEntries(Object.entries(lists.lists).map(([k, v]) => [k, v.slice()])); user.profile.active = lists.active;
       clearTimeout(profileTimer);
-      profileTimer = setTimeout(() => api("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: activeList() }) }).catch(() => {}), 600);
+      profileTimer = setTimeout(() => api("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lists: lists.lists, active: lists.active }) }).catch(() => {}), 600);
     } else if (STATIC_MODE && user) { user.profile = Object.assign({}, user.profile, { tickers: activeList().slice() }); try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
   }
   const activeList = () => (lists && lists.lists[lists.active]) || [];
@@ -1143,7 +1167,7 @@
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
     $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
-      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}${k === "home" && lists ? ` <span class="cnt">${activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
+      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
@@ -1579,6 +1603,12 @@
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.getAttribute("data-open"))));
     const ag = $("[data-agree]"); if (ag) ag.addEventListener("click", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} if (user && !STATIC_MODE) api("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: activeList() }) }).catch(() => {}); renderAll(); });
     wireSearch();
+    document.querySelectorAll("#app [data-list]").forEach((b) => b.addEventListener("click", () => { lists.active = b.getAttribute("data-list"); saveLists(); renderAll(); }));
+    const nl = $("#app [data-newlist]"); if (nl) nl.addEventListener("click", newList);
+    const ni = $("#list-new input"); if (ni) { ni.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); createList(ni.value); } if (e.key === "Escape") $("#list-new").hidden = true; }); }
+    const nc = $("[data-newcancel]"); if (nc) nc.addEventListener("click", () => { $("#list-new").hidden = true; });
+    const rl = $("#app [data-renamelist]"); if (rl) rl.addEventListener("click", () => { const n = prompt("Rename this list:", lists.active); if (n) renameList(n); });
+    const dl = $("#app [data-deletelist]"); if (dl) dl.addEventListener("click", deleteList);
     document.querySelectorAll("#app [data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));

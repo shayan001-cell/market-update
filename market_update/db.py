@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS watchlist (
     ticker TEXT NOT NULL,
     position INTEGER NOT NULL,
     added REAL NOT NULL,
-    PRIMARY KEY (email, ticker)
+    list_name TEXT NOT NULL DEFAULT 'My watchlist',
+    PRIMARY KEY (email, list_name, ticker)
 );
 """
 
@@ -77,10 +78,21 @@ def connect() -> Iterator[sqlite3.Connection]:
         con.close()
 
 
+DEFAULT_LIST = "My watchlist"
+
+
 def _migrate(con: sqlite3.Connection) -> None:
     cols = {r["name"] for r in con.execute("PRAGMA table_info(users)")}
     if "name" not in cols:
         con.execute("ALTER TABLE users ADD COLUMN name TEXT")
+    if "active_list" not in cols:
+        con.execute("ALTER TABLE users ADD COLUMN active_list TEXT")
+    wcols = {r["name"] for r in con.execute("PRAGMA table_info(watchlist)")}
+    if "list_name" not in wcols:                      # older single-list table: rebuild with the list name in the key
+        con.execute("ALTER TABLE watchlist RENAME TO watchlist_old")
+        con.execute("CREATE TABLE watchlist (email TEXT NOT NULL, ticker TEXT NOT NULL, position INTEGER NOT NULL, added REAL NOT NULL, list_name TEXT NOT NULL DEFAULT 'My watchlist', PRIMARY KEY (email, list_name, ticker))")
+        con.execute("INSERT INTO watchlist(email, ticker, position, added, list_name) SELECT email, ticker, position, added, 'My watchlist' FROM watchlist_old")
+        con.execute("DROP TABLE watchlist_old")
 
 
 def _sid(cookie_value: str) -> str:
@@ -109,9 +121,12 @@ def profile(email: str) -> dict[str, Any] | None:
         row = con.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if not row:
             return None
-        tickers = [r["ticker"] for r in con.execute("SELECT ticker FROM watchlist WHERE email = ? ORDER BY position", (email,))]
+        lists: dict[str, list[str]] = {}
+        for r in con.execute("SELECT list_name, ticker FROM watchlist WHERE email = ? ORDER BY list_name, position", (email,)):
+            lists.setdefault(r["list_name"], []).append(r["ticker"])
+        active = row["active_list"] if row["active_list"] in lists else (next(iter(lists)) if lists else DEFAULT_LIST)
         return {"email": email, "name": row["name"], "created": row["created"], "last_login": row["last_login"],
-                "accepted_disclaimer_at": row["accepted_disclaimer_at"], "tickers": tickers}
+                "accepted_disclaimer_at": row["accepted_disclaimer_at"], "tickers": lists.get(active, []), "lists": lists, "active": active}
 
 
 def set_name(email: str, name: str) -> None:
@@ -224,12 +239,25 @@ def login_state(email: str) -> dict[str, Any]:
 
 
 # ---- watchlist --------------------------------------------------------------------
-def set_watchlist(email: str, tickers: list[str]) -> list[str]:
+def set_watchlist(email: str, tickers: list[str], list_name: str = DEFAULT_LIST) -> list[str]:
+    """Replace one named list (the default list unless told otherwise) and make it active."""
+    now = time.time()
+    with connect() as con:
+        con.execute("DELETE FROM watchlist WHERE email = ? AND list_name = ?", (email, list_name))
+        con.executemany("INSERT INTO watchlist(email, ticker, position, added, list_name) VALUES (?, ?, ?, ?, ?)", [(email, t, i, now, list_name) for i, t in enumerate(tickers)])
+        con.execute("UPDATE users SET active_list = ? WHERE email = ?", (list_name, email))
+    return tickers
+
+
+def set_watchlists(email: str, lists: dict[str, list[str]], active: str | None) -> dict[str, Any]:
+    """Replace every list the user owns; `active` names the one the page is showing."""
     now = time.time()
     with connect() as con:
         con.execute("DELETE FROM watchlist WHERE email = ?", (email,))
-        con.executemany("INSERT INTO watchlist(email, ticker, position, added) VALUES (?, ?, ?, ?)", [(email, t, i, now) for i, t in enumerate(tickers)])
-    return tickers
+        for name, tickers in lists.items():
+            con.executemany("INSERT INTO watchlist(email, ticker, position, added, list_name) VALUES (?, ?, ?, ?, ?)", [(email, t, i, now, name) for i, t in enumerate(tickers)])
+        con.execute("UPDATE users SET active_list = ? WHERE email = ?", (active if active in lists else (next(iter(lists)) if lists else DEFAULT_LIST), email))
+    return {"lists": lists, "active": active}
 
 
 def all_watchlist_tickers() -> list[str]:
