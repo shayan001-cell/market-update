@@ -1428,6 +1428,8 @@
     return mailStatus.configured ? `<div class="mail-line ok">Links are emailed by <b>${esc(mailStatus.from_name)}</b> (${esc(mailStatus.transport)}). Check your spam folder the first time.</div>`
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
+  const WA_GROUP = "https://chat.whatsapp.com/C4NROWURa0SI1hoegnfHOc?mode=gi_t";
+  const waJoin = () => `<a class="wa-join" href="${WA_GROUP}" target="_blank" rel="noopener"><span class="wa-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3l-2-1c-.3-.1-.5-.1-.7.1l-.9 1.1c-.2.2-.3.2-.6.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.6-1.2.1-.2 0-.4 0-.5l-.9-2.1c-.2-.6-.5-.5-.7-.5z"/></svg></span><span class="wa-t"><b>Join the Webex Traders group on WhatsApp</b><span>The team's latest moves, posted as they happen: what we are watching, buying and stepping away from, before the hourly report catches up.</span></span><i aria-hidden="true">Join ›</i></a>`;
   function loginHero(r) {
     const tape = ((r && r.macro) || []).slice(0, 8).map((m) => `<span class="lt-item"><b>${esc(m.label || m.symbol)}</b> <span class="mono">${fnum(m.last, m.last < 10 ? 3 : 2)}</span> <span class="delta ${cls(qchg(m))}">${fpct(qchg(m))}</span></span>`).join("");
     return `<div class="lg-hero">
@@ -1440,6 +1442,7 @@
         <li><span class="lg-ic" style="--vc:#2EE59D">${ICONS.scan}</span><div><b>Volume scanner, every minute</b><span>15m and 30m bars, RVOL by time of day, VWAP.</span></div></li>
         <li><span class="lg-ic" style="--vc:#4FE3C1">${ICONS.smart}</span><div><b>Who is buying</b><span>Insiders, institutions, Congress and options flow.</span></div></li>
       </ul>
+      ${waJoin()}
       ${tape ? `<div class="lg-tape"><div class="lt-track">${tape}${tape}</div></div>` : ""}
     </div>`;
   }

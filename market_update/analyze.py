@@ -398,7 +398,8 @@ def _verdict(s: dict[str, Any]) -> dict[str, Any]:
         conv = "high" if (strong_vol and code in ("momentum_up", "momentum_down", "selling_today", "buying_today")) else "med" if code != "flat" else "low"
         why = _why_bullets(s, False)
         if code in ("selling_today", "buying_today"):
-            why.insert(0, f"{'Down' if today < 0 else 'Up'} {abs(today):.1f}% today on {rv:.1f}x the usual trading{f', after a {abs(r5):.0f}% {'rise' if r5 > 0 else 'fall'} over the past five sessions' if _num(r5) and abs(r5) >= 3 else ''}.")
+            after = f", after a {abs(r5):.0f}% {'rise' if r5 > 0 else 'fall'} over the past five sessions" if _num(r5) and abs(r5) >= 3 else ""
+            why.insert(0, f"{'Down' if today < 0 else 'Up'} {abs(today):.1f}% today on {rv:.1f}x the usual trading{after}.")
         elif _num(r5):
             why.insert(0, f"{'Up' if r5 >= 0 else 'Down'} {abs(r5):.1f}% over the past five sessions on {'heavy' if strong_vol else 'ordinary'} trading.")
         return {"kind": "large", "code": code, "word": word, "cls": cls, "plain": plain, "conviction": conv, "why": why[:4], "model": st.get("choice")}
