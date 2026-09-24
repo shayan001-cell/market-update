@@ -1048,3 +1048,14 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .view.stock .kv dd { text-align: right; overflow-wrap: anywhere; }
 .stk-list th:nth-child(1) { width: 36%; } .stk-list th:nth-child(2) { width: 19%; } .stk-list th:nth-child(3) { width: 25%; } .stk-list th:nth-child(4) { width: 20%; }
 .stk-list td.sc2 span { display: block; margin: 0; line-height: 1.25; }
+/* ---- theme table: model reads first, in words ---- */
+.th-tbl { table-layout: fixed; } .th-tbl td { vertical-align: middle; font-size: 12px; }
+.th-tbl th:nth-child(1) { width: 17%; } .th-tbl th:nth-child(2) { width: 11%; } .th-tbl th:nth-child(3) { width: 19%; } .th-tbl th:nth-child(4), .th-tbl th:nth-child(5) { width: 13%; } .th-tbl th:nth-child(6), .th-tbl th:nth-child(7) { width: 8%; } .th-tbl th:nth-child(8) { width: 8%; } .th-tbl th:nth-child(9) { width: 3%; }
+.th-tbl td.sym b { display: block; } .th-tbl .meta2 { white-space: normal; line-height: 1.3; }
+.th-run b { display: inline-block; text-transform: capitalize; font-size: 13px; margin-right: 6px; } .th-run .mono { font-size: 11px; }
+.th-bar { height: 5px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-top: 4px; } .th-bar i { display: block; height: 100%; background: var(--warn); } .th-bar i.up { background: var(--up); } .th-bar i.up2 { background: var(--pill-ok); } .th-bar i.down { background: var(--down); }
+.th-ph .pill { display: block; font-size: 11px; }
+.dots { display: inline-flex; gap: 3px; } .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line-2); } .dots i.on { background: var(--accent); border-color: var(--accent); } .dots.mv i.on { background: var(--up); border-color: var(--up); }
+.th-fl .tag { margin: 1px 2px 1px 0; }
+.th-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 11.5px; color: var(--text-2); margin: 0 0 8px; } .th-legend b { color: var(--text); }
+@media (max-width: 1250px) { .th-tbl th:nth-child(8), .th-tbl td.th-fl { display: none; } }

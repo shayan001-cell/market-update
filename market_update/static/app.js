@@ -566,7 +566,11 @@
     stage: { early: "Early: leaders just breaking out, most groups still flat.", mid: "Mid: leaders extended, second-tier groups turning up; participation broadening.", late: "Late: nearly every group up and extended; laggards running.", exhausted: "Exhausted: leaders rolling over while laggards spike.", broken: "Broken: most groups in downtrends." },
     phase: { leader: "Leading the group", catching_up: "Catching up", laggard: "Lagging", extended: "Extended after a vertical run", broken: "Broken" },
     lev: ["peripheral", "meaningful", "core", "pure play"],
+    levPlain: ["Barely tied to the theme", "Partly tied to the theme", "Core to the theme", "Pure play on the theme"],
     move: ["market-like", "amplified", "explosive", "parabolic candidate"],
+    movePlain: ["Moves like the market", "Moves more than the market", "Can move a lot in a day", "Can go parabolic"],
+    phasePlain: { leader: "Already leading. Chase less; buy pullbacks.", catching_up: "Just starting to move. Often the better entry.", laggard: "Has not moved yet. Needs a trigger first.", extended: "Ran too far, too fast. Wait for a rest.", broken: "Trend is broken. Leave it alone." },
+    phaseCls: { leader: "up", catching_up: "up2", laggard: "flat", extended: "warn", broken: "down" },
     fund: ["story only", "mixed", "supported", "underpriced"],
     group: { compute: "Compute", memory_storage: "Memory & storage", networking_optics: "Networking & optics", servers_cooling: "Servers & cooling", power: "Power", semicap: "Chip equipment", real_estate: "Data-center REITs", platforms: "Hyperscalers & clouds" },
   };
@@ -582,25 +586,28 @@
     const groups = ["all", ...Object.keys(TH.group).filter((k) => T_.rows.some((x) => x.group === k))];
     const tabs = groups.map((k) => `<button class="tab ${themeGroup === k ? "active" : ""}" data-theme-group="${k}">${k === "all" ? "All" : TH.group[k]}</button>`).join("");
     const rows = T_.rows.filter((x) => themeGroup === "all" || x.group === themeGroup).map((x) => {
-      const a = x.ai || {}, t = x.technicals, f = x.fundamentals || {}, pa = x.price_action || {};
+      const a = x.ai || {}, t = x.technicals, f = x.fundamentals || {};
       const ph = a.phase ? a.phase.choice : "";
+      const rk = x.rank || 0, rkWord = words(rk, 1.0001, SCORE_WORDS), rkCls = rk >= 0.75 ? "up" : rk >= 0.5 ? "up2" : rk >= 0.25 ? "flat" : "down";
+      const lev = a.theme_leverage ? Math.round(a.theme_leverage.score) : null, mv = a.move_potential ? Math.round(a.move_potential.score) : null;
+      const flags = [...(x.tags || []).map((g) => `<span class="tag ${g === "extended" ? "bad" : g === "earnings_soon" ? "warn" : g === "new_high" ? "ok" : "acc"}">${pretty(g)}</span>`), smBadge(x), opBadge(x)].filter(Boolean).join("");
       return `<tr>
-        <td class="sym"><b>${esc(x.ticker)}</b> <span class="tag">${TH.group[x.group] || x.group}</span><div class="meta2">${esc(x.name || "")}</div></td>
+        <td class="sym"><b>${esc(x.ticker)}</b><div class="meta2">${esc(x.name || "")} · ${TH.group[x.group] || x.group}</div></td>
+        <td class="th-run"><b class="${rkCls}">${rkWord}</b><span class="mono muted">${(rk * 100).toFixed(0)}</span><div class="th-bar"><i class="${rkCls}" style="width:${(rk * 100).toFixed(0)}%"></i></div></td>
+        <td class="th-ph">${ph ? `<span class="pill ${TH.phaseCls[ph] || "flat"}">${TH.phase[ph] || pretty(ph)}</span><div class="meta2">${TH.phasePlain[ph] || ""}</div>` : '<span class="muted">–</span>'}</td>
+        <td class="th-lv">${lev != null ? `<div class="dots">${[0, 1, 2].map((i) => `<i class="${i < lev ? "on" : ""}"></i>`).join("")}</div><div class="meta2">${TH.levPlain[lev]}</div>` : '<span class="muted">–</span>'}</td>
+        <td class="th-mv">${mv != null ? `<div class="dots mv">${[0, 1, 2].map((i) => `<i class="${i < mv ? "on" : ""}"></i>`).join("")}</div><div class="meta2">${TH.movePlain[mv]}</div>` : '<span class="muted">–</span>'}</td>
         <td class="num">${fnum(x.last_price)}<div class="delta ${cls(x.chg_pct)}">${arrow(x.chg_pct)} ${fpct(x.chg_pct)}</div></td>
-        <td class="num"><span class="${cls(t.ret_1m)}">${fpct(t.ret_1m, 1)}</span> / <span class="${cls(t.ret_3m)}">${fpct(t.ret_3m, 1)}</span><div class="meta2">vs SPY <span class="${cls(x.rel_1m)}">${fpct(x.rel_1m, 1)}</span> / <span class="${cls(x.rel_3m)}">${fpct(x.rel_3m, 1)}</span></div></td>
-        <td><span class="${{ up: "up", down: "down" }[t.trend] || "flat"}">${t.trend}</span><div class="meta2">${pretty(pa.structure || "")} · ${fpct(t.dist_sma20_pct, 0)} vs 20d · RSI ${fnum(t.rsi14, 0)}</div></td>
-        <td class="num">${fpct(t.atr_pct, 1, false)}<div class="meta2">β ${fnum(f.beta, 1)} · short ${isNum(f.short_float) ? (f.short_float * 100).toFixed(0) + "%" : "–"}</div></td>
-        <td class="num">${isNum(f.rev_growth) ? fpct(f.rev_growth * 100, 0) : "–"}<div class="meta2">fwd P/E ${fnum(f.forward_pe, 0)} · ${a.fundamental_support ? TH.fund[Math.round(a.fundamental_support.score)] : "–"}</div></td>
-        <td>${a.theme_leverage ? `${bar(a.theme_leverage.score, 3)}<span class="mono">${TH.lev[Math.round(a.theme_leverage.score)]}</span>` : "–"}</td>
-        <td>${a.move_potential ? `${bar(a.move_potential.score, 3)}<span class="mono">${TH.move[Math.round(a.move_potential.score)]}</span>` : "–"}</td>
-        <td><span class="pill ${{ leader: "up", catching_up: "up", broken: "down", extended: "warn" }[ph] || "flat"}">${pretty(ph)}</span> ${a.phase ? conf(a.phase.confidence) : ""}</td>
-        <td class="num">${bar(x.rank, 1)}<span class="mono">${(x.rank * 100).toFixed(0)}</span><div class="meta2">${smBadge(x)}${opBadge(x)}${(x.tags || []).map((g) => `<span class="tag ${g === "extended" ? "bad" : g === "earnings_soon" ? "warn" : g === "new_high" ? "ok" : "acc"}">${pretty(g)}</span>`).join("")}</div></td>
+        <td class="num"><span class="${cls(x.rel_1m)}">${fpct(x.rel_1m, 0)}</span><div class="meta2">vs S&amp;P, 1 month</div></td>
+        <td class="th-fl">${flags || '<span class="muted">–</span>'}</td>
         <td><a class="btn sm ghost" href="${tvLink(x.ticker)}" target="_blank" rel="noopener">Chart</a></td></tr>`;
     }).join("");
+    const legend = `<div class="th-legend"><span><b>Run score</b> how likely the name is to move if the theme runs: strong, good, modest or weak.</span><span><b>Phase</b> where it is in its own move.</span><span><b>Theme tie</b> how much of its business is the theme (dots: one to three).</span><span><b>Move size</b> how big its moves tend to be.</span></div>`;
     return `<section class="th-section"><h2>${esc(T_.name)}: who can run <span class="muted">${T_.rows.length} names by role in the stack · ranked by theme leverage × move potential × trend × volatility × relative strength · SPY ${fpct(T_.spy_ret_1m, 1)} / ${fpct(T_.spy_ret_3m, 1)} over 1 / 3 months</span></h2>
       ${head}
       <div class="tabs">${tabs}</div>
-      <div class="tbl-wrap"><table class="tbl th-tbl"><thead><tr><th>Name</th><th>Price</th><th>1m / 3m</th><th>Trend</th><th>Daily range</th><th>Rev growth</th><th>Theme leverage</th><th>Move potential</th><th>Phase</th><th>Run score</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+      ${legend}
+      <div class="tbl-wrap"><table class="tbl th-tbl"><thead><tr><th>Name</th><th>Run score</th><th>Phase</th><th>Theme tie</th><th>Move size</th><th>Price</th><th>1 month</th><th>Flags</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
   }
 
   // ---------------------------------------------------------------- big picture: 1 / 3 / 6 / 12 months
