@@ -5,7 +5,12 @@
 
   // ---------------------------------------------------------------- state
   const EMBEDDED = document.getElementById("report-data");
-  const STATIC_MODE = !!EMBEDDED;
+  const API = ((document.querySelector('meta[name="mu-api-url"]') || {}).content || "").replace(/__API_URL__/, "").replace(/\/$/, "");
+  const STATIC_MODE = !!EMBEDDED && !API;          // a static copy with an API behind it behaves like the app
+  let authToken = null; try { authToken = localStorage.getItem("mu-token"); } catch (e) {}
+  const mst = (location.hash.match(/[#&]st=([A-Za-z0-9_\-.]+)/) || [])[1];
+  if (mst) { authToken = mst; try { localStorage.setItem("mu-token", mst); } catch (e) {} try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
+  const api = (path, opts) => { const o = Object.assign({}, opts || {}); o.headers = Object.assign({}, o.headers || {}); if (API) { o.credentials = "include"; if (authToken) o.headers["Authorization"] = "Bearer " + authToken; } return fetch(API + path, o); };
   let report = null;
   let selectedTicker = null;
   let stockTab = "all";
@@ -655,7 +660,7 @@
   async function pollNews() {
     if (STATIC_MODE || !report) return;
     try {
-      const j = await (await fetch("/api/news", { cache: "no-store" })).json();
+      const j = await (await api("/api/news", { cache: "no-store" })).json();
       const items = j.items || [];
       items.forEach((x) => { x._new = newsSeen.size > 0 && !newsSeen.has(x.id); });
       items.forEach((x) => newsSeen.add(x.id));
@@ -920,7 +925,7 @@
     if (!STATIC_MODE && user && user.profile) {           // the watchlist lives with the account, so it follows the user to any browser
       user.profile.tickers = activeList().slice();
       clearTimeout(profileTimer);
-      profileTimer = setTimeout(() => fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: activeList() }) }).catch(() => {}), 600);
+      profileTimer = setTimeout(() => api("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: activeList() }) }).catch(() => {}), 600);
     } else if (STATIC_MODE && user) { user.profile = Object.assign({}, user.profile, { tickers: activeList().slice() }); try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
   }
   const activeList = () => (lists && lists.lists[lists.active]) || [];
@@ -930,7 +935,7 @@
   function syncServerWatchlist() {
     if (STATIC_MODE) return;
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(() => { const all = [...new Set(Object.values(lists.lists).flat())]; fetch("/api/watchlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: all }) }).catch(() => {}); }, 800);
+    syncTimer = setTimeout(() => { const all = [...new Set(Object.values(lists.lists).flat())]; api("/api/watchlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: all }) }).catch(() => {}); }, 800);
   }
   function addTicker(t) {
     t = (t || "").toUpperCase().trim(); if (!t || !report) return;
@@ -956,7 +961,7 @@
     if (analyzing.has(t) && attempt === 0) return;
     analyzing.add(t); delete analyzeError[t];
     try {
-      const res = await fetch(`/api/stock/${encodeURIComponent(t)}`, { cache: "no-store" });
+      const res = await api(`/api/stock/${encodeURIComponent(t)}`, { cache: "no-store" });
       if (res.status === 202) { if (attempt < 30) setTimeout(() => requestAnalysis(t, attempt + 1), 5000); return; }
       const j = await res.json();
       if (!res.ok) throw new Error(j.detail || res.statusText);
@@ -984,7 +989,7 @@
     try {
       const emb = document.getElementById("symbols-data");
       if (emb) symbolIndex = JSON.parse(emb.textContent);
-      else { const res = await fetch("./symbols.json"); if (res.ok) symbolIndex = await res.json(); }
+      else { const res = await (API ? api("/symbols.json") : fetch("./symbols.json")); if (res.ok) symbolIndex = await res.json(); }
     } catch (e) { /* search still works over the report's own names */ } finally { symbolLoading = false; }
     if (symbolIndex && document.activeElement === $("#search")) renderSearch();
   }
@@ -1074,7 +1079,7 @@
   async function pollLiveScan() {
     if (STATIC_MODE || !report) return;
     try {
-      const res = await fetch("/api/scan/live", { cache: "no-store" });
+      const res = await api("/api/scan/live", { cache: "no-store" });
       if (res.status === 202) return;
       const j = await res.json(); liveScan = j; liveScan.received = Date.now();
       if (currentView === "scan" && subTab.scan === "scanner") { const sec = $(".sc-section"); if (sec) { const tmp = document.createElement("div"); tmp.innerHTML = secScan(report); sec.replaceWith(tmp.firstElementChild); wireStocks(); } }
@@ -1204,7 +1209,7 @@
     if (left > 0) return;
     scheduleHourly();
     if (STATIC_MODE) { try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); } } } catch (e) {} }
-    else { try { await fetch("/api/refresh", { method: "POST" }); } catch (e) {} poll(); }
+    else { try { await api("/api/refresh", { method: "POST" }); } catch (e) {} poll(); }
   }
   function initSide() {
     const shell = $("#shell"), tg = $("#side-toggle"); if (!shell || !tg) return;
@@ -1216,11 +1221,11 @@
   // ---------------------------------------------------------------- sign-in gate + onboarding
   async function loadUser() {
     if (STATIC_MODE) { user = null; try { localStorage.removeItem(USER_KEY); } catch (e) {} }
-    else { try { const res = await fetch("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; } }
+    else { try { const res = await api("/api/me", { cache: "no-store" }); user = res.ok ? await res.json() : null; } catch (e) { user = null; } }
     lists = null;                                   // rebuild the watchlist from the account on every (re)load
     if (user && user.profile && !(user.profile.tickers || []).length) {   // first sign-in from this browser: keep what was built here
       const saved = loadLists(); const mine = saved && saved.lists[saved.active];
-      if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) fetch("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
+      if (mine && mine.length) { user.profile.tickers = mine.slice(); if (!STATIC_MODE) api("/api/profile/tickers", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tickers: mine }) }).catch(() => {}); }
     }
   }
   const discThisSession = () => { try { return sessionStorage.getItem("mu-disc-s") === "1"; } catch (e) { return false; } };
@@ -1251,7 +1256,7 @@
     document.body.classList.add("dash-enter");
     setTimeout(() => document.body.classList.remove("dash-enter"), 2200);
   }
-  const hexSteps = (n) => { const steps = ["Sign in", "Confirm", "Watchlist"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
+  const hexSteps = (n) => { const steps = ["Sign in", "Disclaimer", "Dashboard"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
   const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
   const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
   function mailLine() {
@@ -1279,9 +1284,9 @@
     const r = report || {};
     const card = STATIC_MODE
       ? `<div class="g-core">${hexSteps(0)}<span class="eyebrow">Sign in required</span><h1>Sign in to your desk</h1>
-        <p>Webex Market Update is for signed-in users. Enter your email on the app and we send a one-time link; the same link creates a new account.</p>
+        <p>Webex Market Update is for signed-in users. Sign-in runs on the app server; this copy has not been connected to one yet.</p>
         ${APP_URL ? `<div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Sign in or sign up</span><i aria-hidden="true">↗</i></a></div>`
-          : `<p class="fine">The sign-in service for this address is being connected. Until then, sign in on the app server given to you by the site owner.</p>`}
+          : `<p class="fine">Ask the site owner for the app link, or check back shortly.</p>`}
         <p class="fine">Market data, model reads and scans here are information, not advice.</p></div>`
       : `<div class="g-core" id="login-core">
         ${hexSteps(0)}
@@ -1361,8 +1366,8 @@
         if (!STATIC_MODE && user) {
           const nm = $("#name-input") ? $("#name-input").value.trim() : "";
           try {
-            if (nm && !user.name) { const r1 = await fetch("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm }) }); if (r1.ok) user.name = (await r1.json()).name; }
-            const r2 = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: (user.profile && user.profile.tickers) || [] }) });
+            if (nm && !user.name) { const r1 = await api("/api/profile/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm }) }); if (r1.ok) user.name = (await r1.json()).name; }
+            const r2 = await api("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: (user.profile && user.profile.tickers) || [] }) });
             if (!r2.ok) { st.className = "gate-status err"; st.textContent = "Could not save. Try again."; return; }
             user.profile = (await r2.json()).profile; if (!user.name) user.name = user.email.split("@")[0];
           } catch (e) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; return; }
@@ -1372,7 +1377,7 @@
       });
     }
 
-    if (!user && !STATIC_MODE && !mailStatus) fetch("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
+    if (!user && !STATIC_MODE && !mailStatus) api("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
   }
   function wireGate() {
     const lf = $("#login-form");
@@ -1382,11 +1387,11 @@
       if (STATIC_MODE) return;
       st.textContent = "Sending…";
       try {
-        const res = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+        const res = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
         if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not send the link."; return; }
         const core = $("#login-core"); if (core) { core.innerHTML = sentHtml(email, j); startSentTimer(j.expires_in_s || 600);
-          const rs = core.querySelector("[data-resend]"); if (rs) rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); }
+          const rs = core.querySelector("[data-resend]"); if (rs) rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); }
       } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
     });
     const go = $("#picks-go"); if (!go) return;
@@ -1409,7 +1414,7 @@
       if (STATIC_MODE) { user.profile = profile; try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) {} }
       else {
         try {
-          const res = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, kind, tickers: profile.tickers }) });
+          const res = await api("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, kind, tickers: profile.tickers }) });
           const j = await res.json(); if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not save."; return; }
           user.profile = j.profile;
         } catch (e) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; return; }
@@ -1434,7 +1439,8 @@
   }
   async function signOut() {
     if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
-    else { try { await fetch("/api/auth/logout", { method: "POST" }); } catch (e) {} }
+    else { try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {} }
+    authToken = null; try { localStorage.removeItem("mu-token"); } catch (e) {}
     user = null; lists = null; try { sessionStorage.removeItem("mu-disc-s"); } catch (e) {}
     if (report) { ensureLists(report); renderAll(); }        // fall back to the browser copy of the list
     renderGate();
@@ -1498,7 +1504,7 @@
   }
   async function pollAdmin() {
     if (STATIC_MODE || !user || user.role !== "admin") return;
-    try { const res = await fetch("/api/admin/overview", { cache: "no-store" }); if (res.ok) { adminData = await res.json(); if (currentView === "admin") renderAll(); } } catch (e) {}
+    try { const res = await api("/api/admin/overview", { cache: "no-store" }); if (res.ok) { adminData = await res.json(); if (currentView === "admin") renderAll(); } } catch (e) {}
   }
   const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() / 1000) - t); return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
   function secAdmin() {
@@ -1571,7 +1577,7 @@
       if (!row.hidden) { const el = row.querySelector("[data-chart-weekly]"); if (el && el.childElementCount === 0) { const a = report.horizons.assets.find((x) => x.symbol === sym); weeklyChart(el, a.weekly); } }
     }));
     document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.getAttribute("data-open"))));
-    const ag = $("[data-agree]"); if (ag) ag.addEventListener("click", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} if (user && !STATIC_MODE) fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: activeList() }) }).catch(() => {}); renderAll(); });
+    const ag = $("[data-agree]"); if (ag) ag.addEventListener("click", () => { try { localStorage.setItem("mu-disc", "1"); } catch (e) {} if (user && !STATIC_MODE) api("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accepted: true, tickers: activeList() }) }).catch(() => {}); renderAll(); });
     wireSearch();
     document.querySelectorAll("#app [data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
@@ -1615,14 +1621,14 @@
   }
 
   async function fetchReport() {
-    const res = await fetch("/api/report", { cache: "no-store" });
+    const res = await api("/api/report", { cache: "no-store" });
     if (!res.ok) throw new Error("report " + res.status);
     return res.json();
   }
 
   async function poll() {
     try {
-      const st = await (await fetch("/api/status", { cache: "no-store" })).json();
+      const st = await (await api("/api/status", { cache: "no-store" })).json();
       const btn = $("#refresh-btn");
       if (st.building) { btn.disabled = true; btn.textContent = "Building…"; }
       else if (st.refresh_available_in_s > 0) { btn.disabled = true; btn.textContent = `Refresh (${st.refresh_available_in_s}s)`; }
@@ -1644,7 +1650,7 @@
     if (STATIC_MODE) return;
     const btn = $("#refresh-btn"); btn.disabled = true; btn.textContent = "Building…";
     try {
-      const res = await fetch("/api/refresh", { method: "POST" });
+      const res = await api("/api/refresh", { method: "POST" });
       const j = await res.json();
       if (res.status === 429) notice(`Refresh is rate-limited; try again in ${j.retry_in_s}s.`);
       else notice("Rebuilding: fresh quotes, news and model judgments. This takes about a minute.");
@@ -1676,6 +1682,9 @@
       if (v === "ticker" && t) { if (currentView !== "ticker" || tickerSel !== t.toUpperCase()) { tickerSel = t.toUpperCase(); currentView = "ticker"; if (report) renderAll(); } return; }
       if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
     $("#refresh-btn").addEventListener("click", onRefresh);
+    if (EMBEDDED && API) {
+      try { report = JSON.parse(EMBEDDED.textContent); } catch (e) { report = null; }   // seed the first paint from the export; the API takes over below
+    }
     if (STATIC_MODE) {
       report = JSON.parse(EMBEDDED.textContent);
       const rb = $("#refresh-btn"); rb.hidden = false; rb.textContent = "REFRESH";

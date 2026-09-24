@@ -45,7 +45,8 @@ REPORT_PATH = DATA_DIR / "report.json"
 USE_AI = os.environ.get("MU_NO_AI", "0") not in ("1", "true", "yes")
 
 app = FastAPI(title="Market Update", version="0.2.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+_CORS = [o.strip().rstrip("/") for o in os.environ.get("MU_CORS_ORIGINS", "https://shayan001-cell.github.io").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["*"])
 
 
 @app.middleware("http")
@@ -194,7 +195,7 @@ async def _startup() -> None:
 async def index(request: Request) -> HTMLResponse:
     """Serve index.html with asset URLs versioned by file mtime, so a deploy never fights a browser cache."""
     html = (config.STATIC_DIR / "index.html").read_text()
-    html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request)).replace("__APP_URL__", "")
+    html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request)).replace("__APP_URL__", "").replace("__API_URL__", "")
     for name in ("app.js", "styles.css"):
         v = int((config.STATIC_DIR / name).stat().st_mtime)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
@@ -380,9 +381,17 @@ def _unsign(value: str | None) -> str | None:
     return payload if hmac.compare_digest(expect, sig) else None
 
 
+def _raw_session(request: Request) -> str | None:
+    """The session value: the cookie, or a bearer token the static copy stored after the emailed link."""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer ") and len(auth) > 20:
+        return auth[7:].strip()
+    return request.cookies.get(SESSION_COOKIE)
+
+
 def _session_email(request: Request) -> str | None:
-    """Signed cookie AND a live, logged-in row in the sessions table."""
-    raw = request.cookies.get(SESSION_COOKIE)
+    """Signed cookie or bearer token AND a live, logged-in row in the sessions table."""
+    raw = _raw_session(request)
     payload = _unsign(raw)
     if not payload:
         return None
@@ -491,6 +500,11 @@ async def auth_verify(request: Request, token: str = "") -> Response:
     db.log_activity(email, "login", request.headers.get("user-agent", "")[:80])
     cookie = _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}")
     db.open_session(cookie, email, SESSION_DAYS * 86400, request.headers.get("user-agent"))
+    # The public copy lives on another origin (GitHub Pages): send the user back there with the session in the
+    # URL fragment (never sent to servers), which the page stores as a bearer token. Same-origin users get the cookie.
+    public = os.environ.get("MU_SITE_URL", "").rstrip("/")            # the public page (GitHub Pages) when it differs from this server
+    if public and public != _public_url(request).rstrip("/"):
+        return RedirectResponse(f"{public}/?signed_in=1#st={cookie}", status_code=303)
     resp = RedirectResponse("/?signed_in=1", status_code=303)
     resp.set_cookie(SESSION_COOKIE, cookie, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
     return resp
@@ -509,9 +523,10 @@ async def api_me(request: Request) -> JSONResponse:
                         headers={"Cache-Control": "no-store"})
     # Sliding session: every visit renews the cookie and the session row, so the login stays active
     # until the user signs out or stays away for SESSION_DAYS.
-    raw = request.cookies.get(SESSION_COOKIE) or ""
+    raw = _raw_session(request) or ""
     db.touch_session(raw, SESSION_DAYS * 86400)
-    resp.set_cookie(SESSION_COOKIE, raw, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
+    if request.cookies.get(SESSION_COOKIE):
+        resp.set_cookie(SESSION_COOKIE, raw, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
     return resp
 
 
@@ -596,7 +611,7 @@ async def api_profile_tickers(request: Request, payload: dict[str, Any] = Body(.
 @app.post("/api/auth/logout")
 async def auth_logout(request: Request) -> JSONResponse:
     db.log_activity(_session_email(request), "logout")
-    db.close_session(request.cookies.get(SESSION_COOKIE))     # the sessions row now says logged_in = 0
+    db.close_session(_raw_session(request))     # the sessions row now says logged_in = 0
     resp = JSONResponse({"status": "ok", "logged_in": False})
     resp.delete_cookie(SESSION_COOKIE)
     return resp
