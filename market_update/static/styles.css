@@ -1657,3 +1657,7 @@ tr.day-detail td { background: var(--surface-2); }
 .cw-h { display: flex; gap: 8px; align-items: baseline; } .cw-h b { font-size: 15px; }
 .cw-l { font-weight: 700; font-size: 14px; } .cw-l.up { color: var(--up); } .cw-l.down { color: var(--down); }
 @media (max-width: 1100px) { .cw-grid { grid-template-columns: 1fr; } }
+
+.guide .gd { margin: 14px 0 0; } .guide .gd h3 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+.gd-list { margin: 0; padding: 0 0 0 18px; display: grid; gap: 5px; font-size: 13.5px; line-height: 1.5; max-width: 90ch; } .gd-list b { color: var(--text); }
+.side-item.v-guide { --vc: #66D9A6; }
