@@ -223,7 +223,7 @@ LOW_FLOAT_ROWS = 20
 LOW_FLOAT_MAX_JUDGED = 10
 
 # ---- accounts ----
-ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("MU_ADMIN_EMAILS", "shayan001@live.ca,shayan001@live.cs").split(",") if e.strip()}
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("MU_ADMIN_EMAILS", "shayan001@live.ca,shayan001@live.cs,shayan001@gmail.com").split(",") if e.strip()}
 
 # Every new account (and every guest) starts with these seven; users add or remove from there.
 DEFAULT_WATCHLIST = ["NVDA", "TSLA", "AMD", "PLTR", "COIN", "INTC", "SPY"]

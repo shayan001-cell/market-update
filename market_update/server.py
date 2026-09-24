@@ -1024,8 +1024,9 @@ async def st_status(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/stocktwits/connect")
-async def st_connect(request: Request) -> RedirectResponse:
-    """Admin clicks: register this server as an OAuth client (once), then go sign in at StockTwits."""
+async def st_connect(request: Request, json_out: int = 0) -> Any:
+    """Admin clicks: register this server as an OAuth client (once), then go sign in at StockTwits.
+    With json_out=1 the page fetches this with its bearer token and follows the returned URL itself."""
     import base64 as b64, hashlib as hl, secrets
     _require_admin(request)
     d = _st_load()
@@ -1041,7 +1042,10 @@ async def st_connect(request: Request) -> RedirectResponse:
     from urllib.parse import urlencode
     q = urlencode({"response_type": "code", "client_id": d["client_id"], "redirect_uri": redirect, "scope": "read", "state": st,
                    "code_challenge": challenge, "code_challenge_method": "S256"})
-    return RedirectResponse(f"{ST_AUTH}/authorize?{q}")
+    url = f"{ST_AUTH}/authorize?{q}"
+    if json_out:
+        return JSONResponse({"url": url})
+    return RedirectResponse(url)
 
 
 @app.get("/api/stocktwits/callback")
