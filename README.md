@@ -65,7 +65,7 @@ login with an "I agree" button and an "I do not agree, sign out" link. The publi
 requires sign-in and has no guest mode. The menu footer has "Invite friends on WhatsApp",
 which opens a ready-made message with the link and what the desk does.
 
-**Watchlist page (view 2).** One card per name with three perspectives side by side, each
+**Watchlist page (view 2).** Users can keep several named lists (a switcher with New, Rename and Delete sits above the chips; at least one list always remains). Every list is saved to the account, keyed by list name, and the active list drives the home verdicts and the cards. One card per name with three perspectives side by side, each
 from the same TypeSafe stock read: **Day trade** (the intraday playbook, day score, daily
 range, volume versus normal, yesterday's range, the live volume-build score), **Swing**
 (the stance, swing score, lean, setup, the ten-point checklist and the plan with stop,
