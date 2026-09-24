@@ -571,7 +571,32 @@
   }
   const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
   const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
-  const BRIEF_SLOTS = [["morning", "Morning briefing", "07:00"], ["midday", "Midday check", "13:00"], ["close", "After the close", "16:30"]];
+  const BRIEF_SLOTS = [["morning", "Morning briefing", "07:00"], ["direction", "Intraday direction", "every 15 min"], ["close", "After the close", "16:30"]];
+  let direction = null;
+  async function pollDirection() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/direction", { cache: "no-store" }); if (!res.ok) return; direction = await res.json();
+      if (currentView === "home" && report) { const el = $('[data-brief-slot="direction"]'); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = directionCard(); el.replaceWith(tmp.firstElementChild); wireStocks(); } } } catch (e) { /* server restarting */ }
+  }
+  const DIR = { higher: ["Higher into the close", "up"], lower: ["Lower into the close", "down"], sideways: ["Sideways into the close", "flat"] };
+  const DIR_DRIVER = { trend_and_vwap: "price is on the same side of the day's average price as the 1-hour trend", level_break: "a level just gave way", level_hold: "a level held on the test", exhaustion: "the move is stretched and stalling", sentiment: "the crowd's mood is the deciding factor", no_edge: "nothing clear, so sideways is the honest read" };
+  function directionCard() {
+    const d = direction; const open = briefOpen === "direction";
+    if (!d || d.status !== "ok" || !d.latest) return `<article class="bcard pending" data-brief-slot="direction"><div class="bcard-h"><b>Intraday direction</b><span class="muted">every 15 min</span></div><div class="muted">${d && d.market_state === "open" ? "First read of the session arrives within 15 minutes." : "Runs every 15 minutes while the market is open (09:30 to 16:00 ET): technicals plus the crowd's mood, scored after the close."}</div></article>`;
+    const L = d.latest, f = L.facts || {}, sp = f.spy || {}, qq = f.qqq || {}, sm = f.sentiment || {};
+    const m = DIR[L.expected] || ["No read", "flat"];
+    const facts = f.spy ? `<div class="meta2">SPY ${fnum(sp.last)} · ${sp.above_vwap == null ? "" : sp.above_vwap ? "above" : "below"} the day's average price · ${isNum(sp.range_pos) ? Math.round(sp.range_pos * 100) + "% of the day's range" : ""} · 1-hour RSI ${fnum((sp.hourly || {}).rsi_1h, 0)}</div><div class="meta2">QQQ ${fnum(qq.last)} · ${qq.above_vwap == null ? "" : qq.above_vwap ? "above" : "below"} the day's average price · RSI ${fnum((qq.hourly || {}).rsi_1h, 0)}${isNum(f.breadth_pct_above_20d) ? ` · breadth ${f.breadth_pct_above_20d}% above the 20-day` : ""}</div><div class="meta2">Mood: Reddit on SPY ${esc(sm.reddit_spy || "none")}, on QQQ ${esc(sm.reddit_qqq || "none")} · the President's recent posts ${esc(sm.trump_lean_recent || "none")}</div>` : "";
+    const strip = (d.today || []).map((r) => { const k = DIR[r.expected] ? DIR[r.expected][1] : "flat"; const t = new Date(r.ts * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }); return `<span class="dir-dot ${k} ${r.hit === 1 ? "hit" : r.hit === 0 ? "miss" : ""}" title="${t} ET: ${r.expected || "–"}${r.hit == null ? "" : r.hit ? " · hit" : " · miss"}">${r.expected === "higher" ? "▲" : r.expected === "lower" ? "▼" : "▬"}</span>`; }).join("");
+    const st = (d.stats || {}).totals || {};
+    return `<article class="bcard ${open ? "open" : ""}" data-brief-slot="direction">
+      <div class="bcard-h"><b>Intraday direction</b><span class="muted">${esc((L.at || "").slice(11, 16))} ET · ${d.market_state === "open" ? (isNum(d.next_in_s) ? `next in ${Math.ceil(d.next_in_s / 60)} min` : "live") : "last read of the session"}</span></div>
+      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
+      ${facts}
+      <div class="dir-strip">${strip || '<span class="muted">no reads yet today</span>'}</div>
+      <div class="bc-more"><div class="meta2">Every 15 minutes during the regular session the desk reads SPY and QQQ against the day's average price, the day's range, the 1-hour trend, RSI and levels, plus the crowd's mood, and says which way the market is likelier to go into the close. After the close each read is scored against where SPY actually finished. ${isNum(st.scored) && st.scored ? `Last 30 days: ${st.hits || 0} of ${st.scored} reads right (${Math.round((st.hits || 0) / st.scored * 100)}%).` : "Scores appear after the first close."} Monitoring only, not advice.</div></div>
+      <button type="button" class="lnk bc-toggle" data-brief-toggle="direction">${open ? "less" : "more"}</button>
+    </article>`;
+  }
   let briefOpen = null;
   function jumpToBrief() {                       // email link "#view=home&brief=1": open the morning card and bring it into view
     let want = /brief=1/.test(location.hash); try { if (sessionStorage.getItem("mu-open-brief") === "1") { want = true; } } catch (e) {}
@@ -605,6 +630,11 @@
       <p class="bc-summary">${esc(b.summary || "")}</p>
       <div class="bc-chips">${chips}</div>
       <div class="bc-idx-row">${idx}</div>
+      ${slot === "close" && b.scorecard ? (() => { const sc = b.scorecard; const mm = sc.morning_call ? (BRIEF_MOVE[sc.morning_call] || [pretty(sc.morning_call), "flat"])[0] : null; return `<div class="scorecard"><div class="sc-h">Scorecard <span class="muted">expectation vs what the market did</span></div>
+        <div class="sc-row"><span>Intraday reads</span><b>${sc.scored ? `${sc.hits} of ${sc.scored} right · ${sc.hit_rate}%` : (sc.reads ? "not scored" : "none today")}</b></div>
+        <div class="sc-row"><span>Morning call on SPY</span><b>${mm ? `${mm} → SPY ${fpct(sc.spy_day_pct, 2)} · ${sc.morning_hit === 1 ? '<i class="up">hit</i>' : sc.morning_hit === 0 ? '<i class="down">miss</i>' : "no direction"}` : "no call"}</b></div>
+        <div class="dir-strip">${(sc.timeline || []).map((r) => `<span class="dir-dot ${DIR[r.expected] ? DIR[r.expected][1] : "flat"} ${r.hit === 1 ? "hit" : r.hit === 0 ? "miss" : ""}" title="${new Date(r.at * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false })} ET: ${r.expected}, SPY then ${fpct(r.move_spy_pct, 2)} to the close">${r.expected === "higher" ? "▲" : r.expected === "lower" ? "▼" : "▬"}</span>`).join("")}</div>
+        <div class="meta2">${esc(sc.how || "")}</div></div>`; })() : ""}
       <div class="bc-more">
         ${slot === "morning" ? `<h5>Mega caps overnight</h5><div class="bf-megas">${mega || '<span class="muted">no quotes</span>'}</div>` : `<h5>Biggest moves</h5><div class="bf-megas">${movers || '<span class="muted">none</span>'}</div>${sectors}`}
         ${trump ? `<h5>The President, market-relevant</h5><ul class="bf-list">${trump}</ul>` : ""}
@@ -618,8 +648,8 @@
     const j = brief; if (!j) return "";
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
     const isToday = j.date === today;
-    const cards = BRIEF_SLOTS.map(([slot, label, at]) => briefCard((j.briefs || {})[slot], slot, label, at, isToday)).join("");
-    return `<section class="briefs"><div class="briefs-h"><h3>Briefings <span class="muted">${isToday ? "today" : esc(j.date || "")} · morning at 07:00, midday at 13:00, after the close at 16:30 ET · monitoring only, not advice</span></h3></div><div class="briefs-row">${cards}</div></section>`;
+    const cards = BRIEF_SLOTS.map(([slot, label, at]) => slot === "direction" ? directionCard() : briefCard((j.briefs || {})[slot], slot, label, at, isToday)).join("");
+    return `<section class="briefs"><div class="briefs-h"><h3>Briefings <span class="muted">${isToday ? "today" : esc(j.date || "")} · morning at 07:00, a direction read every 15 minutes of the session, after the close at 16:30 ET · monitoring only, not advice</span></h3></div><div class="briefs-row">${cards}</div></section>`;
   }
   let social = null, socialAll = false;
   const TP = {
@@ -1757,6 +1787,7 @@
       <div class="grid c3" style="margin-bottom:12px">${tile("Calls logged", T.n || 0, T.since ? "since " + new Date(T.since * 1000).toLocaleDateString() : "")}${tile("Scored so far", T.scored || 0, "windows that have closed")}${tile("Hit rate", rate(T.hits || 0, T.scored || 0), `${T.hits || 0} hits`)}</div>
       <h3>By verdict</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Window</th><th>Verdict</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody>${byv}</tbody></table></div>
       <h3 style="margin-top:14px">By name</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody>${byt}</tbody></table></div>
+      ${j.direction ? `<h3 style="margin-top:14px">Intraday direction reads <span class="muted">every 15 minutes of the session, scored at the close · last ${j.direction.days} days</span></h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Day</th><th>Reads</th><th>Scored</th><th>Hits</th><th>Hit rate</th></tr></thead><tbody>${(j.direction.by_day || []).map((x) => `<tr><td>${esc(x.day)}</td><td class="num">${x.n}</td><td class="num">${x.scored || 0}</td><td class="num">${x.hits || 0}</td><td class="num"><b>${rate(x.hits || 0, x.scored || 0)}</b></td></tr>`).join("") || '<tr><td colspan="5" class="muted">No reads yet.</td></tr>'}</tbody></table></div>` : ""}
       <h3 style="margin-top:14px">Most recent calls</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Name</th><th>Window</th><th>Verdict</th><th>Price then</th><th>Price after</th><th>Result</th></tr></thead><tbody>${rec || '<tr><td colspan="7" class="muted">No calls logged yet.</td></tr>'}</tbody></table></div></section>`;
   }
   async function pollAdmin() {
@@ -1929,19 +1960,9 @@
     } catch (e) { notice("Refresh failed: " + e.message); }
   }
 
-  function initTheme() {
-    let saved = null; try { saved = localStorage.getItem("mu-theme"); } catch (e) {}
-    if (saved) document.documentElement.setAttribute("data-theme", saved);
-    const sync = () => { const cur = document.documentElement.getAttribute("data-theme") || "dark"; const b = $("#theme-btn"); if (b) { b.classList.toggle("light", cur === "light"); b.setAttribute("aria-pressed", cur === "light" ? "true" : "false"); } };
-    sync(); document.addEventListener("mu-theme", sync);
-    $("#theme-btn").addEventListener("click", () => {
-      const cur = document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-      const next = cur === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      try { localStorage.setItem("mu-theme", next); } catch (e) {}
-      document.dispatchEvent(new Event("mu-theme"));
-      if (report) renderAll();
-    });
+  function initTheme() {                        // one mode only: the navy desk
+    document.documentElement.removeAttribute("data-theme");
+    try { localStorage.removeItem("mu-theme"); } catch (e) {}
   }
 
   async function init() {
@@ -1994,6 +2015,8 @@
     setTimeout(pollSocial, 4000);
     setInterval(pollBrief, 300000);
     setTimeout(pollBrief, 2000);
+    setInterval(pollDirection, 60000);
+    setTimeout(pollDirection, 3000);
     setInterval(pollLiveScan, 60000);
     setTimeout(pollLiveScan, 2500);
     setInterval(pollAdmin, 30000);

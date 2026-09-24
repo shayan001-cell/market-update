@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS verdicts (
 );
 CREATE INDEX IF NOT EXISTS verdicts_open ON verdicts(eval_ts, ts);
 CREATE UNIQUE INDEX IF NOT EXISTS verdicts_once ON verdicts(ticker, kind, build_id);
+CREATE TABLE IF NOT EXISTS direction_reads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    day TEXT NOT NULL,
+    spy REAL, qqq REAL,
+    expected TEXT, confidence REAL, driver TEXT,
+    facts TEXT,                         -- JSON: the technical and sentiment inputs
+    close_spy REAL, close_qqq REAL,
+    move_spy_pct REAL, move_qqq_pct REAL,
+    hit INTEGER,
+    scored_at REAL
+);
+CREATE INDEX IF NOT EXISTS direction_day ON direction_reads(day);
 CREATE TABLE IF NOT EXISTS alerts (
     email TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,
@@ -400,3 +413,41 @@ def brief_recipients() -> list[dict[str, Any]]:
 def set_brief_opt_out(email: str, flag: bool) -> None:
     with connect() as con:
         con.execute("UPDATE users SET brief_opt_out = ? WHERE email = ?", (1 if flag else 0, email))
+
+
+# ---- intraday direction reads and their scoring --------------------------------------------------
+def log_direction(read: dict[str, Any]) -> int:
+    import json as _json
+    f = read.get("facts") or {}
+    with connect() as con:
+        cur = con.execute("INSERT INTO direction_reads(ts, day, spy, qqq, expected, confidence, driver, facts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                          (time.time(), read.get("date"), (f.get("spy") or {}).get("last"), (f.get("qqq") or {}).get("last"), read.get("expected"), read.get("confidence"), read.get("driver"), _json.dumps(f)))
+        return int(cur.lastrowid)
+
+
+def day_directions(day: str) -> list[dict[str, Any]]:
+    with connect() as con:
+        return [dict(r) for r in con.execute("SELECT id, ts, spy, qqq, expected, confidence, driver, move_spy_pct, move_qqq_pct, hit FROM direction_reads WHERE day = ? ORDER BY ts", (day,))]
+
+
+def score_day_directions(day: str, close_spy: float, close_qqq: float, scorer) -> dict[str, Any]:
+    """Score every unscored read of the day against the closing prices. `scorer(expected, move_pct) -> hit`."""
+    now = time.time()
+    with connect() as con:
+        rows = [dict(r) for r in con.execute("SELECT id, spy, qqq, expected FROM direction_reads WHERE day = ? AND scored_at IS NULL", (day,))]
+        for r in rows:
+            ms = (close_spy / r["spy"] - 1) * 100 if r.get("spy") else None
+            mq = (close_qqq / r["qqq"] - 1) * 100 if r.get("qqq") else None
+            hit = scorer(r.get("expected"), ms)
+            con.execute("UPDATE direction_reads SET close_spy = ?, close_qqq = ?, move_spy_pct = ?, move_qqq_pct = ?, hit = ?, scored_at = ? WHERE id = ?", (close_spy, close_qqq, ms, mq, hit, now, r["id"]))
+        tot = dict(con.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored FROM direction_reads WHERE day = ?", (day,)).fetchone())
+    return tot
+
+
+def direction_stats(days: int = 30) -> dict[str, Any]:
+    since = time.time() - days * 86400
+    with connect() as con:
+        by_day = [dict(r) for r in con.execute("SELECT day, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored FROM direction_reads WHERE ts >= ? GROUP BY day ORDER BY day DESC", (since,))]
+        by_expected = [dict(r) for r in con.execute("SELECT expected, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, AVG(move_spy_pct) AS avg_move FROM direction_reads WHERE ts >= ? GROUP BY expected", (since,))]
+        tot = dict(con.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored FROM direction_reads WHERE ts >= ?", (since,)).fetchone())
+    return {"by_day": by_day, "by_expected": by_expected, "totals": tot, "days": days}

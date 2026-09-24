@@ -214,7 +214,7 @@ def _brief_dir() -> Path:
     return d
 
 
-BRIEF_SLOTS = [("morning", 7 * 60), ("midday", 13 * 60), ("close", 16 * 60 + 30)]     # minutes after midnight ET
+BRIEF_SLOTS = [("morning", 7 * 60), ("close", 16 * 60 + 30)]     # minutes after midnight ET; the middle of the day is the live 15-minute direction read
 
 
 def _brief_file(day: str, slot: str) -> Path:
@@ -227,7 +227,7 @@ def _load_briefs(day: str) -> dict[str, Any]:
         p = _brief_file(day, slot)
         if p.exists():
             try:
-                b = json.loads(p.read_text()); b.setdefault("slot", slot); b.setdefault("title", {"morning": "Morning briefing", "midday": "Midday check", "close": "After the close"}[slot]); out[slot] = b
+                b = json.loads(p.read_text()); b.setdefault("slot", slot); b.setdefault("title", {"morning": "Morning briefing", "close": "After the close"}[slot]); out[slot] = b
             except Exception:  # noqa: BLE001
                 pass
     return out
@@ -240,6 +240,11 @@ async def make_brief(day: str, slot: str = "morning") -> None:
     state["brief_building"] = True
     try:
         b = await morning_brief(state["report"], Judge(enabled=USE_AI), slot)
+        if slot == "close":
+            try:
+                b["scorecard"] = await asyncio.to_thread(_score_day, day, b)
+            except Exception:  # noqa: BLE001
+                log.exception("scorecard failed")
         _brief_file(day, slot).write_text(json.dumps(b, default=str))
         state.setdefault("briefs", {})
         if state.get("briefs_day") != day:
@@ -304,6 +309,57 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
     log.info("briefing emailed to %d users", sent)
 
 
+def _score_day(day: str, close_brief: dict[str, Any]) -> dict[str, Any]:
+    """After the close: score every 15-minute read and the morning call against what the market did."""
+    from .analyze import score_direction
+    q = fetch.fetch_quotes(["SPY", "QQQ"])
+    close_spy = (q.get("SPY") or {}).get("last"); close_qqq = (q.get("QQQ") or {}).get("last")
+    ses = {x["symbol"]: x for x in (close_brief.get("session") or {}).get("indexes", [])}
+    if not close_spy:
+        close_spy = (ses.get("SPY") or {}).get("last")
+    if not close_qqq:
+        close_qqq = (ses.get("QQQ") or {}).get("last")
+    tot = db.score_day_directions(day, close_spy or 0, close_qqq or 0, score_direction) if close_spy and close_qqq else {"n": 0, "hits": 0, "scored": 0}
+    reads = db.day_directions(day)
+    morning = (state.get("briefs") or {}).get("morning") or {}
+    m_call = (((morning.get("indexes") or {}).get("SPY") or {}).get("ai") or {}).get("next_move", {}).get("choice")
+    m_expected = {"push_higher": "higher", "rebound": "higher", "break_lower": "lower", "pullback_then_higher": "lower", "range_bound": "sideways"}.get(m_call)
+    spy_day = (ses.get("SPY") or {}).get("chg_pct"); qqq_day = (ses.get("QQQ") or {}).get("chg_pct")
+    m_hit = score_direction(m_expected, spy_day) if m_expected is not None else None
+    return {"day": day, "close_spy": close_spy, "close_qqq": close_qqq, "spy_day_pct": spy_day, "qqq_day_pct": qqq_day,
+            "reads": tot.get("n", 0), "hits": tot.get("hits") or 0, "scored": tot.get("scored") or 0,
+            "hit_rate": round((tot.get("hits") or 0) / tot["scored"] * 100) if tot.get("scored") else None,
+            "morning_call": m_call, "morning_expected": m_expected, "morning_hit": m_hit,
+            "timeline": [{"at": r["ts"], "expected": r["expected"], "confidence": r["confidence"], "spy": r["spy"], "move_spy_pct": r["move_spy_pct"], "hit": r["hit"]} for r in reads],
+            "how": "Each 15-minute read is a hit when SPY closed on the side it expected (sideways: within 0.15% of the read price). The morning call is scored the same way against the full day."}
+
+
+async def direction_loop() -> None:
+    """Every 15 minutes of the regular session: a technicals-plus-mood read on where the market goes into the close."""
+    from .analyze import Judge, intraday_read
+    while True:
+        try:
+            if state.get("report") and fetch.market_state() == "open" and time.time() - state.get("direction_at", 0) >= 15 * 60:
+                read = await intraday_read(state["report"], Judge(enabled=USE_AI))
+                read["id"] = db.log_direction(read)
+                state["direction"] = read; state["direction_at"] = time.time()
+                log.info("direction read: %s (%.2f) %s", read.get("expected"), read.get("confidence") or 0, read.get("driver"))
+        except Exception:  # noqa: BLE001
+            log.exception("direction read failed")
+        await asyncio.sleep(60)
+
+
+@app.get("/api/direction")
+async def api_direction() -> JSONResponse:
+    day = fetch.now_et().date().isoformat()
+    today = await asyncio.to_thread(db.day_directions, day)
+    latest = state.get("direction")
+    if not latest and today:
+        latest = {"at": datetime.fromtimestamp(today[-1]["ts"], tz=config.ET).isoformat(), "expected": today[-1]["expected"], "confidence": today[-1]["confidence"], "driver": today[-1]["driver"], "facts": None}
+    return JSONResponse({"status": "ok" if latest else "none", "market_state": fetch.market_state(), "latest": latest, "today": today, "next_in_s": max(0, int(15 * 60 - (time.time() - state.get("direction_at", 0)))) if state.get("direction_at") else None,
+                         "stats": await asyncio.to_thread(db.direction_stats, 30)}, headers={"Cache-Control": "no-store"})
+
+
 async def brief_scheduler() -> None:
     """Three briefings a day, each built once when its time arrives: 07:00 morning (every day, emailed),
     13:00 midday and 16:30 after the close (market days). A slot is only built inside its own window,
@@ -322,7 +378,7 @@ async def brief_scheduler() -> None:
             weekday = now.weekday() < 5
             for i, (slot, start) in enumerate(BRIEF_SLOTS):
                 end = BRIEF_SLOTS[i + 1][1] if i + 1 < len(BRIEF_SLOTS) else 24 * 60 + 7 * 60
-                if slot != "morning" and not weekday:
+                if slot == "close" and not weekday:
                     continue
                 if start <= mins < end and slot not in (state.get("briefs") or {}) and not _brief_file(today, slot).exists():
                     await make_brief(today, slot)
@@ -356,6 +412,7 @@ async def _startup() -> None:
         log.info("imported %d accounts from users.json into %s", db.import_legacy_json(USERS_PATH), db.DB_PATH)
     asyncio.create_task(scheduler())
     asyncio.create_task(brief_scheduler())
+    asyncio.create_task(direction_loop())
     asyncio.create_task(live_scanner())
 
 
@@ -820,7 +877,9 @@ async def auth_logout(request: Request) -> JSONResponse:
 @app.get("/api/track-record")
 async def api_track_record() -> JSONResponse:
     """Public: every verdict the model has made, scored after its horizon against the later price."""
-    return JSONResponse(await asyncio.to_thread(db.track_record), headers={"Cache-Control": "no-store"})
+    tr = await asyncio.to_thread(db.track_record)
+    tr["direction"] = await asyncio.to_thread(db.direction_stats, 60)
+    return JSONResponse(tr, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/alerts")

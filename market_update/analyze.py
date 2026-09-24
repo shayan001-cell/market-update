@@ -1090,7 +1090,7 @@ def _brief_summary(b: dict[str, Any], slot: str = "morning") -> str:
 async def morning_brief(report: dict[str, Any], judge: "Judge", slot: str = "morning") -> dict[str, Any]:
     b = await asyncio.to_thread(_brief_inputs, report)
     b["slot"] = slot
-    b["title"] = {"morning": "Morning briefing", "midday": "Midday check", "close": "After the close"}.get(slot, slot)
+    b["title"] = {"morning": "Morning briefing", "close": "After the close"}.get(slot, slot)
     states = [{k: v for k, v in (b["indexes"][sym] or {}).items() if k != "bars"} | {"name": {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF"}[sym]} for sym in ("SPY", "QQQ") if b["indexes"].get(sym)]
     ans = await judge.run_many(states, J.BRIEF_INDEX_QUESTIONS)
     for st, a in zip(states, ans):
@@ -1102,3 +1102,50 @@ async def morning_brief(report: dict[str, Any], judge: "Judge", slot: str = "mor
     b["summary"] = _brief_summary(b, slot)
     b["note"] = "For monitoring only. Reads come from textbook technicals and public data; nothing here is financial advice."
     return _clean(b)
+
+
+# ---------------------------------------------------------------------------
+# Intraday direction: every 15 minutes of the regular session, technicals plus mood, stored for scoring
+# ---------------------------------------------------------------------------
+def _intraday_inputs(report: dict[str, Any]) -> dict[str, Any]:
+    intraday = fetch.fetch_intraday(["SPY", "QQQ"])
+    hourly = fetch.download(["SPY", "QQQ"], period="1mo", interval="1h")
+    out: dict[str, Any] = {}
+    for sym in ("SPY", "QQQ"):
+        f15 = fetch.frame_for(intraday, sym)
+        ses = scanner._session_stats(scanner._regular(f15)) if f15 is not None and "Close" in f15 else {}
+        h = _hourly_read(sym, fetch.frame_for(hourly, sym)) or {}
+        out[sym] = {"last": _r(ses.get("last")) if ses else h.get("last"), "chg_day_pct": ses.get("chg_pct") if ses else h.get("change_1d_pct"),
+                    "above_vwap": ses.get("above_vwap"), "vwap": _r(ses.get("vwap")), "range_pos": ses.get("range_pos"), "chg_from_open_pct": ses.get("chg_from_open_pct"),
+                    "hourly": {k: h.get(k) for k in ("rsi_1h", "above_20_bar_avg", "above_50_bar_avg", "avg20_slope_pct", "structure", "nearest_support", "nearest_resistance", "dist_support_pct", "dist_resistance_pct")}}
+    social = report.get("social") or {}
+    crowd = {x["ticker"]: x for x in ((social.get("crowd") or {}).get("rows") or [])}
+    cutoff = (datetime.now(tz=config.ET) - timedelta(hours=6)).isoformat()[:19]
+    posts = [p for p in ((social.get("trump") or {}).get("posts") or []) if p.get("ai") and ((p["ai"].get("market_relevance") or {}).get("p", 0) >= 0.5) and (p.get("posted") or "") >= cutoff]
+    leans = [((p["ai"].get("direction") or {}).get("choice")) for p in posts]
+    trump_lean = "none" if not leans else ("bullish" if leans.count("bullish_for_stocks") > leans.count("bearish_for_stocks") else "bearish" if leans.count("bearish_for_stocks") > leans.count("bullish_for_stocks") else "mixed")
+    B = (report.get("flows") or {}).get("breadth") or {}
+    now = datetime.now(tz=config.ET)
+    return {"time_et": now.strftime("%H:%M"), "minutes_to_close": max(0, 16 * 60 - (now.hour * 60 + now.minute)),
+            "spy": out["SPY"], "qqq": out["QQQ"], "breadth_pct_above_20d": _r(B["above20"] / B["n"] * 100, 0) if B.get("n") else None,
+            "sentiment": {"reddit_spy": (crowd.get("SPY") or {}).get("wsb_sentiment") or "none", "reddit_qqq": (crowd.get("QQQ") or {}).get("wsb_sentiment") or "none",
+                          "trump_lean_recent": trump_lean, "trump_posts_6h": len(posts)}}
+
+
+async def intraday_read(report: dict[str, Any], judge: "Judge") -> dict[str, Any]:
+    st = await asyncio.to_thread(_intraday_inputs, report)
+    ans = await judge.run_one(st, J.INTRADAY_DIRECTION_QUESTIONS)
+    return _clean({"at": datetime.now(tz=config.ET).isoformat(), "date": datetime.now(tz=config.ET).date().isoformat(), "facts": st, "ai": ans,
+                   "expected": (ans or {}).get("direction", {}).get("choice"), "confidence": (ans or {}).get("direction", {}).get("confidence"),
+                   "driver": (ans or {}).get("driver", {}).get("choice")})
+
+
+def score_direction(expected: str, move_pct: float | None, flat_band: float = 0.15) -> int | None:
+    """1 hit / 0 miss for one read against the move from the read's price to the close."""
+    if move_pct is None or not expected:
+        return None
+    if expected == "higher":
+        return 1 if move_pct > 0 else 0
+    if expected == "lower":
+        return 1 if move_pct < 0 else 0
+    return 1 if abs(move_pct) <= flat_band else 0

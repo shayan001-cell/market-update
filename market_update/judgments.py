@@ -909,3 +909,33 @@ BRIEF_INDEX_QUESTIONS = {
         },
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Intraday direction read, every 15 minutes of the regular session: technicals plus the prevailing mood
+# state: {time_et, minutes_to_close, spy:{last, chg_day_pct, above_vwap, range_pos, hourly:{rsi_1h, above_20_bar_avg, above_50_bar_avg, structure, nearest_support, nearest_resistance}},
+#         qqq:{...}, breadth_pct_above_20d, sentiment:{reddit_spy, reddit_qqq, trump_lean_recent}}
+# ---------------------------------------------------------------------------
+INTRADAY_DIRECTION_QUESTIONS = {
+    "direction": Choice(
+        instructions=(
+            "Using the intraday facts for SPY (S&P 500) and QQQ (Nasdaq 100): price against the day's average price (VWAP), position in "
+            "the day's range, the 1-hour trend, RSI and structure, the nearest support and resistance, the day's breadth, the minutes "
+            "left in the session, and the crowd's stated mood in `sentiment`. Which way is the market likelier to move from now until "
+            "the close? A monitoring read, not advice."
+        ),
+        criteria={
+            "higher": "Above VWAP and holding the upper part of the range with an intact 1-hour uptrend, or reclaiming VWAP with breadth improving and no resistance right overhead.",
+            "lower": "Below VWAP and losing the lower part of the range with a 1-hour downtrend, or failing at resistance with breadth weakening.",
+            "sideways": "Price hugging VWAP inside a narrow range, flat 1-hour averages, or too little time left for a meaningful move.",
+        },
+    ),
+    "driver": Choice(
+        instructions="The single fact doing most of the work in that read.",
+        criteria={
+            "trend_and_vwap": "Price on the same side of VWAP as the 1-hour trend.", "level_break": "A support or resistance level just gave way.",
+            "level_hold": "A level held on a test.", "exhaustion": "RSI extreme or a stretched move that is stalling.",
+            "sentiment": "The crowd's mood is the deciding factor.", "no_edge": "Nothing clear; the sideways read is the honest one.",
+        },
+    ),
+}
