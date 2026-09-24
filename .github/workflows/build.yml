@@ -42,7 +42,12 @@ jobs:
           MU_API_URL: ${{ vars.MU_API_URL }}     # repository variable: public URL of the app server (tunnel or Render)     # repository variable: the hosted app's URL once it is published
         run: |
           mkdir -p site
-          market-update --out site
+          # The runner occasionally aborts with a native heap error inside a data library; a fresh process succeeds.
+          for attempt in 1 2 3; do
+            if market-update --out site; then break; fi
+            echo "build attempt $attempt failed; retrying"; sleep 20
+            [ "$attempt" = 3 ] && exit 1
+          done
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
