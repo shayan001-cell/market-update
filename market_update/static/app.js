@@ -354,7 +354,7 @@
     return `<div class="playbook"><div class="pb-col"><h4>Day trader</h4><ul>${day.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div><div class="pb-col"><h4>Swing trader</h4><ul>${swing.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div></div>`;
   }
   function moodPanel(r) {
-    const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">Model read unavailable this build.</div>${activeList().length > 4 ? playbook(r) : ""}</section>`;
+    const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">Model read unavailable this build.</div></section>`;
     const volL = ["quiet", "normal", "elevated", "extreme"];
     const tone = g.tone.choice, cl = { risk_on: "up", risk_off: "down", mixed: "flat" }[tone];
     const fact = (label, value, c) => `<div class="fact"><span class="fact-l">${label}</span><span class="fact-v ${c || ""}">${value}</span></div>`;
@@ -369,6 +369,7 @@
         ${fact("Rates", pretty(g.rates_read.choice), { tailwind: "up", headwind: "down" }[g.rates_read.choice] || "")}
         ${fact("Money flow", pretty(g.flow_read.choice))}
       </div>
+      ${activeList().length > 4 ? playbook(r) : ""}
     </section>`;
   }
 
