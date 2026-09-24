@@ -1026,11 +1026,45 @@ def _brief_inputs(report: dict[str, Any]) -> dict[str, Any]:
     cutoff = (datetime.now(tz=config.ET) - timedelta(hours=24)).isoformat()
     trump = [p for p in (social.get("trump") or {}).get("posts", []) if p.get("ai") and ((p["ai"].get("market_relevance") or {}).get("p", 0) >= 0.5) and (p.get("posted") or "") >= cutoff[:19]]
     events = [c for c in report.get("calendar", []) if (c.get("relevance") or 0) >= 2][:6]
-    return {"mega": mega, "tape": tape, "yields": yields, "indexes": idx, "trump": trump[:5], "events": events}
+    # the session so far: index ETFs, sector leaders and laggards, the biggest movers among analysed names, scanner count
+    ind = {i["symbol"]: i for i in report.get("indices", [])}
+    session = {"indexes": [{"symbol": k, "name": v.get("name"), "last": v.get("last"), "chg_pct": v.get("chg_pct")} for k, v in ind.items() if k in ("SPY", "QQQ", "IWM", "DIA")]}
+    secs = sorted([x for x in ((report.get("flows") or {}).get("sectors") or []) if isinstance(x.get("chg_1d"), (int, float))], key=lambda x: -x["chg_1d"])
+    session["leaders"] = [{"label": x["label"], "chg_pct": x["chg_1d"]} for x in secs[:3]]
+    session["laggards"] = [{"label": x["label"], "chg_pct": x["chg_1d"]} for x in secs[-3:]][::-1]
+    movers = sorted([s for s in report.get("stocks", []) if isinstance(s.get("chg_pct"), (int, float))], key=lambda s: -abs(s["chg_pct"]))[:6]
+    session["movers"] = [{"ticker": s["ticker"], "name": s.get("name"), "chg_pct": s["chg_pct"], "read": (s.get("verdict") or {}).get("word")} for s in movers]
+    session["scan_qualified"] = (report.get("scan") or {}).get("qualified")
+    session["breadth"] = (report.get("flows") or {}).get("breadth")
+    return {"mega": mega, "tape": tape, "yields": yields, "indexes": idx, "trump": trump[:5], "events": events, "session": session}
 
 
-def _brief_summary(b: dict[str, Any]) -> str:
+def _pct_word(x: float) -> str:
+    return f"{'up' if x >= 0 else 'down'} {abs(x):.1f}%"
+
+
+def _brief_summary(b: dict[str, Any], slot: str = "morning") -> str:
     bits = []
+    if slot in ("midday", "close"):
+        ses = b.get("session") or {}
+        idx = {x["symbol"]: x for x in ses.get("indexes", [])}
+        parts = [f"{n} {_pct_word(idx[s]['chg_pct'])}" for s, n in (("SPY", "S&P 500"), ("QQQ", "Nasdaq 100"), ("IWM", "small caps")) if idx.get(s) and isinstance(idx[s].get("chg_pct"), (int, float))]
+        if parts:
+            bits.append(("At 1 pm: " if slot == "midday" else "At the close: ") + ", ".join(parts))
+        if ses.get("leaders"):
+            bits.append(f"leading: {', '.join(x['label'] for x in ses['leaders'][:2])}; lagging: {', '.join(x['label'] for x in ses['laggards'][:2])}")
+        if ses.get("movers"):
+            bits.append("biggest moves among analysed names: " + ", ".join(f"{m['ticker']} {_pct_word(m['chg_pct'])}" for m in ses["movers"][:3]))
+        if isinstance(ses.get("scan_qualified"), int):
+            bits.append(f"{ses['scan_qualified']} names trading far above normal")
+        reads = {k: (v or {}).get("ai") for k, v in b["indexes"].items()}
+        words = {"push_higher": "pointing higher", "pullback_then_higher": "stretched, a dip is likelier first", "range_bound": "range-bound", "break_lower": "at risk of breaking lower", "rebound": "set up for a rebound"}
+        for sym in ("SPY", "QQQ"):
+            a = reads.get(sym)
+            if a and a.get("next_move"):
+                bits.append(f"{sym} 1-hour chart {'into tomorrow ' if slot == 'close' else ''}{words.get(a['next_move']['choice'], a['next_move']['choice'])}")
+        return ". ".join(x[0].upper() + x[1:] for x in bits) + "." if bits else "No session data yet."
+
     t = {x["symbol"]: x for x in b["tape"]}
     es = t.get("ES=F")
     if es and isinstance(es.get("chg_pct"), (int, float)):
@@ -1053,8 +1087,10 @@ def _brief_summary(b: dict[str, Any]) -> str:
     return ". ".join(x[0].upper() + x[1:] for x in bits) + "." if bits else "Quiet overnight."
 
 
-async def morning_brief(report: dict[str, Any], judge: "Judge") -> dict[str, Any]:
+async def morning_brief(report: dict[str, Any], judge: "Judge", slot: str = "morning") -> dict[str, Any]:
     b = await asyncio.to_thread(_brief_inputs, report)
+    b["slot"] = slot
+    b["title"] = {"morning": "Morning briefing", "midday": "Midday check", "close": "After the close"}.get(slot, slot)
     states = [{k: v for k, v in (b["indexes"][sym] or {}).items() if k != "bars"} | {"name": {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF"}[sym]} for sym in ("SPY", "QQQ") if b["indexes"].get(sym)]
     ans = await judge.run_many(states, J.BRIEF_INDEX_QUESTIONS)
     for st, a in zip(states, ans):
@@ -1063,6 +1099,6 @@ async def morning_brief(report: dict[str, Any], judge: "Judge") -> dict[str, Any
     now = datetime.now(tz=config.ET)
     b["date"] = now.date().isoformat()
     b["generated_at"] = now.isoformat()
-    b["summary"] = _brief_summary(b)
+    b["summary"] = _brief_summary(b, slot)
     b["note"] = "For monitoring only. Reads come from textbook technicals and public data; nothing here is financial advice."
     return _clean(b)

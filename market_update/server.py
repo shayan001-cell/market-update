@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -214,19 +214,43 @@ def _brief_dir() -> Path:
     return d
 
 
-async def make_brief(day: str) -> None:
+BRIEF_SLOTS = [("morning", 7 * 60), ("midday", 13 * 60), ("close", 16 * 60 + 30)]     # minutes after midnight ET
+
+
+def _brief_file(day: str, slot: str) -> Path:
+    return _brief_dir() / (f"{day}.json" if slot == "morning" else f"{day}-{slot}.json")
+
+
+def _load_briefs(day: str) -> dict[str, Any]:
+    out = {}
+    for slot, _ in BRIEF_SLOTS:
+        p = _brief_file(day, slot)
+        if p.exists():
+            try:
+                b = json.loads(p.read_text()); b.setdefault("slot", slot); b.setdefault("title", {"morning": "Morning briefing", "midday": "Midday check", "close": "After the close"}[slot]); out[slot] = b
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
+async def make_brief(day: str, slot: str = "morning") -> None:
     from .analyze import Judge, morning_brief
     if state.get("brief_building") or not state.get("report"):
         return
     state["brief_building"] = True
     try:
-        b = await morning_brief(state["report"], Judge(enabled=USE_AI))
-        (_brief_dir() / f"{day}.json").write_text(json.dumps(b, default=str))
-        state["brief"] = b
-        log.info("morning briefing generated for %s", day)
-        await asyncio.to_thread(_mail_brief, b, day)
+        b = await morning_brief(state["report"], Judge(enabled=USE_AI), slot)
+        _brief_file(day, slot).write_text(json.dumps(b, default=str))
+        state.setdefault("briefs", {})
+        if state.get("briefs_day") != day:
+            state["briefs"] = {}; state["briefs_day"] = day
+        state["briefs"][slot] = b
+        state["brief"] = state["briefs"].get("morning") or b
+        log.info("%s briefing generated for %s", slot, day)
+        if slot == "morning":
+            await asyncio.to_thread(_mail_brief, b, day)
     except Exception:  # noqa: BLE001
-        log.exception("morning briefing failed")
+        log.exception("%s briefing failed", slot)
     finally:
         state["brief_building"] = False
 
@@ -281,21 +305,27 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
 
 
 async def brief_scheduler() -> None:
-    """07:00 ET every day: build the briefing once, keep the latest one loaded."""
+    """Three briefings a day, each built once when its time arrives: 07:00 morning (every day, emailed),
+    13:00 midday and 16:30 after the close (market days). A slot is only built inside its own window,
+    so a restart at night does not fake a midday card."""
     while True:
         try:
             now = fetch.now_et()
             today = now.date().isoformat()
-            if now.hour >= 7 and (state.get("brief") or {}).get("date") != today:
-                p = _brief_dir() / f"{today}.json"
-                if p.exists():
-                    state["brief"] = json.loads(p.read_text())
-                else:
-                    await make_brief(today)
-            elif not state.get("brief"):
-                files = sorted(_brief_dir().glob("*.json"))
-                if files:
-                    state["brief"] = json.loads(files[-1].read_text())
+            mins = now.hour * 60 + now.minute
+            if state.get("briefs_day") != today:
+                state["briefs"] = _load_briefs(today); state["briefs_day"] = today
+                state["brief"] = state["briefs"].get("morning")
+                if not state["briefs"]:                                   # nothing yet today: keep yesterday's cards visible until the morning one lands
+                    y = (now.date() - timedelta(days=1)).isoformat()
+                    state["briefs_prev"] = _load_briefs(y); state["briefs_prev_day"] = y
+            weekday = now.weekday() < 5
+            for i, (slot, start) in enumerate(BRIEF_SLOTS):
+                end = BRIEF_SLOTS[i + 1][1] if i + 1 < len(BRIEF_SLOTS) else 24 * 60 + 7 * 60
+                if slot != "morning" and not weekday:
+                    continue
+                if start <= mins < end and slot not in (state.get("briefs") or {}) and not _brief_file(today, slot).exists():
+                    await make_brief(today, slot)
         except Exception:  # noqa: BLE001
             log.exception("brief scheduler error")
         await asyncio.sleep(60)
@@ -867,11 +897,14 @@ async def api_social() -> JSONResponse:
 
 @app.get("/api/brief")
 async def api_brief() -> JSONResponse:
-    """The latest morning briefing (07:00 ET). Signed-in users only, like the rest of the desk."""
-    b = state.get("brief")
-    if not b:
+    """Today's briefings by slot (morning, midday, close); yesterday's when today has none yet."""
+    briefs = state.get("briefs") or {}
+    day = state.get("briefs_day")
+    if not briefs and state.get("briefs_prev"):
+        briefs, day = state["briefs_prev"], state.get("briefs_prev_day")
+    if not briefs:
         return JSONResponse({"status": "not_ready", "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
-    return JSONResponse({"status": "ok", **b}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", "date": day, "briefs": briefs, "slots": [s for s, _ in BRIEF_SLOTS], "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/brief/unsubscribe")

@@ -564,49 +564,62 @@
       <div><h4>Industry groups today</h4><div class="meta2" style="margin-bottom:6px">${secLine}</div><div class="tb-list">${bars || '<span class="muted">no sector data</span>'}</div></div></div>
     </section>`;
   }
-  let brief = null;
+  let brief = null;                     // {date, briefs: {morning, midday, close}}
   async function pollBrief() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status === "ok" && (!brief || brief.generated_at !== j.generated_at)) { brief = j; if (currentView === "home" && report) { const el = $(".brief"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const cm = $(".view.home .col-main"); if (cm) cm.prepend(tmp.firstElementChild); } wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
+    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (currentView === "home" && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const cm = $(".view.home .col-main"); if (cm) cm.prepend(tmp.firstElementChild); } wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
   }
   const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
   const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
-  function jumpToBrief() {                       // email link "#view=home&brief=1": open the briefing and bring it into view
+  const BRIEF_SLOTS = [["morning", "Morning briefing", "07:00"], ["midday", "Midday check", "13:00"], ["close", "After the close", "16:30"]];
+  let briefOpen = null;
+  function jumpToBrief() {                       // email link "#view=home&brief=1": open the morning card and bring it into view
     let want = /brief=1/.test(location.hash); try { if (sessionStorage.getItem("mu-open-brief") === "1") { want = true; } } catch (e) {}
     if (!want) return;
     try { sessionStorage.removeItem("mu-open-brief"); } catch (e) {}
-    const el = $(".brief"); if (!el) return;
-    const d = el.querySelector("details"); if (d) d.open = true;
+    const el = $(".briefs"); if (!el) return;
+    briefOpen = "morning"; const d = el.querySelector('[data-brief-slot="morning"]'); if (d) d.classList.add("open");
     el.scrollIntoView({ block: "start", behavior: "smooth" });
     try { history.replaceState(null, "", "#view=home"); } catch (e) {}
   }
-  function secBrief(r) {
-    const b = brief; if (!b) return "";
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
-    const fresh = b.date === today;
-    const chip = (l, v, c) => `<div class="bf-chip"><span class="bf-l">${esc(l)}</span><span class="bf-v ${c || ""}">${v}</span></div>`;
+  function briefCard(b, slot, label, at, today) {
+    if (!b) return `<article class="bcard pending" data-brief-slot="${slot}"><div class="bcard-h"><b>${label}</b><span class="muted">${at} ET</span></div><div class="muted">${slot === "morning" ? "Arrives at 07:00 every day." : slot === "midday" ? "Arrives at 13:00 on market days." : "Arrives after the close on market days."}</div></article>`;
     const tape = Object.fromEntries((b.tape || []).map((x) => [x.symbol, x]));
-    const tp = (sym, l) => { const x = tape[sym]; return x ? chip(l, `${fnum(x.last, x.last < 100 ? 2 : 0)} <small class="${cls(x.chg_pct)}">${fpct(x.chg_pct, 1)}</small>`, "") : ""; };
     const y = b.yields || {};
-    const chips = [tp("ES=F", "S&P futures"), tp("NQ=F", "Nasdaq futures"), tp("^VIX", "VIX"), tp("CL=F", "Oil"), tp("GC=F", "Gold"), tp("BTC-USD", "Bitcoin"),
-      isNum(y["10y"]) ? chip("10-year", `${fnum(y["10y"], 2)}% <small class="${isNum(y["10y_chg_bp"]) ? (y["10y_chg_bp"] > 0 ? "down" : "up") : ""}">${isNum(y["10y_chg_bp"]) ? fbp(y["10y_chg_bp"]) : ""}</small>`) : "",
-      isNum(y["5y"]) ? chip("5-year", `${fnum(y["5y"], 2)}% <small class="${isNum(y["5y_chg_bp"]) ? (y["5y_chg_bp"] > 0 ? "down" : "up") : ""}">${isNum(y["5y_chg_bp"]) ? fbp(y["5y_chg_bp"]) : ""}</small>`) : ""].join("");
+    const chip = (l, v) => `<span class="bc-chip"><i>${esc(l)}</i>${v}</span>`;
+    const tp = (sym, l) => { const x = tape[sym]; return x && isNum(x.chg_pct) ? chip(l, `<b class="${cls(x.chg_pct)}">${fpct(x.chg_pct, 1)}</b>`) : ""; };
+    const ses = b.session || {}; const sidx = Object.fromEntries((ses.indexes || []).map((x) => [x.symbol, x]));
+    const chips = slot === "morning"
+      ? [tp("ES=F", "S&P fut"), tp("NQ=F", "Nasdaq fut"), tp("CL=F", "Oil"), tp("GC=F", "Gold"), tp("BTC-USD", "BTC"), isNum(y["10y"]) ? chip("10-yr", `<b>${fnum(y["10y"], 2)}%</b>`) : "", isNum(y["5y"]) ? chip("5-yr", `<b>${fnum(y["5y"], 2)}%</b>`) : ""].join("")
+      : [["SPY", "S&P 500"], ["QQQ", "Nasdaq 100"], ["IWM", "Small caps"]].map(([k, l]) => sidx[k] && isNum(sidx[k].chg_pct) ? chip(l, `<b class="${cls(sidx[k].chg_pct)}">${fpct(sidx[k].chg_pct, 1)}</b>`) : "").join("") + tp("CL=F", "Oil") + tp("GC=F", "Gold") + tp("BTC-USD", "BTC");
     const idx = ["SPY", "QQQ"].map((sym) => { const x = (b.indexes || {})[sym]; if (!x) return ""; const a = (x.ai || {}).next_move; const mv = a ? BRIEF_MOVE[a.choice] : null; const dr = (x.ai || {}).driver;
-      return `<div class="bf-idx ${mv ? mv[1] : "flat"}"><div class="bf-idx-h"><b>${sym}</b><span class="mono">${fnum(x.last)}</span><span class="delta ${cls(x.change_1d_pct)}">${fpct(x.change_1d_pct)}</span></div>
-        <div class="bf-idx-read">${mv ? `<span class="pill ${mv[1]}">${mv[0]}</span> ${convTag(a.confidence)}` : '<span class="muted">no read</span>'}</div>
-        <div class="meta2">${dr ? "Mainly " + (BRIEF_DRIVER[dr.choice] || pretty(dr.choice)) + ". " : ""}1-hour RSI ${fnum(x.rsi_1h, 0)} · ${x.above_20_bar_avg ? "above" : "below"} the 20-bar average${x.above_50_bar_avg == null ? "" : x.above_50_bar_avg ? ", above the 50-bar" : ", below the 50-bar"} · support ${fnum(x.nearest_support)} · resistance ${fnum(x.nearest_resistance)}</div></div>`; }).join("");
-    const mega = (b.mega || []).map((m) => { const v = m.verdict; return `<span class="bf-mega" data-ticker-page="${esc(m.ticker)}"><b>${esc(m.ticker)}</b><span class="delta ${cls(m.chg_pct)}">${fpct(m.chg_pct, 1)}</span>${v ? `<i class="${v.cls}">${v.word.toLowerCase()}</i>` : ""}</span>`; }).join("");
-    const trump = (b.trump || []).map((p) => { const a = p.ai || {}; const d = a.direction ? TP.dir[a.direction.choice] : null; return `<li><span class="pill ${d ? d[1] : "flat"}">${d ? d[0] : "read"}</span> <span class="tag acc">${a.theme ? TP.theme[a.theme.choice] || pretty(a.theme.choice) : ""}</span> ${esc(p.text.slice(0, 160))}${p.text.length > 160 ? "…" : ""} ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open</a>` : ""}</li>`; }).join("");
-    const ev = (b.events || []).map((c) => `<li><samp>${esc(c.time_et)}</samp> ${esc(c.title)}</li>`).join("");
-    return `<section class="brief ${fresh ? "" : "stale"}"><details ${fresh ? "open" : ""}><summary><span class="bf-title">Morning briefing</span><span class="muted">${fresh ? "today" : esc(b.date)} · generated ${esc((b.generated_at || "").slice(11, 16))} ET · every day at 07:00</span></summary>
-      <p class="bf-summary">${esc(b.summary || "")}</p>
-      <div class="bf-chips">${chips}</div>
-      <div class="bf-two"><div><h4>SPY and QQQ on the 1-hour chart <span class="muted">possible next move, textbook technicals</span></h4><div class="bf-idx-grid">${idx || '<div class="muted">No index read this morning.</div>'}</div></div>
-        <div><h4>Mega caps overnight</h4><div class="bf-megas">${mega || '<span class="muted">no quotes</span>'}</div>
-          ${trump ? `<h4>The President, market-relevant posts</h4><ul class="bf-list">${trump}</ul>` : `<h4>The President</h4><div class="muted">No market-relevant posts in the last 24 hours.</div>`}
-          ${ev ? `<h4>Today</h4><ul class="bf-list">${ev}</ul>` : ""}</div></div>
-      <div class="meta2">${esc(b.note || "")}</div>
-    </details></section>`;
+      return `<div class="bc-idx"><b>${sym}</b> ${mv ? `<span class="pill ${mv[1]}">${mv[0]}</span> ${convTag(a.confidence)}` : '<span class="muted">no read</span>'}<div class="meta2">${dr ? "Mainly " + (BRIEF_DRIVER[dr.choice] || pretty(dr.choice)) + " · " : ""}RSI ${fnum(x.rsi_1h, 0)} · support ${fnum(x.nearest_support)} · resistance ${fnum(x.nearest_resistance)}</div></div>`; }).join("");
+    const mega = (b.mega || []).slice(0, 8).map((m) => `<span class="bf-mega" data-ticker-page="${esc(m.ticker)}"><b>${esc(m.ticker)}</b><span class="delta ${cls(m.chg_pct)}">${fpct(m.chg_pct, 1)}</span></span>`).join("");
+    const movers = (ses.movers || []).slice(0, 5).map((m) => `<span class="bf-mega" data-ticker-page="${esc(m.ticker)}"><b>${esc(m.ticker)}</b><span class="delta ${cls(m.chg_pct)}">${fpct(m.chg_pct, 1)}</span>${m.read ? `<i>${esc(m.read.toLowerCase())}</i>` : ""}</span>`).join("");
+    const sectors = (ses.leaders || []).length ? `<div class="meta2">Leading: ${ses.leaders.map((x) => `${esc(x.label)} ${fpct(x.chg_pct, 1)}`).join(", ")} · Lagging: ${(ses.laggards || []).map((x) => `${esc(x.label)} ${fpct(x.chg_pct, 1)}`).join(", ")}</div>` : "";
+    const trump = (b.trump || []).map((p) => { const a = p.ai || {}; const d = a.direction ? TP.dir[a.direction.choice] : null; return `<li><span class="pill ${d ? d[1] : "flat"}">${d ? d[0] : "read"}</span> ${esc(p.text.slice(0, 140))}${p.text.length > 140 ? "…" : ""} ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open</a>` : ""}</li>`; }).join("");
+    const ev = (b.events || []).slice(0, 4).map((c) => `<li><samp>${esc(c.time_et)}</samp> ${esc(c.title)}</li>`).join("");
+    const open = briefOpen === slot;
+    return `<article class="bcard ${open ? "open" : ""}" data-brief-slot="${slot}">
+      <div class="bcard-h"><b>${label}</b><span class="muted">${esc((b.generated_at || "").slice(11, 16))} ET${today ? "" : " · " + esc(b.date || "")}</span></div>
+      <p class="bc-summary">${esc(b.summary || "")}</p>
+      <div class="bc-chips">${chips}</div>
+      <div class="bc-idx-row">${idx}</div>
+      <div class="bc-more">
+        ${slot === "morning" ? `<h5>Mega caps overnight</h5><div class="bf-megas">${mega || '<span class="muted">no quotes</span>'}</div>` : `<h5>Biggest moves</h5><div class="bf-megas">${movers || '<span class="muted">none</span>'}</div>${sectors}`}
+        ${trump ? `<h5>The President, market-relevant</h5><ul class="bf-list">${trump}</ul>` : ""}
+        ${ev ? `<h5>${slot === "close" ? "Tomorrow" : "Today"}</h5><ul class="bf-list">${ev}</ul>` : ""}
+        <div class="meta2">${esc(b.note || "")}</div>
+      </div>
+      <button type="button" class="lnk bc-toggle" data-brief-toggle="${slot}">${open ? "less" : "more"}</button>
+    </article>`;
+  }
+  function secBrief(r) {
+    const j = brief; if (!j) return "";
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+    const isToday = j.date === today;
+    const cards = BRIEF_SLOTS.map(([slot, label, at]) => briefCard((j.briefs || {})[slot], slot, label, at, isToday)).join("");
+    return `<section class="briefs"><div class="briefs-h"><h3>Briefings <span class="muted">${isToday ? "today" : esc(j.date || "")} · morning at 07:00, midday at 13:00, after the close at 16:30 ET · monitoring only, not advice</span></h3></div><div class="briefs-row">${cards}</div></section>`;
   }
   let social = null, socialAll = false;
   const TP = {
@@ -1419,7 +1432,7 @@
   }
   function inviteText() {
     const link = APP_URL || ((document.querySelector('meta[property="og:url"]') || {}).content || location.origin + "/").replace(/\/$/, "") + "/";
-    return ["OneView - a clearer market desk for day trades, swing setups and long-term decisions", "", link, "",
+    return ["OneView - a clearer market desk for day trades, swing setups and long-term decisions", "", "Desk: " + link, "Group: " + WA_GROUP, "",
       "Sign in with your email (one-time link, no password). Then you get:",
       "- A verdict for every stock you follow: buy, buy the dip, wait, hold, avoid or short, with the reason",
       "- Day trade, swing and long-term reads side by side on your watchlist",
@@ -1539,11 +1552,11 @@
           <button class="ov-primary" type="submit" id="login-submit">Send sign-in link</button>
           <div class="ov-hint">No password needed.</div>
         </form>
-        <div id="login-status" class="gate-status" role="status" aria-live="polite"></div>
+        <div id="login-status" class="gate-status" role="status" aria-live="polite">${signedOutNote ? "Thank you, see you back again." : ""}</div>
         ${mailLine()}
         ${waJoin()}
       </div>`;
-    return `<div class="ov-login login-stage">
+    return `<div class="ov-login login-stage"><div class="ov-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
       <section class="ov-brand" aria-label="OneView">
         ${brandLogo(235)}
         <div class="ov-statement"><h2 class="ov-tagline">Read the market.<br><span>Own your next move.</span></h2><p>A clearer view for day trades, swing setups, and long-term decisions.</p></div>
@@ -1604,7 +1617,7 @@
     const lf = $("#login-form");
     if (lf) lf.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const email = $("#login-email").value.trim().toLowerCase(), st = $("#login-status"); st.className = "gate-status";
+      const email = $("#login-email").value.trim().toLowerCase(), st = $("#login-status"); st.className = "gate-status"; signedOutNote = false;
       if (STATIC_MODE) return;
       const inp = $("#login-email"); if (!inp.checkValidity() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { st.className = "gate-status err"; st.textContent = "Enter a valid email address."; inp.focus(); return; }
       const btn = $("#login-submit"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
@@ -1660,7 +1673,9 @@
     picks.forEach((t) => { if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t); });
     renderGate(); if (currentView !== "home") currentView = "home"; renderAll();
   }
+  let signedOutNote = false;
   async function signOut() {
+    signedOutNote = true;
     if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
     else { try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {} }
     authToken = null; try { localStorage.removeItem("mu-token"); } catch (e) {}
@@ -1835,6 +1850,7 @@
     document.querySelectorAll("#app [data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
     const sa = $("[data-social-all]"); if (sa) sa.addEventListener("click", () => { socialAll = !socialAll; const el = $(".voices"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secVoices(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } });
+    document.querySelectorAll("[data-brief-toggle]").forEach((b) => b.addEventListener("click", () => { const slot = b.getAttribute("data-brief-toggle"); briefOpen = briefOpen === slot ? null : slot; const el = $(".briefs"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } }));
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
     document.querySelectorAll("#app [data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
@@ -1915,11 +1931,14 @@
   function initTheme() {
     let saved = null; try { saved = localStorage.getItem("mu-theme"); } catch (e) {}
     if (saved) document.documentElement.setAttribute("data-theme", saved);
+    const sync = () => { const cur = document.documentElement.getAttribute("data-theme") || "dark"; const b = $("#theme-btn"); if (b) { b.classList.toggle("light", cur === "light"); b.setAttribute("aria-pressed", cur === "light" ? "true" : "false"); } };
+    sync(); document.addEventListener("mu-theme", sync);
     $("#theme-btn").addEventListener("click", () => {
       const cur = document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
       const next = cur === "dark" ? "light" : "dark";
       document.documentElement.setAttribute("data-theme", next);
       try { localStorage.setItem("mu-theme", next); } catch (e) {}
+      document.dispatchEvent(new Event("mu-theme"));
       if (report) renderAll();
     });
   }
