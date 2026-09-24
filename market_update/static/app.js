@@ -1558,7 +1558,7 @@
       </div>`;
     return `<div class="ov-login login-stage"><div class="ov-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
       <section class="ov-brand" aria-label="OneView">
-        ${brandLogo(235)}
+        ${brandLogo(235)}<span class="ov-badge">Formerly Webex Traders</span>
         <div class="ov-statement"><h2 class="ov-tagline">Read the market.<br><span>Own your next move.</span></h2><p>A clearer view for day trades, swing setups, and long-term decisions.</p></div>
         <p class="ov-fine">Market data, model reads and scans are information, not advice.</p>
       </section>
