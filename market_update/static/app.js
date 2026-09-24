@@ -25,7 +25,7 @@
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
   const HZ_NAME = { day: "Day trading", swing: "Swing trading", long: "Long-term investing" };
   function setHorizon(h) { if (!HORIZONS.some((x) => x[0] === h)) return; horizon = h; try { localStorage.setItem("mu-horizon", h); } catch (e) {} sortKey = h === "day" ? "day" : "swing"; if (report) renderAll(); }
-  function horizonBar() { const el = $("#horizon"); if (!el) return; const show = ["home", "watch", "stock"].includes(currentView); el.hidden = !show; if (!show) return;
+  function horizonBar() { const el = $("#horizon"); if (!el) return; const show = ["watch", "stock"].includes(currentView); el.hidden = !show; if (!show) return;   /* the Overview keeps one fixed read; the toggle lives on Watchlist and Stocks */
     el.innerHTML = HORIZONS.map(([k, l, t]) => `<button type="button" class="hz-btn ${horizon === k ? "on" : ""}" aria-pressed="${horizon === k}" data-horizon="${k}" title="${esc(t)}">${l}</button>`).join("");
     el.querySelectorAll("[data-horizon]").forEach((b) => b.addEventListener("click", () => setHorizon(b.getAttribute("data-horizon")))); }
   // the read that matches the chosen timeframe for one name
@@ -459,22 +459,22 @@
   }
 
   function verdictPanel(r) {
-    const watch = r.stocks.filter((s) => isWatched(s.ticker) && readFor(s));
-    if (!watch.length) return `<section class="panel verdicts"><h3>Assessments · ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">${HZ_NAME[horizon]}</span></h3><div class="muted">${activeList().length ? (STATIC_MODE ? "No full analysis for the names in this list yet. Names in watchlist.txt get one every build." : "Verdicts appear as each name finishes analysing.") : "Add tickers with the search box in the menu bar."}</div></section>`;
+    const watch = r.stocks.filter((s) => isWatched(s.ticker) && verdictFor(s));
+    if (!watch.length) return `<section class="panel verdicts"><h3>Assessments · ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">swing read</span></h3><div class="muted">${activeList().length ? (STATIC_MODE ? "No full analysis for the names in this list yet. Names in watchlist.txt get one every build." : "Verdicts appear as each name finishes analysing.") : "Add tickers with the search box in the menu bar."}</div></section>`;
     const rank = { up: 0, up2: 1, flat: 2, down: 3, none: 4 };
-    watch.sort((a, b) => rank[readFor(a).cls] - rank[readFor(b).cls] || b.scores.swing - a.scores.swing);
-    const counts = {}; watch.forEach((s) => { const v = readFor(s); counts[v.word] = counts[v.word] || { n: 0, cls: v.cls }; counts[v.word].n++; });
-    const rows = watch.map((s) => { const v = readFor(s), sw = verdictFor(s); return `<li class="vrow" data-open="${esc(s.ticker)}">
+    watch.sort((a, b) => rank[verdictFor(a).cls] - rank[verdictFor(b).cls] || b.scores.swing - a.scores.swing);
+    const counts = {}; watch.forEach((s) => { const v = verdictFor(s); counts[v.word] = counts[v.word] || { n: 0, cls: v.cls }; counts[v.word].n++; });
+    const rows = watch.map((s) => { const v = verdictFor(s), sw = verdictFor(s); return `<li class="vrow" data-open="${esc(s.ticker)}">
         <span class="v-t">${esc(s.ticker)}</span>
         <span class="pill ${v.cls}">${v.word}</span>
-        <span class="pill v-intra ${horizon === "swing" ? (s.ai && s.ai.intraday ? ST.intraday[s.ai.intraday.choice][2] : "flat") : (sw ? sw.cls : "flat")}">${horizon === "swing" ? (s.ai && s.ai.intraday ? "today: " + ST.intraday[s.ai.intraday.choice][0] : "–") : (sw ? "swing: " + sw.word : "–")}</span>
+        <span class="pill v-intra ${s.ai && s.ai.intraday ? ST.intraday[s.ai.intraday.choice][2] : "flat"}">${s.ai && s.ai.intraday ? "today: " + ST.intraday[s.ai.intraday.choice][0] : "–"}</span>
         <span class="v-why">${esc((v.why || [])[0] || v.plain)}</span>
         <span class="v-conf">${convTag(v.conviction)}</span></li>`; }).join("");
     return `<section class="panel verdicts">
-      <h3>Assessments · ${watch.length} in ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">${HZ_NAME[horizon]}</span><a class="lnk v-record" href="#view=record" data-view-link="record">track record ›</a></h3>
+      <h3>Assessments · ${watch.length} in ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">swing read · today's read</span><a class="lnk v-record" href="#view=record" data-view-link="record">track record ›</a></h3>
       <div class="v-summary">${Object.entries(counts).map(([w, x]) => `<span class="pill ${x.cls}">${x.n} ${w.toLowerCase()}</span>`).join("")}</div>
       <ul class="vlist">${rows}</ul>
-      <div class="meta2">Reads follow the timeframe control above. Funds get a trend read, big companies a momentum read, everything else the model's stance. Conviction is LOW, MED or HIGH. Click a row for the reasons.</div>
+      <div class="meta2">Funds get a trend read, big companies a momentum read, everything else the model's stance. Conviction is LOW, MED or HIGH. Click a row for the reasons.</div>
     </section>`;
   }
 
@@ -1361,7 +1361,7 @@
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
     $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
-      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
+      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();

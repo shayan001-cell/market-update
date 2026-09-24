@@ -164,9 +164,9 @@ TYPESAFE_MODEL = "jev-latest"
 
 # Server scheduling (seconds). Overridable with env vars.
 REFRESH_COOLDOWN_S = int(os.environ.get("MU_REFRESH_COOLDOWN", "120"))
-INTERVAL_MARKET_S = int(os.environ.get("MU_INTERVAL_MARKET", "300"))    # pre-market and regular session
-INTERVAL_POST_S = int(os.environ.get("MU_INTERVAL_POST", "900"))        # after-hours
-INTERVAL_OFF_S = int(os.environ.get("MU_INTERVAL_OFF", "3600"))         # nights and weekends
+INTERVAL_MARKET_S = int(os.environ.get("MU_INTERVAL_MARKET", "600"))    # pre-market and regular session
+INTERVAL_POST_S = int(os.environ.get("MU_INTERVAL_POST", "14400"))        # after-hours
+INTERVAL_OFF_S = int(os.environ.get("MU_INTERVAL_OFF", "14400"))         # nights and weekends
 
 
 def load_watchlist() -> list[str]:

@@ -1457,3 +1457,25 @@ footer { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--
 /* page heading per the guide: 28px on desktop */
 @media (min-width: 701px) { .hud-context b { font-size: 28px; } .hud-bar { min-height: 64px; } }
 @media (min-width: 701px) { .home-hero > section > .explain { min-height: 98px; } }
+
+/* ---- top bar, contrast pass: bright links, flat icons, clear active pill, never clipped ---- */
+.topbar { gap: 16px; padding: 0 20px; background: #0B1324; border-bottom: 1px solid #2B3A55; }
+.topnav { gap: 2px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.topnav .side-item { color: #D9E0EE; font-weight: 500; font-size: 14px; padding: 9px 12px; border-radius: 8px; opacity: 1; }
+.topnav .side-item:hover { color: #FFFFFF; background: #16223A; }
+.topnav .side-item.active { color: #FFFFFF; background: #245BFF; font-weight: 600; }
+.topnav .side-item.active .nav-ico svg { stroke: #FFFFFF; }
+.topnav .nav-ico { width: 18px; height: 18px; margin-right: 7px; background: transparent !important; border: 0 !important; box-shadow: none !important; border-radius: 0; }
+.topnav .nav-ico svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 1.8; opacity: .95; }
+.top-actions { gap: 10px; }
+.top-actions .badge { display: inline-flex; align-items: center; gap: 6px; color: #D9E0EE; font-size: 13px; padding: 0 10px; height: 36px; border: 1px solid #2B3A55; border-radius: 8px; background: #101A2B; }
+.btn.ghost.icon-btn { color: #FFFFFF; border-color: #3A4B6A; background: #16223A; font-weight: 600; height: 40px; }
+.btn.ghost.icon-btn:hover { background: #1E2D4D; border-color: #85A7FF; }
+#refresh-btn:disabled { opacity: .75; color: #D9E0EE; }
+.brand-logo { margin-right: 4px; }
+/* tighten before anything can clip: text-only, then icons only with the label as a tooltip */
+@media (max-width: 1560px) { .topnav .nav-ico { display: none !important; } .topnav .side-item { padding: 9px 11px; } }
+@media (max-width: 1400px) { .topnav .side-item { font-size: 13.5px; padding: 8px 9px; } .btn.ghost.icon-btn .lbl { display: none; } .btn.ghost.icon-btn { width: 40px; padding: 0; justify-content: center; } .top-actions .badge { display: none; } }
+@media (max-width: 1180px) and (min-width: 701px) { .topnav .side-item { padding: 8px 7px; font-size: 13px; } }
+@media (max-width: 1100px) and (min-width: 701px) { .topnav .nav-ico { display: inline-grid !important; margin: 0; } .topnav .side-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } .topnav .side-item { width: 40px; height: 40px; padding: 0; justify-content: center; } }
+@media (max-width: 700px) { .topnav .nav-ico { display: inline-grid !important; } .topnav .side-item { color: #D9E0EE; } .topnav .side-item.active { background: #245BFF; color: #fff; } }
