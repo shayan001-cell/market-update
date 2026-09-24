@@ -16,7 +16,9 @@ project, loaded by config):
 from __future__ import annotations
 
 import logging
+import html as html_mod
 import os
+from datetime import datetime
 import smtplib
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
@@ -132,3 +134,65 @@ def send(to: str, subject: str, text: str, html: str | None = None) -> str:
                 smtp.login(user, pw)
             smtp.send_message(msg)
     return p
+
+
+def _fmt_pct(x: Any) -> str:
+    return "–" if not isinstance(x, (int, float)) else f"{'+' if x >= 0 else '−'}{abs(x):.1f}%"
+
+
+def _fmt_num(x: Any, nd: int = 2) -> str:
+    return "–" if not isinstance(x, (int, float)) else f"{x:,.{nd}f}"
+
+
+def brief_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], site_url: str, unsubscribe_url: str) -> tuple[str, str, str]:
+    """Short, professional morning email: the summary, the numbers, SPY/QQQ 1-hour reads, the reader's own names, one link."""
+    date_label = datetime.strptime(brief["date"], "%Y-%m-%d").strftime("%A, %B %d")
+    first = (brief.get("summary") or "").split(". ")[0].rstrip(".")
+    subject = f"OneView briefing · {date_label}" + (f" · {first}" if first and len(first) < 60 else "")
+    tape = {x["symbol"]: x for x in brief.get("tape", [])}
+    y = brief.get("yields") or {}
+    rows = [("S&P 500 futures", _fmt_pct((tape.get("ES=F") or {}).get("chg_pct"))), ("Nasdaq 100 futures", _fmt_pct((tape.get("NQ=F") or {}).get("chg_pct"))),
+            ("Oil", _fmt_pct((tape.get("CL=F") or {}).get("chg_pct"))), ("Gold", _fmt_pct((tape.get("GC=F") or {}).get("chg_pct"))), ("Bitcoin", _fmt_pct((tape.get("BTC-USD") or {}).get("chg_pct"))),
+            ("10-year yield", f"{_fmt_num(y.get('10y'))}%"), ("5-year yield", f"{_fmt_num(y.get('5y'))}%"), ("VIX", _fmt_num((tape.get("^VIX") or {}).get("last"), 1))]
+    words = {"push_higher": "pointing higher", "pullback_then_higher": "stretched; a dip toward the 20-bar average is likelier first", "range_bound": "range-bound between support and resistance",
+             "break_lower": "at risk of breaking lower", "rebound": "set up for a rebound off support"}
+    idx_lines = []
+    for sym in ("SPY", "QQQ"):
+        x = (brief.get("indexes") or {}).get(sym) or {}
+        a = (x.get("ai") or {}).get("next_move")
+        if a:
+            idx_lines.append(f"{sym} at {_fmt_num(x.get('last'))}: {words.get(a['choice'], a['choice'])} (1-hour RSI {_fmt_num(x.get('rsi_1h'), 0)}, support {_fmt_num(x.get('nearest_support'))}, resistance {_fmt_num(x.get('nearest_resistance'))}).")
+    ev = [f"{c.get('time_et', '')} {c.get('title', '')}".strip() for c in brief.get("events", [])[:3]]
+    trump = brief.get("trump") or []
+    text_lines = [f"Good morning{', ' + name if name else ''}.", "", brief.get("summary", ""), "", "Numbers to know:"] + [f"  {k}: {v}" for k, v in rows]
+    if idx_lines:
+        text_lines += ["", "SPY and QQQ on the 1-hour chart:"] + [f"  {l}" for l in idx_lines]
+    if watch:
+        text_lines += ["", "Your watchlist:"] + [f"  {w['ticker']}: {_fmt_num(w.get('last'))} ({_fmt_pct(w.get('chg_pct'))}) · {w.get('read') or 'no read yet'}" + (f" · {w['why']}" if w.get('why') else "") for w in watch]
+    if ev:
+        text_lines += ["", "Today:"] + [f"  {e}" for e in ev]
+    if trump:
+        text_lines += ["", f"{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President overnight; details on the desk."]
+    text_lines += ["", f"Open today's briefing: {site_url}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
+    text = "\n".join(text_lines)
+    e = lambda x: html_mod.escape(str(x))
+    num_rows = "".join(f'<tr><td style="padding:6px 0;color:#5B6478;font-size:13px">{e(k)}</td><td style="padding:6px 0;text-align:right;font-size:13px;font-weight:600;color:#0A1220;font-variant-numeric:tabular-nums">{e(v)}</td></tr>' for k, v in rows)
+    watch_rows = "".join(f'<tr><td style="padding:7px 0;border-top:1px solid #E6E9F0"><b>{e(w["ticker"])}</b> <span style="color:#5B6478;font-size:12px">{e((w.get("name") or "")[:28])}</span></td><td style="padding:7px 0;border-top:1px solid #E6E9F0;text-align:right;font-variant-numeric:tabular-nums">{e(_fmt_num(w.get("last")))} <span style="color:{"#0F8F5F" if isinstance(w.get("chg_pct"), (int, float)) and w["chg_pct"] >= 0 else "#C43B4E"}">{e(_fmt_pct(w.get("chg_pct")))}</span></td><td style="padding:7px 0 7px 12px;border-top:1px solid #E6E9F0;font-size:12.5px"><b>{e(w.get("read") or "no read yet")}</b>{(" · " + e(w["why"])) if w.get("why") else ""}</td></tr>' for w in watch)
+    html = f"""<!doctype html><html><body style="margin:0;background:#F3F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#0A1220">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:28px 16px">
+<table role="presentation" width="560" style="max-width:560px;background:#fff;border:1px solid #E6E9F0;border-radius:12px" cellpadding="0" cellspacing="0"><tr><td style="padding:28px 28px 8px">
+  <div style="font-size:12px;letter-spacing:.14em;color:#245BFF;font-weight:700">ONEVIEW · MORNING BRIEFING</div>
+  <h1 style="margin:10px 0 4px;font-size:22px;letter-spacing:-.02em">{e(date_label)}</h1>
+  <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#5B6478">Good morning{(", " + e(name)) if name else ""}. Here is what matters before the open, in three minutes.</p>
+  <p style="margin:0 0 18px;font-size:15px;line-height:1.55">{e(brief.get("summary", ""))}</p>
+  <h2 style="margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478">NUMBERS TO KNOW</h2>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{num_rows}</table>
+  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478'>SPY AND QQQ, 1-HOUR CHART</h2>" + "".join(f"<p style='margin:0 0 6px;font-size:14px;line-height:1.5'>{e(l)}</p>" for l in idx_lines) if idx_lines else ""}
+  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478'>YOUR WATCHLIST</h2><table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='font-size:14px'>" + watch_rows + "</table>" if watch else "<p style='margin:18px 0 0;font-size:13px;color:#5B6478'>Add names to your watchlist on the desk and they will appear here with their reads.</p>"}
+  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478'>TODAY</h2>" + "".join(f"<div style='font-size:13.5px;line-height:1.5'>{e(x)}</div>" for x in ev) if ev else ""}
+  {f"<p style='margin:14px 0 0;font-size:13.5px;line-height:1.5'><b>{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President overnight.</b> The read on each is on the desk.</p>" if trump else ""}
+  <p style="margin:22px 0 6px"><a href="{e(site_url)}" style="display:inline-block;background:#245BFF;color:#fff;text-decoration:none;font-weight:600;padding:13px 22px;border-radius:8px;font-size:15px">Open today's briefing</a></p>
+  <p style="margin:0 0 4px;font-size:12.5px;line-height:1.55;color:#5B6478">Why this lands at 7:00: the overnight tape, the yields and the first posts of the day set the tone before the open. Five minutes on the desk now saves a rushed decision at 9:31.</p>
+  <p style="margin:18px 0 0;font-size:11.5px;line-height:1.6;color:#8A93A6">OneView is information, not advice. Reads come from public data and textbook technicals, never a guarantee. You receive this because you signed in to OneView. <a href="{e(unsubscribe_url)}" style="color:#8A93A6">Stop these emails</a>.</p>
+</td></tr></table></td></tr></table></body></html>"""
+    return subject, text, html

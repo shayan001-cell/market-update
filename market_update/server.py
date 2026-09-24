@@ -34,6 +34,7 @@ from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db, fetch, mail
+from . import judgments as J
 from . import scanner
 from .analyze import _clean, _scan_slim, analyze_ticker, build_report
 
@@ -207,6 +208,99 @@ def _ledger_from_report(report: dict[str, Any]) -> None:
     log.info("verdict ledger: %d logged, %d scored", n, scored)
 
 
+def _brief_dir() -> Path:
+    d = DATA_DIR / "briefs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+async def make_brief(day: str) -> None:
+    from .analyze import Judge, morning_brief
+    if state.get("brief_building") or not state.get("report"):
+        return
+    state["brief_building"] = True
+    try:
+        b = await morning_brief(state["report"], Judge(enabled=USE_AI))
+        (_brief_dir() / f"{day}.json").write_text(json.dumps(b, default=str))
+        state["brief"] = b
+        log.info("morning briefing generated for %s", day)
+        await asyncio.to_thread(_mail_brief, b, day)
+    except Exception:  # noqa: BLE001
+        log.exception("morning briefing failed")
+    finally:
+        state["brief_building"] = False
+
+
+def _api_root() -> str:
+    env = os.environ.get("MU_API_PUBLIC_URL") or os.environ.get("MU_API_URL")
+    if env:
+        return env.rstrip("/")
+    p = Path("/tmp/mu-tunnel-url.txt")
+    if p.exists() and p.read_text().strip():
+        return p.read_text().strip().rstrip("/")
+    return "http://localhost:8000"
+
+
+def _watch_for_email(email: str, report: dict[str, Any]) -> list[dict[str, Any]]:
+    prof = db.profile(email) or {}
+    tickers = (prof.get("tickers") or [])[:8]
+    by_ticker = {s["ticker"]: s for s in report.get("stocks", [])}
+    lite = report.get("lite") or {}
+    ls = state.get("live_scan") or {}
+    quotes = ls.get("quotes") or {}
+    out = []
+    for t in tickers:
+        s = by_ticker.get(t) or state["adhoc"].get(t, {}).get("stock")
+        q = quotes.get(t) or {}
+        l = lite.get(t) or {}
+        v = (s or {}).get("verdict") or {}
+        out.append({"ticker": t, "name": (s or {}).get("name") or l.get("name") or "", "last": q.get("last") or (s or {}).get("last_price") or l.get("last_price"),
+                    "chg_pct": q.get("chg_pct") if q.get("chg_pct") is not None else ((s or {}).get("chg_pct") if s else l.get("chg_pct")),
+                    "read": v.get("word"), "why": (v.get("why") or [None])[0]})
+    return out
+
+
+def _mail_brief(b: dict[str, Any], day: str) -> None:
+    """One short email per signed-in user, once per day, after the 07:00 briefing."""
+    marker = _brief_dir() / f"{day}.mailed"
+    if marker.exists() or not mail.status().get("configured"):
+        return
+    report = state.get("report") or {}
+    site = os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL
+    sent = 0
+    for u in db.brief_recipients():
+        try:
+            unsub = f"{_api_root()}/brief/unsubscribe?t={_sign(u['email'])}"
+            subject, text, html = mail.brief_email(u.get("name") or "", b, _watch_for_email(u["email"], report), site, unsub)
+            mail.send(u["email"], subject, text, html)
+            sent += 1
+        except Exception as e:  # noqa: BLE001
+            log.warning("briefing email to %s failed: %s", u["email"], e)
+    marker.write_text(str(sent))
+    log.info("briefing emailed to %d users", sent)
+
+
+async def brief_scheduler() -> None:
+    """07:00 ET every day: build the briefing once, keep the latest one loaded."""
+    while True:
+        try:
+            now = fetch.now_et()
+            today = now.date().isoformat()
+            if now.hour >= 7 and (state.get("brief") or {}).get("date") != today:
+                p = _brief_dir() / f"{today}.json"
+                if p.exists():
+                    state["brief"] = json.loads(p.read_text())
+                else:
+                    await make_brief(today)
+            elif not state.get("brief"):
+                files = sorted(_brief_dir().glob("*.json"))
+                if files:
+                    state["brief"] = json.loads(files[-1].read_text())
+        except Exception:  # noqa: BLE001
+            log.exception("brief scheduler error")
+        await asyncio.sleep(60)
+
+
 async def scheduler() -> None:
     while True:
         try:
@@ -231,6 +325,7 @@ async def _startup() -> None:
     if USERS_PATH.exists():
         log.info("imported %d accounts from users.json into %s", db.import_legacy_json(USERS_PATH), db.DB_PATH)
     asyncio.create_task(scheduler())
+    asyncio.create_task(brief_scheduler())
     asyncio.create_task(live_scanner())
 
 
@@ -358,10 +453,20 @@ async def api_news() -> JSONResponse:
             log.warning("news feed failed: %s", e)
             items = _news_cache["items"]
         r = state["report"] or {}
-        judged = {h.get("id"): h.get("ai") for h in r.get("headlines", []) if h.get("id")}
+        judged = {h.get("id"): h.get("ai") for h in r.get("headlines", []) if h.get("id") and h.get("ai")}
+        reads: dict[str, Any] = fetch._cache_get("news_reads", 7 * 86400) or {}
         for it in items:
-            if it["id"] in judged:
-                it["ai"] = judged[it["id"]]
+            it["ai"] = judged.get(it["id"]) or reads.get(it["id"])
+        fresh = [it for it in items[:60] if not it.get("ai")][:30]
+        if fresh:                                            # read each new headline once so the feed can keep only what matters
+            from .analyze import Judge, _headline_state
+            ans = await Judge(enabled=USE_AI).run_many([_headline_state(h) for h in fresh], J.HEADLINE_QUESTIONS)
+            changed = False
+            for it, a in zip(fresh, ans):
+                if a:
+                    it["ai"] = a; reads[it["id"]] = a; changed = True
+            if changed:
+                fetch._cache_put("news_reads", reads)
         _news_cache.update(at=now, items=items[:60])
     return JSONResponse({"items": _news_cache["items"], "as_of": _news_cache["at"]}, headers={"Cache-Control": "no-store"})
 
@@ -758,3 +863,21 @@ async def api_social() -> JSONResponse:
             if not _social_cache["data"]:
                 _social_cache["data"] = ((state["report"] or {}).get("social")) or {"trump": {"posts": [], "status": "unavailable"}, "crowd": {"rows": [], "status": "unavailable"}}
     return JSONResponse(_social_cache["data"], headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/brief")
+async def api_brief() -> JSONResponse:
+    """The latest morning briefing (07:00 ET). Signed-in users only, like the rest of the desk."""
+    b = state.get("brief")
+    if not b:
+        return JSONResponse({"status": "not_ready", "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", **b}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/brief/unsubscribe")
+async def brief_unsubscribe(t: str = "") -> HTMLResponse:
+    email = _unsign(t)
+    if not email:
+        return HTMLResponse(_PAGE.format(eyebrow="Link not valid", title="That link did not work", body="Open the latest briefing email and use its link, or sign in to the desk.", action="", foot="OneView"), status_code=400)
+    db.set_brief_opt_out(email, True)
+    return HTMLResponse(_PAGE.format(eyebrow="Done", title="No more briefing emails", body=f"{email} will not receive the morning briefing by email. The briefing stays on the desk every day at 07:00 ET.", action=f'<a class="pill" href="{config.PUBLIC_URL}">Back to OneView</a>', foot="Information, not advice."))

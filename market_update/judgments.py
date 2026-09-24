@@ -878,3 +878,34 @@ TRUMP_QUESTIONS = {
         },
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Morning briefing: SPY / QQQ on the 1-hour chart, textbook technicals only
+# state: {symbol, name, last, change_1d_pct, ret_24_bars_pct, rsi_1h, above_20_bar_avg, above_50_bar_avg,
+#         avg20_slope_pct, structure, nearest_support, nearest_resistance, dist_support_pct, dist_resistance_pct, range_24_bars}
+# ---------------------------------------------------------------------------
+BRIEF_INDEX_QUESTIONS = {
+    "next_move": Choice(
+        instructions=(
+            "Using only the 1-hour chart facts in the state (price against the 20- and 50-bar averages, the slope of the 20-bar "
+            "average, 1-hour RSI, swing structure, nearest support and resistance and the distance to each), which textbook "
+            "outcome is the most likely next move over the coming sessions? This is a monitoring read, not advice."
+        ),
+        criteria={
+            "push_higher": "Above rising averages, higher highs and higher lows, RSI between 50 and 70, resistance not yet reached.",
+            "pullback_then_higher": "Uptrend intact but stretched: RSI above 70 or price well above the 20-bar average, or resistance right overhead. A dip toward the 20-bar average is the likelier next step.",
+            "range_bound": "Averages flat, price between support and resistance with no clear structure.",
+            "break_lower": "Below the averages with lower highs, support close underneath or already broken, RSI below 50.",
+            "rebound": "Oversold (RSI under 30) or sitting on clear support inside an uptrend or range.",
+        },
+    ),
+    "driver": Choice(
+        instructions="The single chart fact that matters most for that read.",
+        criteria={
+            "momentum": "Rising averages and higher highs.", "overbought": "RSI above 70 or price far above the 20-bar average.",
+            "resistance_overhead": "Resistance within about one percent above.", "support_nearby": "Support within about one percent below.",
+            "trend_intact": "Price holding above the averages after a pullback.", "trend_broken": "Price lost the averages or made a lower low.",
+        },
+    ),
+}

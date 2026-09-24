@@ -105,6 +105,9 @@ DEFAULT_LIST = "My watchlist"
 
 
 def _migrate(con: sqlite3.Connection) -> None:
+    cols_users = {r[1] for r in con.execute("PRAGMA table_info(users)")}
+    if "brief_opt_out" not in cols_users:
+        con.execute("ALTER TABLE users ADD COLUMN brief_opt_out INTEGER NOT NULL DEFAULT 0")
     cols = {r["name"] for r in con.execute("PRAGMA table_info(users)")}
     if "name" not in cols:
         con.execute("ALTER TABLE users ADD COLUMN name TEXT")
@@ -385,3 +388,15 @@ def set_alert(email: str, enabled: bool, rvol_threshold: float, min_price: float
                     "ON CONFLICT(email) DO UPDATE SET enabled = excluded.enabled, rvol_threshold = excluded.rvol_threshold, min_price = excluded.min_price, channel = excluded.channel, updated = excluded.updated",
                     (email, 1 if enabled else 0, float(rvol_threshold), float(min_price), channel, time.time()))
     return get_alert(email)
+
+
+# ---- morning-briefing email recipients ---------------------------------------------------------
+def brief_recipients() -> list[dict[str, Any]]:
+    """Everyone who has signed in at least once and has not opted out."""
+    with connect() as con:
+        return [dict(r) for r in con.execute("SELECT email, name, active_list FROM users WHERE last_login IS NOT NULL AND COALESCE(brief_opt_out, 0) = 0 ORDER BY email")]
+
+
+def set_brief_opt_out(email: str, flag: bool) -> None:
+    with connect() as con:
+        con.execute("UPDATE users SET brief_opt_out = ? WHERE email = ?", (1 if flag else 0, email))

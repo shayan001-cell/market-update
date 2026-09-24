@@ -564,6 +564,41 @@
       <div><h4>Industry groups today</h4><div class="meta2" style="margin-bottom:6px">${secLine}</div><div class="tb-list">${bars || '<span class="muted">no sector data</span>'}</div></div></div>
     </section>`;
   }
+  let brief = null;
+  async function pollBrief() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status === "ok" && (!brief || brief.generated_at !== j.generated_at)) { brief = j; if (currentView === "home" && report) { const el = $(".brief"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const cm = $(".view.home .col-main"); if (cm) cm.prepend(tmp.firstElementChild); } wireStocks(); } } } catch (e) { /* server restarting */ }
+  }
+  const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
+  const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
+  function secBrief(r) {
+    const b = brief; if (!b) return "";
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+    const fresh = b.date === today;
+    const chip = (l, v, c) => `<div class="bf-chip"><span class="bf-l">${esc(l)}</span><span class="bf-v ${c || ""}">${v}</span></div>`;
+    const tape = Object.fromEntries((b.tape || []).map((x) => [x.symbol, x]));
+    const tp = (sym, l) => { const x = tape[sym]; return x ? chip(l, `${fnum(x.last, x.last < 100 ? 2 : 0)} <small class="${cls(x.chg_pct)}">${fpct(x.chg_pct, 1)}</small>`, "") : ""; };
+    const y = b.yields || {};
+    const chips = [tp("ES=F", "S&P futures"), tp("NQ=F", "Nasdaq futures"), tp("^VIX", "VIX"), tp("CL=F", "Oil"), tp("GC=F", "Gold"), tp("BTC-USD", "Bitcoin"),
+      isNum(y["10y"]) ? chip("10-year", `${fnum(y["10y"], 2)}% <small class="${isNum(y["10y_chg_bp"]) ? (y["10y_chg_bp"] > 0 ? "down" : "up") : ""}">${isNum(y["10y_chg_bp"]) ? fbp(y["10y_chg_bp"]) : ""}</small>`) : "",
+      isNum(y["5y"]) ? chip("5-year", `${fnum(y["5y"], 2)}% <small class="${isNum(y["5y_chg_bp"]) ? (y["5y_chg_bp"] > 0 ? "down" : "up") : ""}">${isNum(y["5y_chg_bp"]) ? fbp(y["5y_chg_bp"]) : ""}</small>`) : ""].join("");
+    const idx = ["SPY", "QQQ"].map((sym) => { const x = (b.indexes || {})[sym]; if (!x) return ""; const a = (x.ai || {}).next_move; const mv = a ? BRIEF_MOVE[a.choice] : null; const dr = (x.ai || {}).driver;
+      return `<div class="bf-idx ${mv ? mv[1] : "flat"}"><div class="bf-idx-h"><b>${sym}</b><span class="mono">${fnum(x.last)}</span><span class="delta ${cls(x.change_1d_pct)}">${fpct(x.change_1d_pct)}</span></div>
+        <div class="bf-idx-read">${mv ? `<span class="pill ${mv[1]}">${mv[0]}</span> ${convTag(a.confidence)}` : '<span class="muted">no read</span>'}</div>
+        <div class="meta2">${dr ? "Mainly " + (BRIEF_DRIVER[dr.choice] || pretty(dr.choice)) + ". " : ""}1-hour RSI ${fnum(x.rsi_1h, 0)} · ${x.above_20_bar_avg ? "above" : "below"} the 20-bar average${x.above_50_bar_avg == null ? "" : x.above_50_bar_avg ? ", above the 50-bar" : ", below the 50-bar"} · support ${fnum(x.nearest_support)} · resistance ${fnum(x.nearest_resistance)}</div></div>`; }).join("");
+    const mega = (b.mega || []).map((m) => { const v = m.verdict; return `<span class="bf-mega" data-ticker-page="${esc(m.ticker)}"><b>${esc(m.ticker)}</b><span class="delta ${cls(m.chg_pct)}">${fpct(m.chg_pct, 1)}</span>${v ? `<i class="${v.cls}">${v.word.toLowerCase()}</i>` : ""}</span>`; }).join("");
+    const trump = (b.trump || []).map((p) => { const a = p.ai || {}; const d = a.direction ? TP.dir[a.direction.choice] : null; return `<li><span class="pill ${d ? d[1] : "flat"}">${d ? d[0] : "read"}</span> <span class="tag acc">${a.theme ? TP.theme[a.theme.choice] || pretty(a.theme.choice) : ""}</span> ${esc(p.text.slice(0, 160))}${p.text.length > 160 ? "…" : ""} ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open</a>` : ""}</li>`; }).join("");
+    const ev = (b.events || []).map((c) => `<li><samp>${esc(c.time_et)}</samp> ${esc(c.title)}</li>`).join("");
+    return `<section class="brief ${fresh ? "" : "stale"}"><details ${fresh ? "open" : ""}><summary><span class="bf-title">Morning briefing</span><span class="muted">${fresh ? "today" : esc(b.date)} · generated ${esc((b.generated_at || "").slice(11, 16))} ET · every day at 07:00</span></summary>
+      <p class="bf-summary">${esc(b.summary || "")}</p>
+      <div class="bf-chips">${chips}</div>
+      <div class="bf-two"><div><h4>SPY and QQQ on the 1-hour chart <span class="muted">possible next move, textbook technicals</span></h4><div class="bf-idx-grid">${idx || '<div class="muted">No index read this morning.</div>'}</div></div>
+        <div><h4>Mega caps overnight</h4><div class="bf-megas">${mega || '<span class="muted">no quotes</span>'}</div>
+          ${trump ? `<h4>The President, market-relevant posts</h4><ul class="bf-list">${trump}</ul>` : `<h4>The President</h4><div class="muted">No market-relevant posts in the last 24 hours.</div>`}
+          ${ev ? `<h4>Today</h4><ul class="bf-list">${ev}</ul>` : ""}</div></div>
+      <div class="meta2">${esc(b.note || "")}</div>
+    </details></section>`;
+  }
   let social = null, socialAll = false;
   const TP = {
     theme: { tariffs_trade: "Tariffs & trade", fed_rates: "Fed & rates", taxes_spending: "Taxes & spending", geopolitics: "Geopolitics", energy_oil: "Energy & oil", specific_company_or_sector: "A company or industry", crypto: "Crypto", immigration_labor: "Immigration & labor", not_market: "Not about markets" },
@@ -853,8 +888,8 @@
   // ---------------------------------------------------------------- HOME right column: live news feed
   function feedItems(r) { return newsItems.length ? newsItems : (r.headlines || []); }
   function feedHtml(r) {
-    const items = feedItems(r).slice(0, 60);
-    if (!items.length) return '<li class="muted" style="padding:8px 0">No headlines in the window yet.</li>';
+    const items = feedItems(r).filter((h) => h.ai && ((h.ai.actionable && h.ai.actionable.p >= 0.5) || (h.ai.impact && h.ai.impact.score >= 1.5))).slice(0, 40);
+    if (!items.length) return '<li class="muted" style="padding:8px 0">Nothing market-moving in the last hours. Headlines that cannot move prices are left out on purpose.</li>';
     return items.map((h) => { const a = h.ai; const d = a ? a.direction.choice : null; const dc = { bullish: "up", bearish: "down" }[d] || "flat";
       return `<li class="feed-item ${h._new ? "fresh" : ""}"><div class="feed-meta"><samp>${esc(timeET(h.published).slice(6))}</samp>${(h.related_tickers || []).slice(0, 3).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}${a ? `<span class="pill ${dc}">${arrow({ bullish: 1, bearish: -1 }[d] || 0)} ${d}</span><span class="muted">impact ${a.impact.score.toFixed(1)}</span>` : ""}</div>
         ${h.url ? `<a class="feed-h" href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.headline)}</a>` : `<span class="feed-h">${esc(h.headline)}</span>`}
@@ -878,7 +913,7 @@
     return `<aside class="today">
       ${discPanel()}
       <section class="panel"><h3>Today, ${esc(r.session_date)}</h3><ul class="list">${cal}</ul><div class="meta2" style="margin-top:6px">Earnings: ${earn}</div></section>
-      <section class="panel feed-panel"><h3>News feed <span id="feed-stamp" class="muted" style="letter-spacing:0;text-transform:none">${STATIC_MODE ? "from the latest build" : "live · updates every minute"}</span></h3>
+      <section class="panel feed-panel"><h3>News that can move the market <span id="feed-stamp" class="muted" style="letter-spacing:0;text-transform:none">${STATIC_MODE ? "from the latest build" : "live · every headline read once, only the ones that matter stay"}</span></h3>
         <ul class="feed" id="feed">${feedHtml(r)}</ul></section>
     </aside>`;
   }
@@ -1423,9 +1458,10 @@
   async function hourlyTick() {
     const el = $("#refresh-count"); if (!nextRefreshAt) scheduleHourly();
     const left = Math.max(0, nextRefreshAt - Date.now());
-    if (el) { const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000); el.textContent = `Auto-refresh in ${m}:${String(sec).padStart(2, "0")}`; el.classList.toggle("soon", left < 60000); }
+    if (el) { const ms = marketStateNow(); el.textContent = ms === "open" || ms === "pre" ? "Updates every 10 min while the market is open" : "Updates every 4 h while the market is closed"; el.classList.remove("soon"); }
     if (left > 0) return;
     scheduleHourly();
+    if (!STATIC_MODE) { poll(); return; }
     if (STATIC_MODE) { try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); } } } catch (e) {} }
     else { try { await api("/api/refresh", { method: "POST" }); } catch (e) {} poll(); }
   }
@@ -1650,7 +1686,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main"><div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div><div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
@@ -1921,6 +1957,8 @@
     setTimeout(pollNews, 1500);
     setInterval(pollSocial, 300000);
     setTimeout(pollSocial, 4000);
+    setInterval(pollBrief, 300000);
+    setTimeout(pollBrief, 2000);
     setInterval(pollLiveScan, 60000);
     setTimeout(pollLiveScan, 2500);
     setInterval(pollAdmin, 30000);

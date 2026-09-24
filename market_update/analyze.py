@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -957,3 +957,112 @@ async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool =
     s["analyzed_at"] = datetime.now(tz=config.ET).isoformat()
     s["ai_stats"] = {"calls": judge.calls, "failures": judge.failures}
     return _clean(s)
+
+
+# ---------------------------------------------------------------------------
+# Morning briefing, generated once a day at 07:00 ET for everyone
+# ---------------------------------------------------------------------------
+MEGA_CAPS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "BRK-B", "JPM"]
+
+
+def _hourly_read(sym: str, f: pd.DataFrame | None) -> dict[str, Any] | None:
+    if f is None or "Close" not in f:
+        return None
+    d = f.dropna(subset=["Close"]).tail(160)
+    if len(d) < 30:
+        return None
+    close = d["Close"]
+    last = float(close.iloc[-1])
+    sma20 = float(close.tail(20).mean())
+    sma50 = float(close.tail(50).mean()) if len(close) >= 50 else None
+    sma20_prev = float(close.iloc[-25:-5].mean()) if len(close) >= 25 else sma20
+    sp = T.swing_points(d, lookback=3, bars=80)
+    highs = [x["v"] for x in sp.get("swing_highs", [])]
+    lows = [x["v"] for x in sp.get("swing_lows", [])]
+    res = min([v for v in highs if v > last], default=None)
+    sup = max([v for v in lows if v < last], default=None)
+    ret24 = (last / float(close.iloc[-25]) - 1) * 100 if len(close) >= 25 else None
+    prev_day_close = None
+    days = sorted(set(d.index.date))
+    if len(days) >= 2:
+        prev_day_close = float(d[d.index.date == days[-2]]["Close"].iloc[-1])
+    return {
+        "symbol": sym, "last": _r(last), "change_1d_pct": _r((last / prev_day_close - 1) * 100) if prev_day_close else None,
+        "ret_24_bars_pct": _r(ret24), "rsi_1h": _r(T.rsi(close, 14), 1), "sma20": _r(sma20), "sma50": _r(sma50),
+        "above_20_bar_avg": last > sma20, "above_50_bar_avg": (last > sma50) if sma50 else None,
+        "avg20_slope_pct": _r((sma20 / sma20_prev - 1) * 100) if sma20_prev else None,
+        "structure": sp.get("structure"), "nearest_support": _r(sup), "nearest_resistance": _r(res),
+        "dist_support_pct": _r((last / sup - 1) * 100) if sup else None, "dist_resistance_pct": _r((res / last - 1) * 100) if res else None,
+        "range_24_bars": [_r(float(d["Low"].tail(24).min())), _r(float(d["High"].tail(24).max()))],
+        "bars": [{"t": ts.isoformat(), "o": _r(float(o)), "h": _r(float(h)), "l": _r(float(lo)), "c": _r(float(c))} for ts, o, h, lo, c in
+                 zip(d.index[-48:], d["Open"].tail(48), d["High"].tail(48), d["Low"].tail(48), d["Close"].tail(48))],
+    }
+
+
+def _brief_inputs(report: dict[str, Any]) -> dict[str, Any]:
+    """Everything the briefing needs, fetched synchronously (run in a thread)."""
+    quotes = fetch.fetch_quotes(MEGA_CAPS + ["^FVX", "^TNX"])
+    by_ticker = {s["ticker"]: s for s in report.get("stocks", [])}
+    lite = report.get("lite") or {}
+    mega = []
+    for t in MEGA_CAPS:
+        q = quotes.get(t) or {}
+        s = by_ticker.get(t)
+        mega.append({"ticker": t, "name": (s or {}).get("name") or (lite.get(t) or {}).get("name") or t, "last": q.get("last"), "chg_pct": q.get("change_pct"),
+                     "verdict": (s or {}).get("verdict"), "market_cap": ((s or {}).get("fundamentals") or {}).get("market_cap")})
+    macro = {m["symbol"]: m for m in report.get("macro", [])}
+    tape = []
+    for sym, label in (("ES=F", "S&P 500 futures"), ("NQ=F", "Nasdaq 100 futures"), ("^VIX", "VIX"), ("CL=F", "Oil (WTI)"), ("GC=F", "Gold"), ("BTC-USD", "Bitcoin"), ("DX-Y.NYB", "Dollar")):
+        m = macro.get(sym)
+        if m:
+            tape.append({"symbol": sym, "label": label, "last": m.get("last"), "chg_pct": m.get("change_pct"), "kind": m.get("kind")})
+    y10 = quotes.get("^TNX") or {}
+    y5 = quotes.get("^FVX") or {}
+    yields = {"10y": _r(y10.get("last")), "10y_chg_bp": _r((y10.get("change") or 0) * 100, 0) if y10.get("change") is not None else None,
+              "5y": _r(y5.get("last")), "5y_chg_bp": _r((y5.get("change") or 0) * 100, 0) if y5.get("change") is not None else None}
+    hourly = fetch.download(["SPY", "QQQ"], period="1mo", interval="1h")
+    idx = {sym: _hourly_read(sym, fetch.frame_for(hourly, sym)) for sym in ("SPY", "QQQ")}
+    social = report.get("social") or {}
+    cutoff = (datetime.now(tz=config.ET) - timedelta(hours=24)).isoformat()
+    trump = [p for p in (social.get("trump") or {}).get("posts", []) if p.get("ai") and ((p["ai"].get("market_relevance") or {}).get("p", 0) >= 0.5) and (p.get("posted") or "") >= cutoff[:19]]
+    events = [c for c in report.get("calendar", []) if (c.get("relevance") or 0) >= 2][:6]
+    return {"mega": mega, "tape": tape, "yields": yields, "indexes": idx, "trump": trump[:5], "events": events}
+
+
+def _brief_summary(b: dict[str, Any]) -> str:
+    bits = []
+    t = {x["symbol"]: x for x in b["tape"]}
+    es = t.get("ES=F")
+    if es and isinstance(es.get("chg_pct"), (int, float)):
+        bits.append(f"S&P futures {'up' if es['chg_pct'] >= 0 else 'down'} {abs(es['chg_pct']):.1f}%")
+    for sym, name in (("CL=F", "oil"), ("GC=F", "gold"), ("BTC-USD", "bitcoin")):
+        m = t.get(sym)
+        if m and isinstance(m.get("chg_pct"), (int, float)) and abs(m["chg_pct"]) >= 0.8:
+            bits.append(f"{name} {'up' if m['chg_pct'] >= 0 else 'down'} {abs(m['chg_pct']):.1f}%")
+    y = b["yields"]
+    if isinstance(y.get("10y"), (int, float)):
+        bits.append(f"10-year at {y['10y']:.2f}%")
+    reads = {k: (v or {}).get("ai") for k, v in b["indexes"].items()}
+    words = {"push_higher": "pointing higher", "pullback_then_higher": "stretched, a dip is likelier first", "range_bound": "range-bound", "break_lower": "at risk of breaking lower", "rebound": "set up for a rebound"}
+    for sym in ("SPY", "QQQ"):
+        a = reads.get(sym)
+        if a and a.get("next_move"):
+            bits.append(f"{sym} 1-hour chart {words.get(a['next_move']['choice'], a['next_move']['choice'])}")
+    if b["trump"]:
+        bits.append(f"{len(b['trump'])} market-relevant Trump post{'s' if len(b['trump']) > 1 else ''} overnight")
+    return ". ".join(x[0].upper() + x[1:] for x in bits) + "." if bits else "Quiet overnight."
+
+
+async def morning_brief(report: dict[str, Any], judge: "Judge") -> dict[str, Any]:
+    b = await asyncio.to_thread(_brief_inputs, report)
+    states = [{k: v for k, v in (b["indexes"][sym] or {}).items() if k != "bars"} | {"name": {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF"}[sym]} for sym in ("SPY", "QQQ") if b["indexes"].get(sym)]
+    ans = await judge.run_many(states, J.BRIEF_INDEX_QUESTIONS)
+    for st, a in zip(states, ans):
+        if b["indexes"].get(st["symbol"]) is not None:
+            b["indexes"][st["symbol"]]["ai"] = a
+    now = datetime.now(tz=config.ET)
+    b["date"] = now.date().isoformat()
+    b["generated_at"] = now.isoformat()
+    b["summary"] = _brief_summary(b)
+    b["note"] = "For monitoring only. Reads come from textbook technicals and public data; nothing here is financial advice."
+    return _clean(b)
