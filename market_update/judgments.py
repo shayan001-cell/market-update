@@ -819,3 +819,62 @@ def swing_score(ai_fit: float | None, trend_alignment: float, atr_pct: float | N
     return (w.get("ai_fit", 0) * ((ai_fit or 0) / 3.0)
             + w["trend"] * trend_alignment
             + w["atr_pct"] * _sat(atr_pct, ATR_PCT_SATURATION))
+
+
+# ---------------------------------------------------------------------------
+# Trump posts: does this one matter for markets, which way, and for whom
+# state: {text, posted_at, has_media, reposts}
+# ---------------------------------------------------------------------------
+TRUMP_QUESTIONS = {
+    "market_relevance": Noul(
+        instructions=(
+            "Read `text`, a public post by the sitting US President. Could this post plausibly move "
+            "US stock, bond, currency, commodity or crypto prices in the next trading session?"
+        ),
+        criteria={
+            "true": (
+                "It announces, threatens or changes economic policy: tariffs or trade deals, pressure on the "
+                "Federal Reserve or interest rates, taxes or spending, sanctions or geopolitics with economic teeth, "
+                "energy or oil, a named company or industry, crypto, or a market-relevant appointment."
+            ),
+            "false": (
+                "Personal, ceremonial, sports, campaign or purely political content with no economic policy "
+                "content; congratulations; attacks on individuals; media-only posts with no readable text."
+            ),
+        },
+    ),
+    "direction": Choice(
+        instructions="If the post matters for markets, which way does it lean for US stocks overall in the next session?",
+        criteria={
+            "bullish_for_stocks": "Lower tariffs or a trade deal, lower rates or pressure for cuts, tax cuts, deregulation, easing of a conflict, support for a sector.",
+            "bearish_for_stocks": "New or higher tariffs, threats against trading partners or companies, escalation of a conflict, spending fights or shutdown threats, attacks on the Fed's independence.",
+            "mixed_or_unclear": "Cuts both ways, is vague, or is not about markets.",
+        },
+    ),
+    "theme": Choice(
+        instructions="The main economic subject of the post.",
+        criteria={
+            "tariffs_trade": "Tariffs, trade deals, trading partners, imports and exports.",
+            "fed_rates": "The Federal Reserve, interest rates, the Fed chair.",
+            "taxes_spending": "Taxes, the budget, spending, the debt ceiling, a shutdown.",
+            "geopolitics": "Wars, sanctions, foreign leaders, security with economic consequences.",
+            "energy_oil": "Oil, gas, drilling, energy prices, OPEC.",
+            "specific_company_or_sector": "A named company, CEO or industry (autos, chips, pharma, banks, media).",
+            "crypto": "Bitcoin, stablecoins, crypto policy.",
+            "immigration_labor": "Immigration, deportations, labor supply.",
+            "not_market": "None of the above.",
+        },
+    ),
+    "who_benefits": Choice(
+        instructions="Which group of US stocks is most affected, up or down, if the post is acted on.",
+        criteria={
+            "broad_market": "The whole market: index-level rates, tariffs on everything, fiscal policy.",
+            "large_cap_tech": "Big tech and AI names.", "chips_semis": "Semiconductors and chip equipment.",
+            "industrials_manufacturing": "Manufacturers, machinery, steel, aluminum.", "autos": "Car makers and parts.",
+            "energy": "Oil, gas and energy services.", "banks_financials": "Banks, brokers, insurers.",
+            "defense": "Defense contractors.", "healthcare_pharma": "Drug makers, insurers, hospitals.",
+            "crypto_linked": "Crypto exchanges, miners, stablecoin issuers.", "retail_consumer": "Retailers and consumer brands.",
+            "no_clear_group": "No identifiable group.",
+        },
+    ),
+}

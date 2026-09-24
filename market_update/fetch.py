@@ -994,3 +994,100 @@ def fetch_low_float(max_candidates: int = config.LOW_FLOAT_MAX_CANDIDATES) -> di
             "status": status, "as_of": now_et().isoformat(),
             "settings": {"max_float": config.LOW_FLOAT_MAX, "micro_float": config.LOW_FLOAT_MICRO, "price": list(config.LOW_FLOAT_PRICE),
                          "min_volume": config.LOW_FLOAT_MIN_VOLUME}}
+
+
+# ---------------------------------------------------------------------------
+# Free public feeds: Trump's Truth Social posts (public archives) and the Reddit crowd
+# ---------------------------------------------------------------------------
+_TRUTH_JSON = "https://ix.cnn.io/data/truth-social/truth_archive.json"      # public archive, updated every ~5 minutes
+_TRUTH_RSS = "https://www.trumpstruth.org/feed"                              # fallback archive with an RSS feed
+_APEWISDOM = "https://apewisdom.io/api/v1.0/filter/all-stocks/page/1"        # Reddit ticker mentions, no key
+_TRADESTIE = "https://tradestie.com/api/v1/apps/reddit"                       # r/wallstreetbets sentiment, no key
+_UA = {"User-Agent": "Mozilla/5.0 (WebexMarketUpdate; +https://shayan001-cell.github.io/market-update/)"}
+
+
+def _strip_html(s: str) -> str:
+    s = re.sub(r"<br\s*/?>|</p>", " ", s or "")
+    s = re.sub(r"<[^>]+>", "", s)
+    s = s.replace("&amp;", "&").replace("&quot;", '"').replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def fetch_trump_posts(limit: int = 25) -> dict[str, Any]:
+    """Latest public posts by @realDonaldTrump on Truth Social, newest first, from public archives.
+    Returns {posts: [...], source, as_of, status}. Cached 5 minutes."""
+    cached = _cache_get("trump_posts", 300)
+    if cached:
+        return cached
+    posts: list[dict[str, Any]] = []
+    source, status = None, "ok"
+    try:
+        r = requests.get(_TRUTH_JSON, headers=_UA, timeout=20)
+        r.raise_for_status()
+        for x in r.json()[:limit * 2]:
+            text = _strip_html(x.get("content") or "")
+            media = x.get("media") or []
+            if not text and not media:
+                continue
+            posts.append({"id": str(x.get("id")), "posted": x.get("created_at"), "text": text or ("(video post)" if any(str(m).endswith(".mp4") for m in media) else "(image post)"),
+                          "url": x.get("url"), "media": len(media), "reposts": x.get("reblogs_count"), "replies": x.get("replies_count"), "has_text": bool(text)})
+        source = "Truth Social via the CNN public archive"
+    except Exception as e:  # noqa: BLE001
+        log.warning("truth archive failed: %s", e)
+    if not posts:
+        try:
+            import xml.etree.ElementTree as ET_
+            r = requests.get(_TRUTH_RSS, headers=_UA, timeout=20)
+            r.raise_for_status()
+            root = ET_.fromstring(r.content)
+            for it in root.iter("item"):
+                text = _strip_html(it.findtext("description") or it.findtext("title") or "")
+                link = it.findtext("link") or ""
+                posts.append({"id": link.rsplit("/", 1)[-1] or text[:40], "posted": it.findtext("pubDate"), "text": text or "(media post)", "url": link, "media": 0, "reposts": None, "replies": None, "has_text": bool(text)})
+            source = "Truth Social via trumpstruth.org"
+        except Exception as e:  # noqa: BLE001
+            log.warning("trumpstruth feed failed: %s", e)
+            status = "unavailable"
+    out = {"posts": posts[:limit], "source": source, "as_of": now_et().isoformat(), "status": status}
+    if posts:
+        _cache_put("trump_posts", out)
+    return out
+
+
+def fetch_reddit_crowd() -> dict[str, Any]:
+    """Which tickers Reddit is talking about: mention counts (ApeWisdom) plus r/wallstreetbets
+    sentiment (Tradestie). Both public, no key. Cached 10 minutes."""
+    cached = _cache_get("reddit_crowd", 600)
+    if cached:
+        return cached
+    rows: dict[str, dict[str, Any]] = {}
+    sources = []
+    try:
+        r = requests.get(_APEWISDOM, headers=_UA, timeout=20)
+        r.raise_for_status()
+        for x in r.json().get("results", [])[:40]:
+            t = (x.get("ticker") or "").upper()
+            if not t:
+                continue
+            rows[t] = {"ticker": t, "name": _strip_html(x.get("name") or ""), "rank": x.get("rank"), "mentions": x.get("mentions"), "mentions_24h_ago": x.get("mentions_24h_ago"),
+                       "rank_24h_ago": x.get("rank_24h_ago"), "upvotes": x.get("upvotes")}
+        sources.append("ApeWisdom (mentions across finance subreddits)")
+    except Exception as e:  # noqa: BLE001
+        log.warning("apewisdom failed: %s", e)
+    try:
+        r = requests.get(_TRADESTIE, headers=_UA, timeout=20)
+        r.raise_for_status()
+        for x in r.json()[:60]:
+            t = (x.get("ticker") or "").upper()
+            if not t:
+                continue
+            row = rows.setdefault(t, {"ticker": t, "name": "", "rank": None, "mentions": None})
+            row.update(wsb_sentiment=x.get("sentiment"), wsb_score=x.get("sentiment_score"), wsb_comments=x.get("no_of_comments"))
+        sources.append("Tradestie (r/wallstreetbets sentiment)")
+    except Exception as e:  # noqa: BLE001
+        log.warning("tradestie failed: %s", e)
+    ordered = sorted(rows.values(), key=lambda x: (-(x.get("mentions") or 0), -(x.get("wsb_comments") or 0)))
+    out = {"rows": ordered[:30], "sources": sources, "as_of": now_et().isoformat(), "status": "ok" if sources else "unavailable"}
+    if sources:
+        _cache_put("reddit_crowd", out)
+    return out

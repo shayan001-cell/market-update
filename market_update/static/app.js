@@ -547,6 +547,43 @@
       <div><h4>Industry groups today</h4><div class="meta2" style="margin-bottom:6px">${secLine}</div><div class="tb-list">${bars || '<span class="muted">no sector data</span>'}</div></div></div>
     </section>`;
   }
+  let social = null, socialAll = false;
+  const TP = {
+    theme: { tariffs_trade: "Tariffs & trade", fed_rates: "Fed & rates", taxes_spending: "Taxes & spending", geopolitics: "Geopolitics", energy_oil: "Energy & oil", specific_company_or_sector: "A company or industry", crypto: "Crypto", immigration_labor: "Immigration & labor", not_market: "Not about markets" },
+    dir: { bullish_for_stocks: ["Leans bullish", "up"], bearish_for_stocks: ["Leans bearish", "down"], mixed_or_unclear: ["Unclear", "flat"] },
+    who: { broad_market: "the whole market", large_cap_tech: "big tech", chips_semis: "chip makers", industrials_manufacturing: "manufacturers", autos: "car makers", energy: "energy", banks_financials: "banks", defense: "defense", healthcare_pharma: "healthcare", crypto_linked: "crypto names", retail_consumer: "retailers", no_clear_group: "" },
+  };
+  const agoIso = (iso) => { if (!iso) return ""; const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); return s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  function secVoices(r) {
+    const S = social || r.social; if (!S) return "";
+    const T = S.trump || {}, C = S.crowd || {};
+    const posts = (T.posts || []);
+    const relevant = posts.filter((p) => p.ai && p.ai.market_relevance && p.ai.market_relevance.p >= 0.5);
+    const shown = socialAll ? posts : relevant.length ? relevant : posts.slice(0, 3);
+    const post = (p) => { const a = p.ai || {}; const d = a.direction ? TP.dir[a.direction.choice] : null; const rel = a.market_relevance ? a.market_relevance.p >= 0.5 : null;
+      return `<li class="tp-post ${rel === false ? "dim" : ""}"><div class="tp-meta"><samp>${agoIso(p.posted)}</samp>${a.theme && a.theme.choice !== "not_market" ? `<span class="tag acc">${TP.theme[a.theme.choice] || pretty(a.theme.choice)}</span>` : ""}${d && rel ? `<span class="pill ${d[1]}">${d[0]}</span>` : ""}${a.who_benefits && TP.who[a.who_benefits.choice] && rel ? `<span class="muted">hits ${TP.who[a.who_benefits.choice]}</span>` : ""}${rel === false ? '<span class="muted">not market-moving</span>' : !a.market_relevance ? '<span class="muted">not read yet</span>' : ""}</div>
+        <div class="tp-text">${esc(p.text.length > 260 ? p.text.slice(0, 257) + "…" : p.text)}</div>
+        <div class="meta2">${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open the post</a>` : ""}${isNum(p.reposts) ? ` · ${fvol(p.reposts)} reposts` : ""}</div></li>`; };
+    const rows = (C.rows || []).slice(0, 10).map((x) => { const st = stockFor(x.ticker); const v = verdictFor(st); const q = qp(x.ticker, (r.lite || {})[x.ticker]); const d = isNum(x.mentions) && isNum(x.mentions_24h_ago) && x.mentions_24h_ago ? (x.mentions / x.mentions_24h_ago - 1) * 100 : null;
+      const mood = x.wsb_sentiment ? `<span class="${x.wsb_sentiment === "Bullish" ? "up" : "down"}">${x.wsb_sentiment.toLowerCase()}</span>` : '<span class="muted">–</span>';
+      return `<tr class="clickable" data-ticker-page="${esc(x.ticker)}"><td class="num muted">${x.rank || "–"}</td><td class="sym"><b>${esc(x.ticker)}</b><div class="meta2">${esc(x.name || "")}</div></td><td class="num"><b>${isNum(x.mentions) ? x.mentions : "–"}</b>${isNum(d) ? `<div class="delta ${cls(d)}">${fpct(d, 0)} vs 24h ago</div>` : ""}</td><td>${mood}${isNum(x.wsb_comments) ? `<div class="meta2">${x.wsb_comments} comments</div>` : ""}</td><td class="num">${isNum(q.last) ? priceHtml(x.ticker, null) : '<span class="muted">–</span>'}</td><td>${v ? `<span class="pill ${v.cls}">${v.word}</span>` : '<span class="muted">not analysed</span>'}</td><td>${isWatched(x.ticker) ? '<span class="muted">on list</span>' : `<button class="btn sm ghost" data-add-ticker="${esc(x.ticker)}" data-stop>+ Watch</button>`}</td></tr>`; }).join("");
+    const clash = (C.rows || []).slice(0, 10).filter((x) => { const v = verdictFor(stockFor(x.ticker)); return v && x.wsb_sentiment === "Bullish" && v.cls === "down"; }).map((x) => x.ticker);
+    return `<section class="voices"><h3>Voices moving the tape <span class="muted">free public feeds · ${T.source ? esc(T.source) : "Trump feed unavailable"} · ${(C.sources || []).length ? "Reddit via " + esc((C.sources || []).map((x) => x.split(" (")[0]).join(" + ")) : "Reddit feed unavailable"}</span></h3>
+      ${explain("Two things that have moved prices in the past without warning: the President's posts (tariffs, the Fed, named companies) and a sudden crowd of retail traders piling into one name. The model reads each post once and says whether it matters, which way, and for whom. Reddit numbers are mention counts, not a forecast: a spike is a crowding signal, and crowded names reverse hard.")}
+      <div class="voices-grid">
+        <div class="tp-col"><h4>Trump on the tape ${T.status === "unavailable" ? '<span class="tag warn">feed unavailable</span>' : `<span class="muted">${relevant.length} of ${posts.length} recent posts read as market-moving</span>`}</h4>
+          <ul class="tp-list">${shown.map(post).join("") || '<li class="muted">No posts in the feed right now.</li>'}</ul>
+          ${posts.length > shown.length || socialAll ? `<button class="lnk" data-social-all>${socialAll ? "show only market-moving posts" : `show all ${posts.length} recent posts`}</button>` : ""}</div>
+        <div class="cr-col"><h4>Where the crowd is going ${C.status === "unavailable" ? '<span class="tag warn">feed unavailable</span>' : '<span class="muted">Reddit mentions, last 24 hours</span>'}</h4>
+          ${rows ? `<table class="tbl cr-tbl"><thead><tr><th>#</th><th>Name</th><th>Mentions</th><th>Crowd mood</th><th>Price</th><th>Desk read</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No crowd data right now.</div>'}
+          ${clash.length ? `<div class="meta2 warn" style="margin-top:6px">Crowd bullish, desk bearish: ${clash.join(", ")}. That gap is where crowded trades usually end.</div>` : ""}</div>
+      </div></section>`;
+  }
+  async function pollSocial() {
+    if (STATIC_MODE || !report) return;
+    try { const res = await api("/api/social", { cache: "no-store" }); if (!res.ok) return; social = await res.json();
+      if (currentView === "home") { const el = $(".voices"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secVoices(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } } } catch (e) { /* server restarting */ }
+  }
   function secRunners(r) {
     const rows = [];
     const S = (!STATIC_MODE && liveScan && liveScan.rows) ? liveScan : r.scan;
@@ -1639,7 +1676,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secBigMoney(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secBigMoney(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secVoices(r)}${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
@@ -1773,6 +1810,7 @@
     const dl = $("#app [data-deletelist]"); if (dl) dl.addEventListener("click", deleteList);
     document.querySelectorAll("#app [data-ticker-page]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }));
     document.querySelectorAll("[data-back-home]").forEach((b) => b.addEventListener("click", () => switchView("home")));
+    const sa = $("[data-social-all]"); if (sa) sa.addEventListener("click", () => { socialAll = !socialAll; const el = $(".voices"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secVoices(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } });
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
     document.querySelectorAll("#app [data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
@@ -1907,6 +1945,8 @@
     poll();
     setInterval(pollNews, 60000);
     setTimeout(pollNews, 1500);
+    setInterval(pollSocial, 300000);
+    setTimeout(pollSocial, 4000);
     setInterval(pollLiveScan, 60000);
     setTimeout(pollLiveScan, 2500);
     setInterval(pollAdmin, 30000);

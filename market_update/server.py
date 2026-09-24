@@ -739,3 +739,22 @@ document.getElementById("recent").innerHTML=(j.recent||[]).map(r=>`<tr><td>${new
 async def track_record_page() -> HTMLResponse:
     """Public: no sign-in needed. The desk's scored history."""
     return HTMLResponse(_TRACK_HTML, headers={"Cache-Control": "no-store"})
+
+
+_social_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+@app.get("/api/social")
+async def api_social() -> JSONResponse:
+    """Trump's latest posts with the model's market read, plus the Reddit crowd. Refreshed at most every 5 minutes."""
+    now = time.time()
+    if now - _social_cache["at"] > 300 or not _social_cache["data"]:
+        try:
+            from .analyze import Judge, social_snapshot
+            _social_cache["data"] = await social_snapshot(Judge(enabled=USE_AI))
+            _social_cache["at"] = now
+        except Exception as e:  # noqa: BLE001
+            log.warning("social refresh failed: %s", e)
+            if not _social_cache["data"]:
+                _social_cache["data"] = ((state["report"] or {}).get("social")) or {"trump": {"posts": [], "status": "unavailable"}, "crowd": {"rows": [], "status": "unavailable"}}
+    return JSONResponse(_social_cache["data"], headers={"Cache-Control": "no-store"})

@@ -1131,3 +1131,18 @@ h2 .muted { font-family: var(--sans); text-transform: none; letter-spacing: 0; f
 .wa-t { display: grid; gap: 2px; min-width: 0; } .wa-t b { font-size: 13.5px; } .wa-t span { font-size: 12px; line-height: 1.45; color: var(--g-dim, #A3ADBF); }
 .wa-join i { font-style: normal; font-weight: 700; font-size: 12.5px; color: #25D366; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .wa-ic { animation: none; } }
+
+/* ---- Voices moving the tape: Trump posts + Reddit crowd ---- */
+.voices { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.voices h3 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.voices h3 .muted { font-size: 10px; letter-spacing: 0; text-transform: none; }
+.voices h4 { margin: 0 0 6px; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.voices h4 .muted { letter-spacing: 0; text-transform: none; font-size: 10.5px; }
+.voices-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 1.4fr); gap: 16px; align-items: start; margin-top: 8px; }
+.tp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.tp-post { background: var(--surface-2); padding: 8px 10px; display: grid; gap: 4px; } .tp-post.dim { opacity: .55; }
+.tp-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 10.5px; } .tp-meta samp { color: var(--muted); }
+.tp-meta .tag { margin: 0; font-size: 9.5px; } .tp-meta .pill { font-size: 10px; }
+.tp-text { font-size: 12.5px; line-height: 1.4; color: var(--text); }
+.cr-tbl td { padding: 6px 8px; } .cr-tbl .px { font-family: var(--mono); font-weight: 600; margin-right: 6px; }
+@media (max-width: 1100px) { .voices-grid { grid-template-columns: 1fr; } }

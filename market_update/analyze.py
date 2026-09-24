@@ -480,6 +480,27 @@ def _weekly_levels(f: pd.DataFrame, last: float | None) -> dict[str, Any]:
     return out
 
 
+async def social_snapshot(judge: "Judge") -> dict[str, Any]:
+    """Free public voices: Trump's posts (read once each by the model, reads kept on disk) and the
+    Reddit crowd's ticker mentions. Nothing here needs a paid key."""
+    trump = fetch.fetch_trump_posts(25)
+    crowd = fetch.fetch_reddit_crowd()
+    reads: dict[str, Any] = fetch._cache_get("trump_reads", 14 * 86400) or {}
+    fresh = [p for p in trump.get("posts", []) if p.get("has_text") and p["id"] not in reads]
+    if fresh:
+        ans = await judge.run_many([{"text": p["text"][:1500], "posted_at": p.get("posted"), "has_media": bool(p.get("media")), "reposts": p.get("reposts")} for p in fresh], J.TRUMP_QUESTIONS)
+        changed = False
+        for p, a in zip(fresh, ans):
+            if a:
+                reads[p["id"]] = a
+                changed = True
+        if changed:
+            fetch._cache_put("trump_reads", reads)
+    for p in trump.get("posts", []):
+        p["ai"] = reads.get(p["id"])
+    return _clean({"trump": trump, "crowd": crowd, "as_of": datetime.now(tz=config.ET).isoformat()})
+
+
 async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dict[str, Any]:
     t0 = time.time()
     session = fetch.next_session_date()
@@ -823,7 +844,14 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         s["verdict"] = _verdict(s)
 
 
+    try:
+        social = await social_snapshot(judge)
+    except Exception as e:  # noqa: BLE001
+        log.warning("social snapshot failed: %s", e)
+        social = None
+
     return _clean({
+        "social": social,
         "build_id": uuid.uuid4().hex[:12],
         "generated_at": datetime.now(tz=config.ET).isoformat(),
         "session_date": session.isoformat(),
