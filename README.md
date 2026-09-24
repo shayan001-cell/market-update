@@ -245,9 +245,7 @@ compartment. Below 900px the shell falls back to a single scrolling column.
 
 ## Brand and sharing
 
-The mark is a gold neon fox in an open ring on black (`static/logo.svg`, with PNG
-favicons and a 1200×630 share card `static/og.png`). The page title is "Webex Market
-Update"; Open Graph and Twitter tags give bookmarks and shared links the title, a
+The identity is OneView: the blue numeral-1 mark with a white wordmark on deep navy (#080E1D), from the brand guide. Assets live in `market_update/static/brand/` (header logo, symbol, favicon, touch icon, share card). The tagline appears on the sign-in page only.
 description and the card. The share image URL comes from `MU_PUBLIC_URL` (default: the
 GitHub Pages address) in exports and from the request host on the server.
 

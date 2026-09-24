@@ -44,7 +44,7 @@ DATA_DIR = Path(os.environ.get("MU_DATA_DIR", config.OUTPUT_DIR))
 REPORT_PATH = DATA_DIR / "report.json"
 USE_AI = os.environ.get("MU_NO_AI", "0") not in ("1", "true", "yes")
 
-app = FastAPI(title="Market Update", version="0.2.0")
+app = FastAPI(title="OneView", version="0.3.0")
 _CORS = [o.strip().rstrip("/") for o in os.environ.get("MU_CORS_ORIGINS", "https://shayan001-cell.github.io").split(",") if o.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=_CORS, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["*"])
 
@@ -506,18 +506,18 @@ async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) ->
     return JSONResponse(await _issue_link(request, email))
 
 
-_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Update · sign-in link</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>html,body{{margin:0;min-height:100dvh;background:#050810;color:#E6EAF2;font:15px/1.55 "Plus Jakarta Sans",system-ui,sans-serif}}
-body{{display:grid;place-items:center;padding:24px;background:radial-gradient(700px 420px at 12% -8%,rgba(16,185,129,.22),transparent 60%),radial-gradient(640px 400px at 100% 110%,rgba(59,130,246,.2),transparent 60%),#050810}}
-.shell{{width:min(520px,100%);padding:6px;border-radius:2rem;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}}
-.core{{border-radius:calc(2rem - 6px);background:#0B0F17;padding:32px;box-shadow:inset 0 1px 1px rgba(255,255,255,.12);display:grid;gap:14px}}
-.eyebrow{{display:inline-block;width:max-content;font-size:10px;letter-spacing:.2em;text-transform:uppercase;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);color:#9CA3AF}}
-h1{{margin:0;font-size:24px;font-weight:800;letter-spacing:-.02em}} p{{margin:0;color:#A3ADBF}}
-a.pill{{display:inline-flex;align-items:center;gap:10px;width:max-content;padding:10px 10px 10px 18px;border-radius:999px;background:linear-gradient(90deg,#10B981,#3B82F6);color:#050810;font-weight:700;text-decoration:none;transition:transform .5s cubic-bezier(.32,.72,0,1)}}
-a.pill:hover{{transform:translateY(-1px)}} a.pill i{{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.18);display:inline-grid;place-items:center;font-style:normal}}
-.muted{{color:#6B7280;font-size:12.5px}}</style>
-<div class="shell"><div class="core"><span class="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{body}</p>{action}<p class="muted">{foot}</p></div></div>"""
+_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OneView · sign-in link</title>
+<link rel="icon" href="/static/brand/favicon.png">
+<style>html,body{{margin:0;min-height:100dvh;background:#080E1D;color:#F5F7FC;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif}}
+body{{display:grid;place-items:center;padding:24px}}
+.core{{width:min(440px,100%);border:1px solid #29364C;border-radius:12px;background:#101A2B;padding:32px;display:grid;gap:14px}}
+.logo{{width:170px;height:auto;display:block;mix-blend-mode:lighten;margin:0 0 6px -8px}}
+.eyebrow{{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#A8B4C8;font-weight:600}}
+h1{{margin:0;font-size:26px;font-weight:600;letter-spacing:-.03em;line-height:1.15}} p{{margin:0;color:#A8B4C8}}
+a.pill{{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:0 18px;border-radius:8px;background:#245BFF;color:#fff;font-weight:600;text-decoration:none}}
+a.pill:hover{{background:#1747D1}} a.pill:focus-visible{{outline:3px solid #85A7FF;outline-offset:3px}} a.pill i{{display:none}}
+.muted{{color:#A8B4C8;font-size:13px}}</style>
+<div class="core"><img class="logo" src="/static/brand/oneview-logo.png" alt="OneView"><span class="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{body}</p>{action}<p class="muted">{foot}</p></div>"""
 
 
 @app.get("/auth/verify")
@@ -712,13 +712,13 @@ async def api_alerts_put(request: Request, payload: dict[str, Any] = Body(...)) 
     return out
 
 
-_TRACK_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Track record · Webex Market Update</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/static/favicon.svg"><link rel="stylesheet" href="/static/styles.css">
+_TRACK_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Track record · OneView</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/static/brand/favicon.png"><link rel="stylesheet" href="/static/styles.css">
 <style>body{background:var(--bg);color:var(--text);margin:0;padding:24px;font-family:var(--sans,system-ui)} .tr-wrap{max-width:1100px;margin:0 auto;display:grid;gap:18px}
 .tr-h{display:flex;align-items:center;gap:12px} .tr-h img{width:34px;height:34px} .tr-h b{font-size:20px} .tr-note{color:var(--text-2);font-size:13px;line-height:1.5;max-width:70ch}
 .tr-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)} .tr-tiles .tile{background:var(--surface-2)}
 table.tbl{width:100%} .hit{color:var(--up)} .miss{color:var(--down)} .open{color:var(--muted)}</style></head><body><div class="tr-wrap">
-<div class="tr-h"><img src="/static/logo.svg" alt=""><div><b>Track record</b><div class="muted" style="font-size:12px">Every verdict the model has made, scored against the price after its time window</div></div></div>
+<div class="tr-h"><img src="/static/brand/oneview-symbol.png" alt="" style="width:34px;height:34px;border-radius:8px"><div><b>Track record</b><div class="muted" style="font-size:12px">Every verdict the model has made, scored against the price after its time window</div></div></div>
 <p class="tr-note">How this works: each time the desk publishes a verdict on a name, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. A bullish call counts as a hit if the price went up, a bearish call if it went down. Calls with no direction (wait, hold, range, flat) are listed but not scored. Nothing here is advice; it is the desk keeping itself honest.</p>
 <div id="tiles" class="tr-tiles"></div>
 <h3>By verdict</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Window</th><th>Verdict</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byv"></tbody></table></div>

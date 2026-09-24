@@ -1003,7 +1003,7 @@ _TRUTH_JSON = "https://ix.cnn.io/data/truth-social/truth_archive.json"      # pu
 _TRUTH_RSS = "https://www.trumpstruth.org/feed"                              # fallback archive with an RSS feed
 _APEWISDOM = "https://apewisdom.io/api/v1.0/filter/all-stocks/page/1"        # Reddit ticker mentions, no key
 _TRADESTIE = "https://tradestie.com/api/v1/apps/reddit"                       # r/wallstreetbets sentiment, no key
-_UA = {"User-Agent": "Mozilla/5.0 (WebexMarketUpdate; +https://shayan001-cell.github.io/market-update/)"}
+_UA = {"User-Agent": "Mozilla/5.0 (OneView; +https://shayan001-cell.github.io/market-update/)"}
 
 
 def _strip_html(s: str) -> str:

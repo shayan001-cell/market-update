@@ -18,7 +18,23 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "HOME", "1"], ["watch", "WATCHLIST", "2"], ["scan", "SCAN", "3"], ["stock", "STOCKS", "4"], ["theme", "THEMES", "5"], ["smart", "FILINGS & FLOW", "6"], ["macro", "MACRO", "7"], ["admin", "ADMIN", "8"], ["record", "TRACK RECORD", "9"]];
+  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"]];
+  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record" };
+  // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
+  let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
+  const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
+  const HZ_NAME = { day: "Day trading", swing: "Swing trading", long: "Long-term investing" };
+  function setHorizon(h) { if (!HORIZONS.some((x) => x[0] === h)) return; horizon = h; try { localStorage.setItem("mu-horizon", h); } catch (e) {} sortKey = h === "day" ? "day" : "swing"; if (report) renderAll(); }
+  function horizonBar() { const el = $("#horizon"); if (!el) return; const show = ["home", "watch", "stock"].includes(currentView); el.hidden = !show; if (!show) return;
+    el.innerHTML = HORIZONS.map(([k, l, t]) => `<button type="button" class="hz-btn ${horizon === k ? "on" : ""}" aria-pressed="${horizon === k}" data-horizon="${k}" title="${esc(t)}">${l}</button>`).join("");
+    el.querySelectorAll("[data-horizon]").forEach((b) => b.addEventListener("click", () => setHorizon(b.getAttribute("data-horizon")))); }
+  // the read that matches the chosen timeframe for one name
+  function readFor(s) {
+    if (!s) return null; const a = s.ai || {};
+    if (horizon === "day") { if (!a.intraday) return null; const it = ST.intraday[a.intraday.choice]; return { word: it[0], cls: it[2], plain: it[1], conviction: convOf(a.intraday.confidence), why: [] }; }
+    if (horizon === "long") { if (!a.long_term) return null; const lt = LT.stance[a.long_term.choice]; const q = a.long_term_quality ? Math.round(a.long_term_quality.score) : null; return { word: lt[0], cls: lt[2], plain: lt[1] + (q != null ? ` Business quality: ${LT.quality[q]}.` : ""), conviction: convOf(a.long_term.confidence), why: [] }; }
+    return verdictFor(s);
+  }
   const ICONS = {
     home: '<svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M10 20v-5h4v5"/></svg>',
     scan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 3v9l6.5 4"/></svg>',
@@ -56,6 +72,7 @@
 
   // ---------------------------------------------------------------- utils
   const $ = (sel, el) => (el || document).querySelector(sel);
+  const setLabel = (btn, text) => { if (!btn) return; const l = btn.querySelector(".lbl"); if (l) l.textContent = text; else btn.textContent = text; };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const isNum = (x) => typeof x === "number" && isFinite(x);
   const fnum = (x, nd = 2) => (isNum(x) ? x.toLocaleString("en-US", { minimumFractionDigits: nd, maximumFractionDigits: nd }) : "–");
@@ -442,22 +459,22 @@
   }
 
   function verdictPanel(r) {
-    const watch = r.stocks.filter((s) => isWatched(s.ticker) && verdictFor(s));
-    if (!watch.length) return `<section class="panel verdicts"><h3>Final verdicts · ${esc(lists.active)}</h3><div class="muted">${activeList().length ? (STATIC_MODE ? "No full analysis for the names in this list yet. Names in watchlist.txt get one every build." : "Verdicts appear as each name finishes analysing.") : "Add tickers with the search box in the menu bar."}</div></section>`;
+    const watch = r.stocks.filter((s) => isWatched(s.ticker) && readFor(s));
+    if (!watch.length) return `<section class="panel verdicts"><h3>Assessments · ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">${HZ_NAME[horizon]}</span></h3><div class="muted">${activeList().length ? (STATIC_MODE ? "No full analysis for the names in this list yet. Names in watchlist.txt get one every build." : "Verdicts appear as each name finishes analysing.") : "Add tickers with the search box in the menu bar."}</div></section>`;
     const rank = { up: 0, up2: 1, flat: 2, down: 3, none: 4 };
-    watch.sort((a, b) => rank[verdictFor(a).cls] - rank[verdictFor(b).cls] || b.scores.swing - a.scores.swing);
-    const counts = {}; watch.forEach((s) => { const v = verdictFor(s); counts[v.word] = counts[v.word] || { n: 0, cls: v.cls }; counts[v.word].n++; });
-    const rows = watch.map((s) => { const v = verdictFor(s), a = s.ai || {}; return `<li class="vrow" data-open="${esc(s.ticker)}">
+    watch.sort((a, b) => rank[readFor(a).cls] - rank[readFor(b).cls] || b.scores.swing - a.scores.swing);
+    const counts = {}; watch.forEach((s) => { const v = readFor(s); counts[v.word] = counts[v.word] || { n: 0, cls: v.cls }; counts[v.word].n++; });
+    const rows = watch.map((s) => { const v = readFor(s), sw = verdictFor(s); return `<li class="vrow" data-open="${esc(s.ticker)}">
         <span class="v-t">${esc(s.ticker)}</span>
         <span class="pill ${v.cls}">${v.word}</span>
-        <span class="pill v-intra ${a.intraday ? ST.intraday[a.intraday.choice][2] : "flat"}">${a.intraday ? ST.intraday[a.intraday.choice][0] : "–"}</span>
+        <span class="pill v-intra ${horizon === "swing" ? (s.ai && s.ai.intraday ? ST.intraday[s.ai.intraday.choice][2] : "flat") : (sw ? sw.cls : "flat")}">${horizon === "swing" ? (s.ai && s.ai.intraday ? "today: " + ST.intraday[s.ai.intraday.choice][0] : "–") : (sw ? "swing: " + sw.word : "–")}</span>
         <span class="v-why">${esc((v.why || [])[0] || v.plain)}</span>
         <span class="v-conf">${convTag(v.conviction)}</span></li>`; }).join("");
     return `<section class="panel verdicts">
-      <h3>Final verdicts · ${watch.length} in ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">swing · today</span><a class="lnk v-record" href="#view=record" data-view-link="record">track record ›</a></h3>
+      <h3>Assessments · ${watch.length} in ${esc(lists.active)} <span class="muted" style="text-transform:none;letter-spacing:0">${HZ_NAME[horizon]}</span><a class="lnk v-record" href="#view=record" data-view-link="record">track record ›</a></h3>
       <div class="v-summary">${Object.entries(counts).map(([w, x]) => `<span class="pill ${x.cls}">${x.n} ${w.toLowerCase()}</span>`).join("")}</div>
       <ul class="vlist">${rows}</ul>
-      <div class="meta2">Funds get a trend read, big companies a momentum read, everything else the model's stance. Conviction is LOW, MED or HIGH. Click a row for the reasons.</div>
+      <div class="meta2">Reads follow the timeframe control above. Funds get a trend read, big companies a momentum read, everything else the model's stance. Conviction is LOW, MED or HIGH. Click a row for the reasons.</div>
     </section>`;
   }
 
@@ -487,7 +504,7 @@
       <dl class="pkv"><dt>3m / 6m / 12m</dt><dd><span class="${cls(t.ret_3m)}">${fpct(t.ret_3m, 0)}</span> / <span class="${cls(t.ret_6m)}">${fpct(t.ret_6m, 0)}</span> / <span class="${cls(t.ret_12m)}">${fpct(t.ret_12m, 0)}</span></dd><dt>From 52w high</dt><dd class="mono ${cls(t.pct_from_hi52)}">${fpct(t.pct_from_hi52, 0)}</dd><dt>P/E fwd · P/S</dt><dd class="mono">${fnum(f.forward_pe, 0)} · ${fnum(f.ps, 1)}</dd><dt>Revenue growth</dt><dd class="mono ${cls(f.rev_growth)}">${isNum(f.rev_growth) ? fpct(f.rev_growth * 100, 0) : "–"}</dd><dt>Analysts</dt><dd>${pretty(f.analyst) || "–"}${isNum(f.target) ? ` <span class="mono muted">→ ${fnum(f.target, 0)}</span>` : ""}</dd><dt>Above 200-day</dt><dd>${t.above_sma200 == null ? "–" : t.above_sma200 ? '<span class="up">yes</span>' : '<span class="down">no</span>'}</dd></dl></div>`;
     return `<article class="pcard st-${st ? ST.cls[st] : "none"}" data-ticker="${esc(s.ticker)}">
       <div class="pcard-h"><div class="wc-id"><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}">${esc(s.ticker)}</button><span class="wc-name" title="${esc(s.name)}">${esc(s.name)}${s.sector ? " · " + esc(s.sector) : ""}</span></div><div class="wc-price">${priceHtml(s.ticker, s)}<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from your watchlist">×</button></div></div>
-      <div class="pgrid">${dayCol}${swingCol}${longCol}</div>
+      <div class="pgrid h-${horizon}">${dayCol}${swingCol}${longCol}</div>
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
@@ -1014,14 +1031,14 @@
       return `<tr class="clickable ${selectedTicker === s.ticker ? "selected" : ""}" data-ticker="${esc(s.ticker)}">
         <td class="sym"><b>${esc(s.ticker)}</b><div class="meta2">${esc(s.name)}</div></td>
         <td class="num">${priceHtml(s.ticker, s)}</td>
-        <td>${(() => { const v = verdictFor(s); return v ? `<span class="pill ${v.cls}">${v.word}</span> ${convTag(v.conviction)}` : bias; })()}<div class="meta2">${a.setup ? pretty(a.setup.choice) : ""}</div></td>
+        <td>${(() => { const v = readFor(s); return v ? `<span class="pill ${v.cls}">${v.word}</span> ${convTag(v.conviction)}` : bias; })()}<div class="meta2">${a.setup ? pretty(a.setup.choice) : ""}</div></td>
         <td class="num sc2"><span title="Swing score">S <b>${(s.scores.swing * 100).toFixed(0)}</b></span><span title="Day score">D <b>${(s.scores.day * 100).toFixed(0)}</b></span><div class="meta2">${fpct(t.atr_pct, 1, false)}/day${isNum(s.rel_volume) ? " · " + s.rel_volume.toFixed(1) + "× vol" : ""}</div></td></tr>`;
     }).join("") || `<tr><td colspan="4" class="muted">Nothing in this group right now. Pick another group in the left menu.</td></tr>`;
     const sel = list.find((s) => s.ticker === selectedTicker);
     const tabName = (SUBTABS.stock.find(([k]) => k === (subTab.stock || "all")) || ["", "All names"])[1];
     return `<section><h2>Stocks · ${esc(tabName)} <span class="muted">${stockRows(r).length} of ${r.stocks.length} analysed names (${r.stocks_scanned} liquid stocks scanned) · pick a group in the left menu · click a row for the full breakdown</span></h2>
       ${subTabs("stock")}
-      <div class="tbl-wrap"><table class="tbl stk-list" id="stocks-tbl"><thead><tr><th>Stock</th>${th("chg", "Price")}<th>Verdict</th>${th("swing", "Swing · Day")}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl stk-list" id="stocks-tbl"><thead><tr><th>Stock</th>${th("chg", "Price")}<th>Read · ${HZ_NAME[horizon].toLowerCase()}</th>${th("swing", "Swing · Day")}</tr></thead><tbody>${rows}</tbody></table></div>
       <div id="stock-detail" class="detail">${sel ? stockDetail(sel, r) : '<div class="card muted">Nothing to show for this group. Pick another group in the left menu.</div>'}</div></section>`;
   }
 
@@ -1344,7 +1361,7 @@
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
     $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
-      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l.charAt(0) + l.slice(1).toLowerCase()}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
+      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
@@ -1358,7 +1375,7 @@
   }
   function inviteText() {
     const link = APP_URL || ((document.querySelector('meta[property="og:url"]') || {}).content || location.origin + "/").replace(/\/$/, "") + "/";
-    return ["WEBEX MARKET UPDATE - free market desk for day and swing traders", "", link, "",
+    return ["OneView - a clearer market desk for day trades, swing setups and long-term decisions", "", link, "",
       "Sign in with your email (one-time link, no password). Then you get:",
       "- A verdict for every stock you follow: buy, buy the dip, wait, hold, avoid or short, with the reason",
       "- Day trade, swing and long-term reads side by side on your watchlist",
@@ -1414,7 +1431,7 @@
   }
   function initSide() {
     const shell = $("#shell"), tg = $("#side-toggle"); if (!shell || !tg) return;
-    let c = false; try { c = localStorage.getItem("mu-side") === "collapsed"; } catch (e) {}
+    const c = false;                                   // OneView: the navigation is a top bar, never collapsed
     shell.classList.toggle("collapsed", c); tg.textContent = c ? "›" : "‹";
     tg.addEventListener("click", () => { const now = !shell.classList.contains("collapsed"); shell.classList.toggle("collapsed", now); tg.textContent = now ? "›" : "‹"; try { localStorage.setItem("mu-side", now ? "collapsed" : "open"); } catch (e) {} window.dispatchEvent(new Event("resize")); });
   }
@@ -1433,129 +1450,82 @@
   const gateNeeded = () => (STATIC_MODE ? true : (!user || !user.name || !discThisSession()));
   function disclaimerHtml() {
     const needName = !STATIC_MODE && !(user && user.name);
-    return `<div class="login-stage disc-stage"><canvas id="login-bg" aria-hidden="true"></canvas><div class="disc-wrap"><div class="g-shell wide disc-card reveal" id="lg-card"><div class="g-core disc-core">
-      ${gateBrand()}${user ? `<span class="who">${esc(user.email)}</span>` : ""}<button class="gate-x" data-decline title="Close without agreeing (signs you out)" aria-label="Close">×</button>
-      ${hexSteps(1)}
-      <span class="eyebrow warn">Read before you continue</span>
-      <h1 class="disc-h">This is not financial advice.</h1>
+    return `<div class="ov-login disc-stage"><section class="ov-formpanel disc-panel-wrap"><div class="ov-form ov-form-wide disc-card" id="lg-card">
+      ${brandLogo(170)}<button class="gate-x" data-decline title="Close without agreeing (signs you out)" aria-label="Close">×</button>
+      ${user ? `<div class="ov-eyebrow">Signed in as ${esc(user.email)} · step 2 of 2</div>` : ""}
+      <h1 class="disc-h">Before you continue: this is not financial advice.</h1>
       <div class="disc-body">
-        <p>Webex Market Update is an information tool. It shows market data, arithmetic over that data (levels, ranges, volume, scores) and model reads produced by typed questions. None of it is investment, legal or tax advice, and nothing here is a recommendation or solicitation to buy, sell or hold any security, option or other instrument.</p>
-        <p>Markets move fast and against you. Low-float names halt and gap. Data from public sources can be late or wrong, and model reads are probabilities, not predictions. Past patterns do not guarantee future results. You alone decide what to trade, and you alone carry the risk of loss, which can exceed your original stake with leverage or options.</p>
+        <p>OneView is an information tool. It shows market data, arithmetic over that data (levels, ranges, volume, scores) and model reads produced by typed questions. None of it is investment, legal or tax advice, and nothing here is a recommendation or solicitation to buy, sell or hold any security, option or other instrument.</p>
+        <p>Markets move fast and against you. Thinly traded names halt and gap. Data from public sources can be late or wrong, and model reads are probabilities, not predictions. Past patterns do not guarantee future results. You alone decide what to trade, and you alone carry the risk of loss, which can exceed your original stake with leverage or options.</p>
         <p>Nothing on this site creates an adviser, broker or fiduciary relationship. If you need advice, consult a licensed professional who knows your situation.</p>
       </div>
-      ${needName ? `<div class="field"><input id="name-input" placeholder="Your name (shown in the menu)" maxlength="60" autocomplete="name" value="${esc(user.email.split("@")[0])}"></div>` : ""}
-      <label class="ck"><input type="checkbox" id="disc-ok"><span>I have read this. I understand that nothing on Webex Market Update is financial advice and that I trade at my own risk.</span></label>
-      <div class="gate-actions">${pillBtn("I agree, take me to my dashboard", 'id="disc-go" disabled')}<button class="lnk decline" data-decline>I do not agree · sign out</button><span id="disc-status" class="gate-status"></span></div>
-    </div></div></div><div class="lg-foot">© Webex Market Update · information, not advice</div></div>`;
+      ${needName ? `<div class="ov-fields"><label for="name-input">Your name (shown in the menu)</label><input id="name-input" maxlength="60" autocomplete="name" value="${esc(user.email.split("@")[0])}"></div>` : ""}
+      <label class="ck"><input type="checkbox" id="disc-ok"><span>I have read this. I understand that nothing on OneView is financial advice and that I trade at my own risk.</span></label>
+      <div class="gate-actions"><button class="ov-primary" id="disc-go" disabled>I agree, continue to my desk</button><button type="button" class="lnk decline" data-decline>I do not agree · sign out</button><span id="disc-status" class="gate-status" role="status" aria-live="polite"></span></div>
+    </div></section></div>`;
   }
-  function leaveGate(then) {
+  function leaveGate(then) {                     // one short fade (guide: 120-180 ms), nothing staged
     const g = $("#gate"); if (!g || g.hidden) { then(); return; }
     g.classList.add("leaving");
-    setTimeout(() => { g.classList.remove("leaving"); then(); enterDashboard(); }, 620);
-  }
-  function enterDashboard() {
-    document.body.classList.add("dash-enter");
-    setTimeout(() => document.body.classList.remove("dash-enter"), 2200);
+    setTimeout(() => { g.classList.remove("leaving"); then(); const m = $("#app"); if (m) m.focus({ preventScroll: true }); }, 160);
   }
   const hexSteps = (n) => { const steps = ["Sign in", "Disclaimer", "Dashboard"]; return `<div class="hexflow" aria-label="Setup steps">${steps.map((l, i) => `<div class="hex ${i < n ? "done" : i === n ? "on" : ""}"><svg viewBox="0 0 100 100"><path d="M50 4 90 27v46L50 96 10 73V27z"/></svg><span class="hex-n">${i + 1}</span><span class="hex-l">${l}</span></div>${i < 2 ? '<i class="hex-line"></i>' : ""}`).join("")}</div>`; };
-  const gateBrand = () => `<div class="gate-brand"><img class="logo" src="static/logo.svg" alt="" width="34" height="34"><span><small>WEBEX</small> <b>MARKET UPDATE</b></span></div>`;
+  const gateBrand = () => brandLogo(170);
   const pillBtn = (label, attrs = "") => `<button class="pill-btn" ${attrs}><span>${label}</span><i aria-hidden="true">↗</i></button>`;
   function mailLine() {
     if (STATIC_MODE) return "";
     if (!mailStatus) return `<div class="mail-line muted">Checking the mail service…</div>`;
-    return mailStatus.configured ? `<div class="mail-line ok">Links are emailed by <b>${esc(mailStatus.from_name)}</b> (${esc(mailStatus.transport)}). Check your spam folder the first time.</div>`
+    return mailStatus.configured ? `<div class="mail-line ok">Links are sent by <b>${esc(mailStatus.from_name)}</b>. Check your spam folder the first time.</div>`
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
   const WA_GROUP = "https://chat.whatsapp.com/C4NROWURa0SI1hoegnfHOc?mode=gi_t";
-  const waJoin = () => `<a class="wa-join" href="${WA_GROUP}" target="_blank" rel="noopener"><span class="wa-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3l-2-1c-.3-.1-.5-.1-.7.1l-.9 1.1c-.2.2-.3.2-.6.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.6-1.2.1-.2 0-.4 0-.5l-.9-2.1c-.2-.6-.5-.5-.7-.5z"/></svg></span><span class="wa-t"><b>Join the Webex Traders group on WhatsApp</b><span>The team's latest moves, posted as they happen: what we are watching, buying and stepping away from, before the hourly report catches up.</span></span><i aria-hidden="true">Join ›</i></a>`;
-  function loginHero(r) {
-    const tape = ((r && r.macro) || []).slice(0, 8).map((m) => `<span class="lt-item"><b>${esc(m.label || m.symbol)}</b> <span class="mono">${fnum(m.last, m.last < 10 ? 3 : 2)}</span> <span class="delta ${cls(qchg(m))}">${fpct(qchg(m))}</span></span>`).join("");
-    return `<div class="lg-hero">
-      <div class="lg-mark"><img src="static/logo.svg" alt="" width="120" height="120"><i class="ring"></i><i class="ring r2"></i></div>
-      <div class="lg-brand"><small>WEBEX</small><b>MARKET UPDATE</b></div>
-      <h2 class="lg-h">Your market desk,<br>read in one glance.</h2>
-      <p class="lg-p">Verdicts per stock, a scanner that runs every minute, smart money, options flow and the macro picture, in plain language, refreshed every hour.</p>
-      <ul class="lg-feats">
-        <li><span class="lg-ic" style="--vc:#F5C542">${ICONS.home}</span><div><b>A verdict for every name</b><span>Buy, buy the dip, wait, hold, avoid, with the reason.</span></div></li>
-        <li><span class="lg-ic" style="--vc:#2EE59D">${ICONS.scan}</span><div><b>Volume scanner, every minute</b><span>15m and 30m bars, RVOL by time of day, VWAP.</span></div></li>
-        <li><span class="lg-ic" style="--vc:#4FE3C1">${ICONS.smart}</span><div><b>Who is buying</b><span>Insiders, institutions, Congress and options flow.</span></div></li>
-      </ul>
-      ${waJoin()}
-      ${tape ? `<div class="lg-tape"><div class="lt-track">${tape}${tape}</div></div>` : ""}
-    </div>`;
-  }
+  const waJoin = () => `<a class="wa-join" href="${WA_GROUP}" target="_blank" rel="noopener"><span class="wa-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3l-2-1c-.3-.1-.5-.1-.7.1l-.9 1.1c-.2.2-.3.2-.6.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.6-1.2.1-.2 0-.4 0-.5l-.9-2.1c-.2-.6-.5-.5-.7-.5z"/></svg></span><span class="wa-t"><b>Join the OneView group on WhatsApp</b><span>The team's latest moves, posted as they happen: what we are watching, buying and stepping away from.</span></span><i aria-hidden="true">Join ›</i></a>`;
+  const brandLogo = (w) => `<img class="ov-logo" src="static/brand/oneview-logo.png" alt="OneView" width="${w || 190}" height="${Math.round((w || 190) * 480 / 1560)}">`;
   function loginHtml() {
-    const r = report || {};
-    const card = STATIC_MODE
-      ? `<div class="g-core">${hexSteps(0)}<span class="eyebrow">Sign in required</span><h1>Sign in to your desk</h1>
-        <p>Webex Market Update is for signed-in users. Sign-in runs on the app server; this copy has not been connected to one yet.</p>
-        ${APP_URL ? `<div class="gate-actions"><a class="pill-btn" href="${esc(APP_URL)}/?signin=1"><span>Sign in or sign up</span><i aria-hidden="true">↗</i></a></div>`
-          : `<p class="fine">Ask the site owner for the app link, or check back shortly.</p>`}
-        <p class="fine">Market data, model reads and scans here are information, not advice.</p></div>`
-      : `<div class="g-core" id="login-core">
-        ${hexSteps(0)}
-        <span class="eyebrow">Sign in or sign up · no password</span>
-        <h1>Welcome to the desk</h1>
-        <p>Enter your email and we send a one-time link. New here? The same link creates your account. It works for 10 minutes and signs you in on the device you open it on.</p>
-        <form id="login-form" class="gate-form stack"><div class="field float"><input type="email" id="login-email" placeholder=" " required autocomplete="email" autofocus><label for="login-email">Email address</label></div>${pillBtn("Email me a sign-in link", 'type="submit"')}</form>
-        <div id="login-status" class="gate-status"></div>
+    const form = STATIC_MODE
+      ? `<div class="ov-form" id="login-core"><h1>Welcome to OneView</h1><p>Sign-in runs on the app server; this copy is not connected to one yet.</p>
+        ${APP_URL ? `<a class="ov-primary" href="${esc(APP_URL)}/?signin=1">Go to the sign-in page</a>` : `<p class="ov-hint">Ask the site owner for the app link.</p>`}</div>`
+      : `<div class="ov-form" id="login-core">
+        <h1>Welcome to OneView</h1>
+        <p>Enter your email to receive a one-time sign-in link.</p>
+        <form id="login-form" class="ov-fields" novalidate>
+          <label for="login-email">Email address</label>
+          <input type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email" inputmode="email" autofocus>
+          <button class="ov-primary" type="submit" id="login-submit">Send sign-in link</button>
+          <div class="ov-hint">No password needed.</div>
+        </form>
+        <div id="login-status" class="gate-status" role="status" aria-live="polite"></div>
         ${mailLine()}
-        <p class="fine">Market data, model reads and scans here are information, not advice.</p>
+        ${waJoin()}
       </div>`;
-    return `<div class="login-stage"><canvas id="login-bg" aria-hidden="true"></canvas>
-      <div class="login-split">${loginHero(r)}<div class="g-shell lg-card reveal" id="lg-card">${card}</div></div>
-      <div class="lg-foot">© Webex Market Update · gold means information, not advice</div></div>`;
+    return `<div class="ov-login login-stage">
+      <section class="ov-brand" aria-label="OneView">
+        ${brandLogo(235)}
+        <div class="ov-statement"><h2 class="ov-tagline">Read the market.<br><span>Own your next move.</span></h2><p>A clearer view for day trades, swing setups, and long-term decisions.</p></div>
+        <p class="ov-fine">Market data, model reads and scans are information, not advice.</p>
+      </section>
+      <section class="ov-formpanel" aria-label="Sign in">${form}</section>
+    </div>`;
   }
   function sentHtml(email, j) {
     const mins = j.expires_in_min || 10;
-    return `${hexSteps(0)}
-      <div class="sent"><svg class="env" viewBox="0 0 64 48" aria-hidden="true"><path class="e1" pathLength="100" d="M4 8h56v32H4z"/><path class="e2" pathLength="100" d="M4 8l28 20L60 8"/><path class="e3" pathLength="100" d="M4 40l20-16M60 40 40 24"/></svg>
-        <span class="eyebrow">${j.status === "sent" ? "Link sent" : "Link ready"}</span>
-        <h1>${j.status === "sent" ? "Check your inbox" : "Here is your link"}</h1>
-        <p>${j.status === "sent" ? `We emailed a one-time link to <b>${esc(email)}</b>. Open it on this device and you land on your dashboard.` : `No mail service is connected on this machine, so here is the link for local use.`}</p>
-        ${j.dev_link ? `<div class="gate-actions"><a class="pill-btn" href="${esc(j.dev_link)}"><span>Open my sign-in link</span><i aria-hidden="true">↗</i></a></div>` : ""}
-        <div class="sent-timer"><span class="st-ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="16"/><circle class="prog" cx="18" cy="18" r="16" id="sent-prog" pathLength="100"/></svg></span><div><b id="sent-count">${mins}:00</b><span>valid for ${mins} minutes · opening an expired link sends a fresh one</span></div></div>
-        <p class="fine">Nothing in your inbox? Check spam once, then <button class="lnk" data-resend>send again</button> (available after a minute).</p>
-      </div>`;
+    return `<h1>Check your inbox</h1>
+      <p>If <b>${esc(email)}</b> can receive mail, a one-time sign-in link is on its way. Open it on this device and you land on your desk.</p>
+      ${j.dev_link ? `<a class="ov-primary" href="${esc(j.dev_link)}">Open my sign-in link</a><div class="ov-hint">No mail service is connected on this machine, so the link is shown here for local use.</div>` : ""}
+      <div class="sent-timer"><b id="sent-count">${mins}:00</b><span>Valid for ${mins} minutes. Opening an expired link sends a fresh one automatically.</span></div>
+      <p class="ov-hint">Nothing there? Check spam once, then <button type="button" class="lnk" data-resend>send it again</button>.</p>`;
   }
   let sentTimer = null;
   function startSentTimer(total) {
     clearInterval(sentTimer); const t0 = Date.now();
-    sentTimer = setInterval(() => { const el = $("#sent-count"), pr = $("#sent-prog"); if (!el) { clearInterval(sentTimer); return; }
+    sentTimer = setInterval(() => { const el = $("#sent-count"); if (!el) { clearInterval(sentTimer); return; }
       const left = Math.max(0, total - Math.floor((Date.now() - t0) / 1000)); el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-      if (pr) pr.style.strokeDashoffset = String(100 - (left / total) * 100);
       if (!left) { clearInterval(sentTimer); el.textContent = "expired"; } }, 1000);
   }
-  let bgAnim = null;
-  function startLoginFx() {
-    const cv = $("#login-bg"); if (!cv) return;
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const ctx = cv.getContext("2d"); let W, H, pts = [];
-    const size = () => { W = cv.width = cv.clientWidth * devicePixelRatio; H = cv.height = cv.clientHeight * devicePixelRatio; };
-    size(); addEventListener("resize", size);
-    const N = reduce ? 0 : Math.min(90, Math.floor((cv.clientWidth * cv.clientHeight) / 14000));
-    for (let i = 0; i < N; i++) pts.push({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - .5) * .25 * devicePixelRatio, vy: (Math.random() - .5) * .25 * devicePixelRatio, r: (Math.random() * 1.6 + .6) * devicePixelRatio, a: Math.random() * Math.PI * 2 });
-    const draw = () => {
-      if (!document.body.contains(cv)) { cancelAnimationFrame(bgAnim); return; }
-      ctx.clearRect(0, 0, W, H);
-      for (const p of pts) { p.x += p.vx; p.y += p.vy; p.a += .01; if (p.x < 0 || p.x > W) p.vx *= -1; if (p.y < 0 || p.y > H) p.vy *= -1; }
-      ctx.lineWidth = devicePixelRatio * .6;
-      for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) { const a = pts[i], b = pts[j], d = Math.hypot(a.x - b.x, a.y - b.y), lim = 150 * devicePixelRatio; if (d < lim) { ctx.strokeStyle = `rgba(245,197,66,${(1 - d / lim) * .18})`; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); } }
-      for (const p of pts) { const g = .55 + Math.sin(p.a) * .35; ctx.fillStyle = `rgba(255,227,138,${g})`; ctx.shadowColor = "rgba(245,197,66,.9)"; ctx.shadowBlur = 8 * devicePixelRatio; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
-      ctx.shadowBlur = 0;
-      bgAnim = requestAnimationFrame(draw);
-    };
-    cancelAnimationFrame(bgAnim); if (N) draw();
-    const card = $("#lg-card");
-    if (card && !reduce && matchMedia("(pointer:fine)").matches) {
-      const stage = $(".login-stage");
-      stage.addEventListener("mousemove", (e) => { const b = card.getBoundingClientRect(); const dx = (e.clientX - (b.left + b.width / 2)) / b.width, dy = (e.clientY - (b.top + b.height / 2)) / b.height; card.style.transform = `perspective(1200px) rotateY(${dx * 5}deg) rotateX(${-dy * 5}deg)`; });
-      stage.addEventListener("mouseleave", () => { card.style.transform = ""; });
-    }
-  }
+  function startLoginFx() { /* OneView: no decorative motion on the sign-in page */ }
   function renderGate() {
     const g = $("#gate"); if (!g) return;
-    const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) lb.textContent = `SIGN OUT · ${(user.name || user.email.split("@")[0]).toUpperCase().slice(0, 14)}`; }
+    const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) setLabel(lb, `Sign out · ${(user.name || user.email.split("@")[0]).slice(0, 14)}`); }
     if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
     const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
     g.hidden = false; g.innerHTML = html;
@@ -1591,14 +1561,16 @@
       e.preventDefault();
       const email = $("#login-email").value.trim().toLowerCase(), st = $("#login-status"); st.className = "gate-status";
       if (STATIC_MODE) return;
-      st.textContent = "Sending…";
+      const inp = $("#login-email"); if (!inp.checkValidity() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { st.className = "gate-status err"; st.textContent = "Enter a valid email address."; inp.focus(); return; }
+      const btn = $("#login-submit"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+      st.textContent = "Sending your link…";
       try {
         const res = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
-        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "Could not send the link."; return; }
+        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "The link could not be sent. Try again in a moment."; if (btn) { btn.disabled = false; btn.textContent = "Send sign-in link"; } inp.focus(); return; }
         const core = $("#login-core"); if (core) { core.innerHTML = sentHtml(email, j); startSentTimer(j.expires_in_s || 600);
-          const rs = core.querySelector("[data-resend]"); if (rs) rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); }
-      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now."; }
+          const rs = core.querySelector("[data-resend]"); if (rs) { rs.disabled = true; setTimeout(() => { rs.disabled = false; }, 60000); rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); } }
+      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now. Try again in a moment."; const b2 = $("#login-submit"); if (b2) { b2.disabled = false; b2.textContent = "Send sign-in link"; } }
     });
     const go = $("#picks-go"); if (!go) return;
     const state = () => { const ok = $("#disc-ok").checked; const vals = [...new Set([...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean))]; go.disabled = !(ok && vals.length >= 3); const st = $("#picks-status"); if (st && !st.classList.contains("err")) st.textContent = ok ? (vals.length >= 3 ? "" : `${3 - vals.length} more to go`) : "Tick the box above first"; return vals; };
@@ -1656,21 +1628,22 @@
     const r = report;
     ensureLists(r); seedQuotes(r);
     destroyCharts();
-    $("#session-line").textContent = r.session_date + " · " + r.session_label.split(",")[0].toUpperCase();
+    $("#session-line").textContent = r.session_label.split(",")[0] + " " + r.session_date.slice(5).replace("-", "/");
     const ms = $("#market-state"); ms.textContent = { pre: "pre-market", open: "market open", post: "after hours", closed: "closed" }[r.market_state] || r.market_state; ms.className = "badge " + r.market_state;
-    $("#generated-line").textContent = `UPD ${r.generated_at.slice(11, 16)} ET · ${r.elapsed_s}S`;
+    $("#generated-line").textContent = `report ${r.generated_at.slice(11, 16)} ET`;
     const app = $("#app");
     renderNav();
     const tape = $("#tape"); if (tape) { const items = [...(r.indices || []).map((i) => ({ t: i.symbol, l: i.symbol, o: i })), ...(r.macro || []).map((m) => ({ t: m.symbol, l: m.label || m.symbol, o: m })), ...(r.world || []).map((w) => ({ t: w.symbol, l: w.label, o: w }))].filter((x) => isNum(qp(x.t, x.o).last));
       const row = items.map((x) => `<span class="tp"><b>${esc(x.l)}</b>${priceHtml(x.t, x.o)}</span>`).join("");
       tape.innerHTML = `<div class="tape-track">${row}${row}</div>`; tape.hidden = !items.length; }
     const ttl = $("#hud-title"), sub = $("#hud-sub");
-    if (ttl) { const v = VIEWS.find((x) => x[0] === currentView); ttl.textContent = currentView === "ticker" ? (tickerSel || "Ticker") : (v ? v[1].charAt(0) + v[1].slice(1).toLowerCase() : "Home"); }
+    if (ttl) { ttl.textContent = currentView === "ticker" ? (tickerSel || "Ticker") : (PAGE_TITLES[currentView] || "Your market overview"); }
+    horizonBar();
     if (sub) { sub.innerHTML = `${esc(r.session_label.split(",")[0])} ${esc(r.session_date.slice(5).replace("-", "/"))} · report ${esc(r.generated_at.slice(11, 16))} ET · <span data-qstamp>${quoteStamp()}</span>`; }
     app.innerHTML = viewHtml(r);
     firstRender = false;
     const st = r.ai_stats;
-    $("#footer").innerHTML = `<div class="foot">Prices: Yahoo Finance, 15-minute delayed · change is versus the prior close · report built ${r.generated_at.slice(11, 16)} ET${r.ai_enabled ? "" : " · model reads off this build"} · information, not advice.</div>`;
+    $("#footer").innerHTML = `<div class="foot">Prices: Yahoo Finance, 15-minute delayed · change is versus the prior close · report built ${r.generated_at.slice(11, 16)} ET${r.ai_enabled ? "" : " · model reads off this build"} · OneView is information, not advice.</div>`;
     mountCharts();
     wireStocks();
   }
@@ -1862,9 +1835,9 @@
     try {
       const st = await (await api("/api/status", { cache: "no-store" })).json();
       const btn = $("#refresh-btn");
-      if (st.building) { btn.disabled = true; btn.textContent = "Building…"; }
-      else if (st.refresh_available_in_s > 0) { btn.disabled = true; btn.textContent = `Refresh (${st.refresh_available_in_s}s)`; }
-      else { btn.disabled = false; btn.textContent = "Refresh"; }
+      if (st.building) { btn.disabled = true; setLabel(btn, "Building…"); }
+      else if (st.refresh_available_in_s > 0) { btn.disabled = true; setLabel(btn, `Refresh (${st.refresh_available_in_s}s)`); }
+      else { btn.disabled = false; setLabel(btn, "Refresh"); }
       if (st.last_error) notice("Last build failed: " + st.last_error);
       if (st.build_id && report && st.build_id !== report.build_id && (!pendingReport || pendingReport.build_id !== st.build_id)) {
         pendingReport = await fetchReport();
@@ -1880,7 +1853,7 @@
 
   async function onRefresh() {
     if (STATIC_MODE) return;
-    const btn = $("#refresh-btn"); btn.disabled = true; btn.textContent = "Building…";
+    const btn = $("#refresh-btn"); btn.disabled = true; setLabel(btn, "Building…");
     try {
       const res = await api("/api/refresh", { method: "POST" });
       const j = await res.json();
@@ -1919,8 +1892,8 @@
     }
     if (STATIC_MODE) {
       report = JSON.parse(EMBEDDED.textContent);
-      const rb = $("#refresh-btn"); rb.hidden = false; rb.textContent = "REFRESH";
-      rb.onclick = async () => { rb.disabled = true; rb.textContent = "CHECKING…"; try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); notice(`Updated to the ${fresh.generated_at.slice(11, 16)} ET build.`); } else notice("You already have the latest build. Forced rebuilds run from the project's Actions page.", true); } } catch (e) { notice("Static snapshot: nothing newer is reachable from here.", true); } rb.disabled = false; rb.textContent = "REFRESH"; };
+      const rb = $("#refresh-btn"); rb.hidden = false; setLabel(rb, "Refresh");
+      rb.onclick = async () => { rb.disabled = true; setLabel(rb, "Checking…"); try { const res = await fetch("./report.json", { cache: "no-store" }); if (res.ok) { const fresh = await res.json(); if (fresh.build_id !== report.build_id) { pendingReport = fresh; applyPending(); notice(`Updated to the ${fresh.generated_at.slice(11, 16)} ET build.`); } else notice("You already have the latest build. Forced rebuilds run from the project's Actions page.", true); } } catch (e) { notice("Static snapshot: nothing newer is reachable from here.", true); } rb.disabled = false; setLabel(rb, "Refresh"); };
       await loadUser(); renderAll(); renderGate(); disclaimerBanner();
       // Hosted statically (e.g. GitHub Pages): a scheduled job republishes report.json; pick it up without a reload.
       setInterval(async () => {
