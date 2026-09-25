@@ -2006,3 +2006,40 @@ header.topbar .btn.ghost.icon-btn{width:34px;height:32px;padding:0}
   header.topbar .btn.ghost.icon-btn{width:34px;padding:0;justify-content:center}
   header.topbar .side-foot{display:none !important}
 }
+/* ---------- header polish: balanced rail, gradient pills, grouped actions, accent line ---------- */
+header.topbar{position:relative;min-height:56px;padding:0 20px;gap:18px;background:linear-gradient(180deg,#121D38 0%,#0B1428 100%);border-bottom:1px solid #2A3B60;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+header.topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,#245BFF 0%,rgba(36,91,255,.55) 35%,rgba(102,217,166,.35) 70%,transparent 100%);pointer-events:none}
+header.topbar .brand-logo{width:152px;filter:drop-shadow(0 2px 8px rgba(0,0,0,.45))}
+header.topbar .topnav{justify-self:center;max-width:100%;gap:3px;padding:4px;background:linear-gradient(180deg,#131F3D,#0C162C);border:1px solid #2E4270;border-radius:13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px rgba(0,0,0,.35)}
+header.topbar .topnav .side-item{padding:7px 12px;font-size:13px;letter-spacing:.005em;color:#D7DFF2;border-radius:9px;transition:background .2s cubic-bezier(.16,1,.3,1),color .2s,transform .12s}
+header.topbar .topnav .side-item:hover{background:#1C2E56;color:#fff}
+header.topbar .topnav .side-item:active{transform:scale(.97)}
+header.topbar .topnav .side-item.active{background:linear-gradient(180deg,#2F6BFF,#1E4FE0);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 4px 12px rgba(36,91,255,.28)}
+header.topbar .topnav .nav-ico svg{stroke-width:1.7}
+header.topbar .top-actions{gap:4px;padding:4px;background:linear-gradient(180deg,#131F3D,#0C162C);border:1px solid #2E4270;border-radius:13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+header.topbar .top-actions .badge{height:32px;border:0;background:transparent;color:#D7DFF2;font-weight:500;padding:0 10px 0 8px;border-radius:9px}
+header.topbar .top-actions .badge::before{content:"";width:7px;height:7px;border-radius:50%;background:#A8B4C8;box-shadow:0 0 0 3px rgba(168,180,200,.15);margin-right:2px}
+header.topbar .top-actions .badge.open::before{background:#66D9A6;box-shadow:0 0 0 3px rgba(102,217,166,.18)}
+header.topbar .top-actions .badge.pre::before,header.topbar .top-actions .badge.post::before{background:#E8BD68;box-shadow:0 0 0 3px rgba(232,189,104,.18)}
+header.topbar .btn.ghost.icon-btn{width:32px;height:32px;border:0;background:transparent;border-radius:9px}
+header.topbar .btn.ghost.icon-btn:hover{background:#1C2E56}
+@media (min-width: 1701px){
+  header.topbar .topnav .side-item{padding:8px 14px;font-size:13.5px}
+  header.topbar .top-actions .badge{padding:0 12px 0 10px}
+}
+@media (max-width: 1600px){ header.topbar .topnav .side-item{padding:7px 9px;font-size:12.5px} }
+@media (max-width: 1360px) and (min-width: 1101px){ header.topbar .topnav .side-item{padding:7px 7px;font-size:12px} }
+@media (max-width: 700px){
+  header.topbar{padding:6px 10px;gap:6px 8px;min-height:0}
+  header.topbar .topnav{justify-self:stretch;border-radius:11px;padding:3px}
+  header.topbar .topnav .side-item{padding:7px 10px}
+  header.topbar .top-actions{padding:3px}
+}
+/* the user chip is a fourth grid child and would start a second row on very wide screens: keep it out of the bar */
+header.topbar .side-foot,header.topbar .side-toggle{display:none !important}
+/* one explicit row: older sidebar rules set three grid rows with a 52px first track and my gap added row spacing */
+header.topbar{grid-template-rows:auto;grid-auto-rows:auto;row-gap:0;column-gap:18px;min-height:56px}
+@media (max-width: 700px){ header.topbar{grid-template-rows:auto auto;row-gap:6px;column-gap:8px;min-height:0} }
+@media (max-width: 1700px){ header.topbar .pro-badge{display:none} }
+header.topbar .btn.ghost.icon-btn .lbl,header.topbar .pro-badge{display:none !important}
+header.topbar .btn.ghost.icon-btn{width:32px;padding:0;justify-content:center}
