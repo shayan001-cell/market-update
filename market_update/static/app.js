@@ -1980,21 +1980,52 @@
         <div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="col-size">Size</th><th class="col-sector">Sector</th><th class="num">Price</th><th class="col-meter">Trend</th><th class="col-meter">Momentum</th><th class="col-meter col-macro">Macro</th><th class="num">Total</th>${deskPro ? proHead() : ""}<th>Read</th></tr></thead><tbody>${rows.map((c) => deskRow(c, { scan: true, flatOnly: true, prefix: "scan:", max: S.max_total, pro: deskPro })).join("") || '<tr><td colspan="9" class="muted empty">Nothing in this group right now.</td></tr>'}</tbody></table></div>
         <div class="meta2">Universe: ${esc(S.universe || "")}. Kept: ${esc(S.criteria || "")}. Scanned ${esc((S.generated_at || "").slice(11, 16))} ET; a result is reused for 30 minutes. Click a row for the reasons.</div></div>`;
     }
-    const tv = `<div class="tv-line"><span class="st-dot ${d.tv_available ? "up" : "none"}"></span>TradingView bridge ${d.tv_available ? "connected" : "not running"}${d.tv_available ? `<button class="btn sm ghost" type="button" data-desk-tv title="Reads daily bars from your TradingView chart for the names in view (up to ${d.tv_max || 12}) and re-scores them. About 12 seconds per name; your chart is restored afterwards.">Re-check the list on TradingView</button><span id="desk-tv-msg" class="muted"></span>` : `<span class="muted">open TradingView Desktop with its debug port on the server Mac</span>`}</div>`;
+    const tv = "";
     return `<section class="panel scan"><div class="scan-head"><div><h3>Mid cap to mega cap scan</h3><div class="kicker">Which big names score high on all three, out of how many, and what it means</div></div>${btn}</div>${body}${tv}</section>`;
   }
   let deskHold = {}; try { deskHold = JSON.parse(localStorage.getItem("mu-desk-hold") || "{}") || {}; } catch (e) { deskHold = {}; }
-  function toggleHold(t) { deskHold[t] = !deskHold[t]; try { localStorage.setItem("mu-desk-hold", JSON.stringify(deskHold)); } catch (e) {} renderAll(); }
+  function toggleHold(t) { deskHold[t] = !deskHold[t]; try { localStorage.setItem("mu-desk-hold", JSON.stringify(deskHold)); } catch (e) {} rerenderDesk(); }
   async function loadDesk() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/desk", { cache: "no-store" }); if (res.ok) { deskData = await res.json(); if (currentView === "desk") renderAll(); } } catch (e) {}
+    try { const res = await api("/api/desk", { cache: "no-store" }); if (res.ok) { deskData = await res.json(); if (currentView === "desk") rerenderDesk(); } } catch (e) {}
   }
   function pillarMeter(v) {
     const n = isNum(v) ? Math.max(-2, Math.min(2, Math.round(v))) : null;
     const cells = [-2, -1, 0, 1, 2].map((k) => { let cls = ""; if (n != null) { if (n > 0 && k > 0 && k <= n) cls = "up"; else if (n < 0 && k < 0 && k >= n) cls = "down"; else if (n === 0 && k === 0) cls = "zero"; } return `<i class="${cls}"></i>`; }).join("");
     return `<span class="meter" title="${n == null ? "no data" : (n > 0 ? "+" : "") + n + " on a scale from −2 to +2"}"><span class="meter-cells">${cells}</span><span class="meter-n ${n > 0 ? "up" : n < 0 ? "down" : ""}">${n == null ? "–" : n > 0 ? "+" + n : n}</span></span>`;
   }
+  function wireDesk() {
+    document.querySelectorAll("[data-desk-hold]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleHold(b.getAttribute("data-desk-hold")); }));
+    document.querySelectorAll("[data-desk-open]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-desk-open"); deskOpen = deskOpen === t ? null : t; rerenderDesk(); }));
+    const pt = $("[data-desk-pro]"); if (pt) pt.addEventListener("click", () => { deskPro = !deskPro; try { localStorage.setItem("mu-desk-pro", deskPro ? "1" : "0"); } catch (e) {} rerenderDesk(); });
+    document.querySelectorAll("[data-desk-jump]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); const t = b.getAttribute("data-desk-jump"); deskScope = "mine"; deskOpen = t; rerenderDesk(); const row = document.querySelector(`.desk-main tr[data-sym="${t}"]`); if (row) row.scrollIntoView({ block: "center", behavior: "smooth" }); }));
+    const fb = $("[data-desk-find]"); if (fb) { fb.addEventListener("input", () => { deskFind = fb.value; applyDeskFind(); }); if (deskFind) applyDeskFind(); }
+    const scb = $("[data-desk-scan]"); if (scb) scb.addEventListener("click", () => { deskScan = { status: "running", started: Date.now() / 1000 }; rerenderDesk(); loadDeskScan(true); });
+    document.querySelectorAll("[data-desk-scan-filter]").forEach((b) => b.addEventListener("click", () => { deskScanFilter = b.getAttribute("data-desk-scan-filter"); rerenderDesk(); }));
+    const tvb = $("[data-desk-tv]"); if (tvb) tvb.addEventListener("click", async () => {
+      const d = deskData || {}; const mine = new Set(((lists && lists.lists && lists.lists[lists.active]) || []).map((x) => (typeof x === "string" ? x : x.ticker || "").toUpperCase()));
+      let syms = (d.cards || []).filter((c) => deskScope === "mine" ? mine.has(c.ticker) : deskScope === "index" ? (d.index || []).includes(c.ticker) || (d.sectors || []).includes(c.ticker) : true).map((c) => c.ticker);
+      if (deskScope === "mine") syms = [...new Set([...syms, ...mine])];
+      syms = syms.slice(0, d.tv_max || 12);
+      const msg = $("#desk-tv-msg"); tvb.disabled = true; if (msg) msg.textContent = `Reading ${syms.length} names from your TradingView chart… about ${Math.ceil(syms.length * 12 / 60)} min.`;
+      try {
+        const res = await api("/api/desk/tv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: syms }) });
+        const j = await res.json();
+        if (j.status === "ok") { (j.cards || []).forEach((c) => { const i = (deskData.cards || []).findIndex((x) => x.ticker === c.ticker); if (i >= 0) deskData.cards[i] = c; else deskData.cards.push(c); }); rerenderDesk(); const m2 = $("#desk-tv-msg"); if (m2) m2.textContent = `Done: ${(j.pulled || []).length} re-scored from TradingView${(j.missing || []).length ? ", not found: " + j.missing.join(", ") : ""}.`; }
+        else if (msg) msg.textContent = j.detail || j.status;
+      } catch (e) { if (msg) msg.textContent = "The pull failed."; }
+      tvb.disabled = false;
+    });
+    document.querySelectorAll("[data-desk-scope]").forEach((b) => b.addEventListener("click", () => { deskScope = b.getAttribute("data-desk-scope"); rerenderDesk(); }));
+  }
   let deskFind = "";
+  // Re-draw only the desk section. The view pane (the scroller) stays put, so nothing jumps.
+  function rerenderDesk() {
+    const sec = $("#app .desk");
+    if (!sec) { renderAll(); return; }
+    sec.outerHTML = secDesk();
+    wireDesk();
+  }
   let deskPro = false; try { deskPro = localStorage.getItem("mu-desk-pro") === "1"; } catch (e) {}
   function proHead() { return `<th class="col-pro num" title="One-month return minus the S&amp;P 500's">vs S&amp;P 1m</th><th class="col-pro num" title="Three-month return minus the S&amp;P 500's">vs S&amp;P 3m</th><th class="col-pro num" title="Today's volume against the 20-day average">Vol ×</th><th class="col-pro num" title="Average money traded per day, last 20 days">$/day</th><th class="col-pro num" title="Distance below the 52-week high">52w</th><th class="col-pro num" title="Days to the next earnings report, when known">Earn</th>`; }
   function proCells(c) {
@@ -2021,7 +2052,7 @@
     if (deskScope === "mine") cards = cards.filter((c) => mine.has(c.ticker));
     else if (deskScope === "index") cards = cards.filter((c) => (d.index || []).includes(c.ticker) || (d.sectors || []).includes(c.ticker));
     const missing = deskScope === "mine" ? [...mine].filter((t) => !byT[t]) : [];
-    const gauges = (m.components || []).map((c) => `<li class="gauge ${!c.available ? "na" : c.signal > 0 ? "up" : c.signal < 0 ? "down" : "flat"}"><span class="g-arrow" aria-hidden="true">${!c.available ? "·" : c.signal > 0 ? "▲" : c.signal < 0 ? "▼" : "▬"}</span><span class="g-text"><span class="g-name">${esc(GAUGE_NAMES[c.ratio] || c.name)}</span><span class="g-detail">${c.available ? esc(gaugeDetail(c.detail)) : "no data"}</span></span><span class="g-code">${esc(c.ratio)}</span></li>`).join("");
+    const gauges = (m.components || []).map((c) => `<li class="gauge ${!c.available ? "na" : c.signal > 0 ? "up" : c.signal < 0 ? "down" : "flat"}" title="${esc(c.ratio)}: ${esc(c.available ? gaugeDetail(c.detail) : "no data")}"><span class="g-arrow" aria-hidden="true">${!c.available ? "·" : c.signal > 0 ? "▲" : c.signal < 0 ? "▼" : "▬"}</span><span class="g-text"><span class="g-name">${esc(GAUGE_NAMES[c.ratio] || c.name)}</span><span class="g-detail">${esc(c.plain || (c.available ? gaugeDetail(c.detail) : "no data"))}</span></span></li>`).join("");
     const counts = Object.entries(d.counts || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => { const w = (DESK_WORDS[k] || pretty(k)); return `<span class="cnt-chip"><b>${v}</b>${esc(w)}</span>`; }).join("");
     const maxTotal = isNum(m.pillar) ? 4 + m.pillar : null;
     const rows = cards.map((c) => deskRow(c, { max: maxTotal, pro: deskPro })).join("");
@@ -2035,7 +2066,7 @@
     const strongMine = mineCards.filter((c) => c.trend.score >= 1 && c.momentum.score >= 1).length;
     const fresh = (d.counts || {}).re_entry || 0;
     const readout = `<div class="readout" aria-label="desk readout">
-      <div class="ro"><span class="ro-l">Regime</span><span class="ro-v ${mc}">${esc((m.regime || "–").toUpperCase())}</span></div>
+      <div class="ro"><span class="ro-l">Backdrop</span><span class="ro-v word ${(m.verdict || {}).cls || mc}">${esc((m.headline || m.regime || "–").toUpperCase())}</span></div>
       <div class="ro"><span class="ro-l">Macro</span><span class="ro-v digit ${mc}">${m.pillar == null ? "--" : (m.pillar > 0 ? "+" : m.pillar < 0 ? "" : " ") + m.pillar}</span></div>
       <div class="ro"><span class="ro-l">${esc(lists && lists.active ? lists.active : "My list")} strong</span><span class="ro-v digit">${String(strongMine).padStart(2, "0")}<i>/${String(mineCards.length).padStart(2, "0")}</i></span></div>
       <div class="ro"><span class="ro-l">Fresh entries</span><span class="ro-v digit up">${String(fresh).padStart(3, "0")}</span></div>
@@ -2050,9 +2081,9 @@
       ${readout}
       <div class="desk-top">
         <div class="panel backdrop">
-          <h3>Market backdrop <span class="muted">one score shared by every name</span></h3>
-          <div class="bd-hero"><span class="mood-tone ${mc}">${esc(m.regime || "–")}</span><div class="bd-side"><span class="pill ${mc}">Macro ${m.pillar > 0 ? "+" : ""}${m.pillar == null ? "–" : m.pillar}</span><span class="bd-label">${esc(m.label || "")}</span></div></div>
-          <p class="bd-plain">${esc(m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are moving together, the inflation flag." : ""}</p>
+          <h3>Market backdrop <span class="muted">what the whole market is doing, in plain words</span></h3>
+          <div class="bd-hero"><span class="mood-tone ${mc}">${esc(m.headline || m.regime || "–")}</span><div class="bd-side"><span class="pill ${(m.verdict || {}).cls || mc}">${esc((m.verdict || {}).word || "")} · macro ${m.pillar > 0 ? "+" : ""}${m.pillar == null ? "–" : m.pillar}</span><span class="bd-label">${esc(m.summary || "")}</span></div></div>
+          <p class="bd-plain">${esc((m.verdict || {}).text || m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are falling together, which is the inflation flag." : ""}</p>
           <ul class="gauges">${gauges}</ul>
         </div>
         <div class="right-col">
@@ -2232,28 +2263,7 @@
         row.querySelector("td").innerHTML = `<ul class="bf-list">${morning}${reads || '<li class="muted">no intraday reads that day</li>'}</ul>`; } catch (e) { row.querySelector("td").innerHTML = '<div class="muted">Could not load that day.</div>'; } }));
     document.querySelectorAll("[data-brief-toggle]").forEach((b) => b.addEventListener("click", () => { const slot = b.getAttribute("data-brief-toggle"); briefOpen = briefOpen === slot ? null : slot; const el = $(".briefs"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } }));
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
-    document.querySelectorAll("[data-desk-hold]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleHold(b.getAttribute("data-desk-hold")); }));
-    document.querySelectorAll("[data-desk-open]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-desk-open"); deskOpen = deskOpen === t ? null : t; renderAll(); }));
-    const pt = $("[data-desk-pro]"); if (pt) pt.addEventListener("click", () => { deskPro = !deskPro; try { localStorage.setItem("mu-desk-pro", deskPro ? "1" : "0"); } catch (e) {} renderAll(); });
-    document.querySelectorAll("[data-desk-jump]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); const t = b.getAttribute("data-desk-jump"); deskScope = "mine"; deskOpen = t; renderAll(); const row = document.querySelector(`.desk-main tr[data-sym="${t}"]`); if (row) row.scrollIntoView({ block: "center", behavior: "smooth" }); }));
-    const fb = $("[data-desk-find]"); if (fb) { fb.addEventListener("input", () => { deskFind = fb.value; applyDeskFind(); }); if (deskFind) applyDeskFind(); }
-    const scb = $("[data-desk-scan]"); if (scb) scb.addEventListener("click", () => { deskScan = { status: "running", started: Date.now() / 1000 }; renderAll(); loadDeskScan(true); });
-    document.querySelectorAll("[data-desk-scan-filter]").forEach((b) => b.addEventListener("click", () => { deskScanFilter = b.getAttribute("data-desk-scan-filter"); renderAll(); }));
-    const tvb = $("[data-desk-tv]"); if (tvb) tvb.addEventListener("click", async () => {
-      const d = deskData || {}; const mine = new Set(((lists && lists.lists && lists.lists[lists.active]) || []).map((x) => (typeof x === "string" ? x : x.ticker || "").toUpperCase()));
-      let syms = (d.cards || []).filter((c) => deskScope === "mine" ? mine.has(c.ticker) : deskScope === "index" ? (d.index || []).includes(c.ticker) || (d.sectors || []).includes(c.ticker) : true).map((c) => c.ticker);
-      if (deskScope === "mine") syms = [...new Set([...syms, ...mine])];
-      syms = syms.slice(0, d.tv_max || 12);
-      const msg = $("#desk-tv-msg"); tvb.disabled = true; if (msg) msg.textContent = `Reading ${syms.length} names from your TradingView chart… about ${Math.ceil(syms.length * 12 / 60)} min.`;
-      try {
-        const res = await api("/api/desk/tv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: syms }) });
-        const j = await res.json();
-        if (j.status === "ok") { (j.cards || []).forEach((c) => { const i = (deskData.cards || []).findIndex((x) => x.ticker === c.ticker); if (i >= 0) deskData.cards[i] = c; else deskData.cards.push(c); }); renderAll(); const m2 = $("#desk-tv-msg"); if (m2) m2.textContent = `Done: ${(j.pulled || []).length} re-scored from TradingView${(j.missing || []).length ? ", not found: " + j.missing.join(", ") : ""}.`; }
-        else if (msg) msg.textContent = j.detail || j.status;
-      } catch (e) { if (msg) msg.textContent = "The pull failed."; }
-      tvb.disabled = false;
-    });
-    document.querySelectorAll("[data-desk-scope]").forEach((b) => b.addEventListener("click", () => { deskScope = b.getAttribute("data-desk-scope"); renderAll(); }));
+    wireDesk();
     document.querySelectorAll("[data-check-day]").forEach((b) => b.addEventListener("click", () => { checkData = null; loadCheck(b.getAttribute("data-check-day")); renderAll(); }));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
     document.querySelectorAll("#app [data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));

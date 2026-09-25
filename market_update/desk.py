@@ -90,12 +90,34 @@ def _macro(series: dict[str, list[float]], report: dict[str, Any]) -> dict[str, 
     comps = []
     for c in r.components:
         comps.append({"name": c["name"], "ratio": c["ratio"], "weight": c["weight"], "signal": c["signal"], "detail": c["detail"], "available": c["available"]})
+    LAY = {
+        "RSP/SPY": ("More stocks are joining the move, not just the giants.", "A few giant stocks carry the market; most others are lagging.", "Big and small stocks are moving about the same."),
+        "10Y-2Y": ("Long-term rates sit above short-term rates and the gap is widening: the normal, healthy shape.", "Short-term rates sit above long-term rates: a warning shape that has come before slowdowns.", "The rates curve is roughly normal."),
+        "HYG/LQD": ("Investors are happy to hold riskier company debt: no fear showing in credit.", "Investors are moving from risky to safe debt: caution showing in credit.", "Credit is calm."),
+        "IWM/SPY": ("Smaller companies are leading: appetite for risk.", "Smaller companies are lagging: money prefers the big, safe names.", "Big and small companies are level."),
+        "SPY/TLT": ("Stocks are beating bonds: money prefers stocks.", "Bonds are beating stocks: money is hiding.", "Stocks and bonds are level."),
+        "XLY/XLP": ("Stocks of things people want are beating stocks of things people need: confidence in spending.", "Staples are beating discretionary: people are being careful with money.", "Spending stocks and staples are level."),
+    }
+    for c in comps:
+        up, down, flat = LAY.get(c["ratio"], (c["detail"], c["detail"], c["detail"]))
+        c["plain"] = (up if (c["signal"] or 0) > 0 else down if (c["signal"] or 0) < 0 else flat) if c["available"] else "No data for this one today."
+        c["lean"] = "up" if (c["signal"] or 0) > 0 else "down" if (c["signal"] or 0) < 0 else "flat"
+    headline = {"Broadening": "Broad and healthy", "Concentration": "Narrow: a few giants carry it", "Contraction": "Money is leaving risk",
+                "Inflationary": "Inflation worry", "Transitional": "Mixed signals"}.get(r.regime, r.regime)
+    if r.pillar_score >= 1:
+        verdict = {"word": "Helps buyers", "cls": "up", "text": "More is going right than wrong in the background. Good setups get the benefit of the doubt."}
+    elif r.pillar_score <= -1:
+        verdict = {"word": "Hurts buyers", "cls": "down", "text": "The background is working against new buying. Smaller size, quicker exits, and only the cleanest setups."}
+    else:
+        verdict = {"word": "Neutral", "cls": "flat", "text": "The background is neither a tailwind nor a headwind. Each stock has to earn its read on its own trend and momentum."}
+    pos = [c for c in comps if c["available"] and c["lean"] == "up"]; neg = [c for c in comps if c["available"] and c["lean"] == "down"]
+    summary = f"{len(pos)} of {len([c for c in comps if c['available']])} gauges point the right way for buyers, {len(neg)} the wrong way."
     words = {"Broadening": "More stocks are joining the move: healthy, broad participation.",
              "Concentration": "A few big names carry the market while the rest lag: fragile leadership.",
              "Contraction": "Credit and breadth are weakening together: risk is being taken off.",
              "Inflationary": "Stocks and bonds are falling together: inflation worry, nowhere to hide.",
              "Transitional": "No clear regime: the signals disagree."}
-    return {"as_of": r.as_of, "composite": r.composite, "regime": r.regime, "regime_plain": words.get(r.regime, ""), "pillar": r.pillar_score,
+    return {"as_of": r.as_of, "composite": r.composite, "regime": r.regime, "regime_plain": words.get(r.regime, ""), "headline": headline, "verdict": verdict, "summary": summary, "pillar": r.pillar_score,
             "label": r.pillar_label, "inflationary": r.inflationary_flag, "spy_tlt_corr": r.spy_tlt_corr, "components": comps, "notes": r.notes}
 
 

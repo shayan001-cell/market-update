@@ -1901,3 +1901,50 @@ tr.day-detail td { background: var(--surface-2); }
   .desk .run-list li{grid-template-columns:1fr}
   .desk .run-why{grid-column:1}
 }
+
+/* ---------- top of page: tape strip first, then a distinct header bar ---------- */
+.tape-bar{height:30px;background:#05080F;border-bottom:1px solid #1C2740}
+.tape-track{height:30px;font-family:var(--mono);font-size:11.5px;letter-spacing:.02em}
+.tape-bar .tp b{color:#8E9BB4;font-weight:600;margin-right:4px;letter-spacing:.06em;font-size:10.5px}
+.topbar{background:linear-gradient(180deg,#111C34,#0C1527);border-bottom:1px solid #2F3F60;box-shadow:0 2px 14px rgba(0,0,0,.35)}
+.topnav{background:#080F1E;border:1px solid #223050;border-radius:12px;padding:3px;gap:2px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.topnav .side-item{color:#E6ECF7;font-weight:500;border-radius:9px;padding:8px 12px}
+.topnav .side-item:hover{background:#1A2742;color:#fff}
+.topnav .side-item.active{background:#245BFF;color:#fff;font-weight:600;box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}
+.top-actions .badge{background:#080F1E;border-color:#223050;color:#E6ECF7}
+.top-actions .btn.ghost.icon-btn{background:#080F1E;border-color:#223050}
+.top-actions .btn.ghost.icon-btn:hover{background:#1A2742}
+@media (max-width: 700px){
+  .tape-bar{height:26px}.tape-track{height:26px;font-size:11px}
+  .topnav{border-radius:10px;padding:2px}
+  .topnav .side-item{padding:8px 10px}
+}
+/* desk: meters line up in fixed columns */
+.desk .meter{display:inline-grid;grid-template-columns:auto 26px;gap:6px;align-items:center}
+.desk .meter-n{text-align:right;min-width:0}
+.desk .desk-tbl th.col-meter{width:104px}
+.desk .desk-tbl td.col-meter{white-space:nowrap}
+.desk .desk-tbl th.num,.desk .desk-tbl td.num{text-align:right}
+.desk .desk-tbl th.col-read,.desk .desk-tbl td.col-read{white-space:nowrap}
+/* desk: backdrop verdict + scan card alignment */
+.desk .bd-side .pill{align-self:flex-start}
+.desk .bd-label{max-width:44ch}
+.desk .scan-head{align-items:center}
+.desk .scan-head .kicker{margin-top:2px}
+.desk .scan-hero{grid-template-columns:150px minmax(0,1fr);align-items:start;padding:12px 0 6px;border-top:1px solid var(--line);margin-top:10px}
+.desk .scan-meaning{padding-left:16px}
+.desk .scan-meaning li{margin:2px 0}
+.desk .scan .seg{margin:10px 0}
+.desk .scan .tbl-wrap{border:1px solid var(--line);border-radius:8px}
+.desk .scan .lede{margin-top:6px}
+@media (max-width: 700px){
+  .desk .scan-hero{grid-template-columns:1fr}
+  .desk .desk-tbl td.col-meter{white-space:normal}
+}
+/* layout rows after moving the tape above the header: shell = tape, header, hud; hud = bar, notice, main, footer */
+.shell{grid-template-rows:auto auto minmax(0,1fr)}
+.hud{grid-template-rows:auto auto minmax(0,1fr) auto}
+@media (max-width: 900px){ .shell{grid-template-rows:auto auto minmax(0,1fr)} .hud{grid-template-rows:auto auto auto auto} }
+
+.desk .ro-v.word{font-size:15px;letter-spacing:.08em;white-space:normal;line-height:1.15}
+@media (max-width: 700px){ .desk .ro-v.word{font-size:13px} }
