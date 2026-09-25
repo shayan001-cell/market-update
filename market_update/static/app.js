@@ -447,7 +447,7 @@
     const tone = g.tone.choice, cl = { risk_on: "up", risk_off: "down", mixed: "flat" }[tone];
     const fact = (label, value, c) => `<div class="fact"><span class="fact-l">${label}</span><span class="fact-v ${c || ""}">${value}</span></div>`;
     return `<section class="panel mood ${cl}">
-      <h3>Market mood · ${esc(r.session_label.split(",")[0])}${r.ai_from ? ` <span class="muted" style="text-transform:none;letter-spacing:0" title="The read service was unavailable on the latest build, so the reads from the last good build are shown next to live prices">reads as of ${esc(String(r.ai_from).slice(11, 16))} ET</span>` : ""}</h3>
+      <h3>Market mood · ${esc(r.session_label.split(",")[0])}${r.ai_source === "rules" ? ` <span class="src-badge" title="The model read service was unavailable on this build (out of credits or down). These reads come from OneView's backup rules: the same facts, judged by fixed rules instead of the model. Conviction is capped at MED.">backup read · rules</span>` : r.ai_source === "mixed" ? ` <span class="src-badge" title="Some reads on this build came from the backup rules because the model service failed part-way.">part backup</span>` : ""}${r.ai_from ? ` <span class="muted" style="text-transform:none;letter-spacing:0" title="The read service was unavailable on the latest build, so the reads from the last good build are shown next to live prices">reads as of ${esc(String(r.ai_from).slice(11, 16))} ET</span>` : ""}</h3>
       <div class="mood-row"><span class="mood-tone">${pretty(tone).toUpperCase()}</span><span class="mood-conf">${convTag(g.tone.confidence)}</span></div>
       <p class="mood-why">${EX.tone[tone]}</p>
       <div class="facts">
@@ -610,7 +610,7 @@
     const verdict = d.market_state !== "open" && scoredToday.length ? `<div class="day-verdict"><b>Day verdict</b> ${hitsToday} of ${scoredToday.length} reads right (${Math.round(hitsToday / scoredToday.length * 100)}%). ${hitsToday / scoredToday.length >= 0.6 ? "The desk read the tape well today." : hitsToday / scoredToday.length >= 0.4 ? "A mixed day: the tape flipped on the desk more than once." : "The desk was wrong-footed today; the reads are logged for the model to learn from."}</div>` : "";
     return `<article class="bcard ${open ? "open" : ""}" data-brief-slot="direction">
       <div class="bcard-h"><b>Intraday direction</b><span class="muted">${esc((L.at || "").slice(11, 16))} ET · ${d.market_state === "open" ? (isNum(d.next_in_s) ? `next in ${Math.ceil(d.next_in_s / 60)} min` : "live") : "last read of the session"}</span></div>
-      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
+      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)}${L.source === "rules" ? ` <span class="src-badge" title="The model read service was unavailable, so this read comes from OneView's backup rules (same facts, fixed rules, conviction capped at MED).">backup read</span>` : ""}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
       ${facts}
       <div class="dir-strip">${strip || '<span class="muted">no reads yet today</span>'}</div>
       ${verdict}

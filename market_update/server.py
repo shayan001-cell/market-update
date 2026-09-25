@@ -141,12 +141,17 @@ async def do_build(reason: str) -> bool:
         try:
             use_ai = USE_AI and (time.time() - state.get("ai_at", 0) >= AI_INTERVAL_S or reason == "manual")
             report = await asyncio.to_thread(_run_build_sync, use_ai)
-            if (report.get("ai_stats") or {}).get("calls", 0) > 0 and report.get("regime"):
+            src = report.get("ai_source") or ("model" if (report.get("ai_stats") or {}).get("calls", 0) > 0 else "none")
+            if src in ("model", "mixed") and report.get("regime"):
                 state["ai_at"] = time.time(); state["ai_report"] = report
                 try:
                     AI_REPORT_PATH.write_text(json.dumps(report, default=str))
                 except Exception:  # noqa: BLE001
                     log.exception("could not save the AI report")
+            elif src == "rules" and report.get("regime"):
+                # Backup engine answered: fresh reads from rules, clearly labelled. Re-try the model next build.
+                state["ai_at"] = 0
+                log.warning("model reads failed this build (%s); %s answers came from the backup rules", (report.get("ai_stats") or {}).get("last_error"), (report.get("ai_stats") or {}).get("rule_answers"))
             else:
                 if not state.get("ai_report") and AI_REPORT_PATH.exists():
                     try:

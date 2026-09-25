@@ -5,6 +5,7 @@ The report is plain JSON-able data consumed by static/app.js.
 from __future__ import annotations
 
 import asyncio
+
 import logging
 import time
 import uuid
@@ -17,6 +18,7 @@ from typesafe_sdk import AsyncTypeSafeClient, TypeSafeError
 
 from . import config, fetch, technicals as T
 from . import judgments as J
+from . import rules as R
 from . import scanner
 
 log = logging.getLogger(__name__)
@@ -41,28 +43,68 @@ def _answers_to_dict(resp: Any) -> dict[str, Any]:
 
 
 class Judge:
-    def __init__(self, enabled: bool = True):
+    """TypeSafe first; when the model service fails (no credits, outage, timeout) the same
+    question is answered by plain rules (`rules.py`) so the page never goes blank. Rule
+    answers are marked `rules: True` and never claim more than MED conviction."""
+    # Once the API says "no credits" we stop hammering it for a while (seconds).
+    CREDITS_BACKOFF_S = 900
+    _credits_out_until: float = 0.0
+
+    def __init__(self, enabled: bool = True, rules_fallback: bool = True):
         self.enabled = enabled
-        self.calls = self.failures = self.input_tokens = self.output_tokens = 0
+        self.rules_fallback = rules_fallback
+        self.calls = self.failures = self.rule_answers = self.input_tokens = self.output_tokens = 0
+        self.last_error: str | None = None
+
+    @property
+    def source(self) -> str:
+        if self.calls and not self.rule_answers:
+            return "model"
+        if self.calls and self.rule_answers:
+            return "mixed"
+        return "rules" if self.rule_answers else "none"
+
+    def _fallback(self, states: list[dict[str, Any]], questions: dict[str, Any], idx: list[int] | None = None) -> list[dict[str, Any] | None]:
+        out: list[dict[str, Any] | None] = [None] * len(states)
+        if not self.rules_fallback:
+            return out
+        for i in (idx if idx is not None else range(len(states))):
+            a = R.answer(questions, states[i])
+            if a is not None:
+                self.rule_answers += 1
+            out[i] = a
+        return out
 
     async def run_many(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None]:
         if not self.enabled or not states:
             return [None] * len(states)
+        if time.time() < Judge._credits_out_until:
+            self.failures += len(states)
+            self.last_error = "TypeSafe credits exhausted (backing off)"
+            return self._fallback(states, questions)
         sem = asyncio.Semaphore(config.TYPESAFE_CONCURRENCY)
         try:
             client_cm = AsyncTypeSafeClient(model=config.TYPESAFE_MODEL)
         except TypeSafeError as e:
             self.failures += len(states)
-            log.error("TypeSafe unavailable, continuing without judgments: %s", e)
-            return [None] * len(states)
+            self.last_error = str(e)[:200]
+            log.error("TypeSafe unavailable, answering by rules: %s", e)
+            return self._fallback(states, questions)
         async with client_cm as client:
             async def one(state: dict[str, Any]) -> dict[str, Any] | None:
                 async with sem:
+                    if time.time() < Judge._credits_out_until:
+                        self.failures += 1
+                        return None
                     try:
                         resp = await client.system_one(state=state, questions=questions)
                     except TypeSafeError as e:
                         self.failures += 1
-                        log.warning("TypeSafe call failed: %s", e)
+                        msg = str(e)
+                        self.last_error = msg[:200]
+                        if "402" in msg or "credits" in msg.lower():
+                            Judge._credits_out_until = time.time() + Judge.CREDITS_BACKOFF_S
+                        log.warning("TypeSafe call failed: %s", msg[:200])
                         return None
                     self.calls += 1
                     u = getattr(resp, "usage", None)
@@ -70,7 +112,13 @@ class Judge:
                         self.input_tokens += int(getattr(u, "input_tokens", 0) or 0)
                         self.output_tokens += int(getattr(u, "output_tokens", 0) or 0)
                     return _answers_to_dict(resp)
-            return list(await asyncio.gather(*(one(s) for s in states)))
+            answers = list(await asyncio.gather(*(one(s) for s in states)))
+        missing = [i for i, a in enumerate(answers) if a is None]
+        if missing:
+            filled = self._fallback(states, questions, missing)
+            for i in missing:
+                answers[i] = filled[i]
+        return answers
 
     async def run_one(self, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any] | None:
         return (await self.run_many([state], questions))[0]
@@ -857,8 +905,10 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         "session_date": session.isoformat(),
         "session_label": session.strftime("%A, %B %d, %Y"),
         "market_state": mstate,
-        "ai_enabled": use_ai and judge.calls > 0,
-        "ai_stats": {"calls": judge.calls, "failures": judge.failures, "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens},
+        "ai_enabled": use_ai and (judge.calls > 0 or judge.rule_answers > 0),
+        "ai_source": judge.source,
+        "ai_stats": {"calls": judge.calls, "failures": judge.failures, "rule_answers": judge.rule_answers, "last_error": judge.last_error,
+                     "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens},
         "regime": regime,
         "macro": macro,
         "world": world,
@@ -955,7 +1005,8 @@ async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool =
         s["tags"].append("heavy_options")
     s["verdict"] = _verdict(s)
     s["analyzed_at"] = datetime.now(tz=config.ET).isoformat()
-    s["ai_stats"] = {"calls": judge.calls, "failures": judge.failures}
+    s["ai_stats"] = {"calls": judge.calls, "failures": judge.failures, "rule_answers": judge.rule_answers}
+    s["ai_source"] = judge.source
     return _clean(s)
 
 
@@ -1158,6 +1209,7 @@ async def morning_brief(report: dict[str, Any], judge: "Judge", slot: str = "mor
     b["title"] = {"morning": "Morning briefing", "close": "After the close"}.get(slot, slot)
     states = [{k: v for k, v in (b["indexes"][sym] or {}).items() if k != "bars"} | {"name": {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF"}[sym], "note": "the 1-hour facts describe the chart at the last regular close; now_price / now_chg_pct is where it trades at this moment (pre-market when before 09:30)"} for sym in ("SPY", "QQQ") if b["indexes"].get(sym)]
     ans = await judge.run_many(states, J.BRIEF_INDEX_QUESTIONS)
+    b["source"] = judge.source
     for st, a in zip(states, ans):
         if b["indexes"].get(st["symbol"]) is not None:
             b["indexes"][st["symbol"]]["ai"] = a
@@ -1211,7 +1263,7 @@ async def intraday_read(report: dict[str, Any], judge: "Judge") -> dict[str, Any
     ans = await judge.run_one(st, J.INTRADAY_DIRECTION_QUESTIONS)
     return _clean({"at": datetime.now(tz=config.ET).isoformat(), "date": datetime.now(tz=config.ET).date().isoformat(), "facts": st, "ai": ans,
                    "expected": (ans or {}).get("direction", {}).get("choice"), "confidence": (ans or {}).get("direction", {}).get("confidence"),
-                   "driver": (ans or {}).get("driver", {}).get("choice")})
+                   "driver": (ans or {}).get("driver", {}).get("choice"), "source": judge.source})
 
 
 def score_direction(expected: str, move_pct: float | None, flat_band: float = 0.15) -> int | None:

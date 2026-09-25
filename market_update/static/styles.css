@@ -1688,3 +1688,6 @@ tr.day-detail td { background: var(--surface-2); }
 .al-th input { width: 72px; min-height: 36px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
 .modal-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 @media (max-width: 700px) { .al-row { grid-template-columns: 1fr; } .modal-card { padding: 16px; } }
+
+/* backup-read badge (rules answered instead of the model) */
+.src-badge{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.02em;text-transform:none;vertical-align:middle;color:var(--caution,#E8BD68);background:rgba(232,189,104,.12);border:1px solid rgba(232,189,104,.35)}
