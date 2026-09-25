@@ -1821,7 +1821,41 @@ tr.day-detail td { background: var(--surface-2); }
 .desk .tv-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;color:var(--text-2)}
 .desk .scan .seg{margin-bottom:10px}
 .src-badge.tv{color:#85A7FF;background:rgba(36,91,255,.14);border-color:rgba(133,167,255,.45)}
+/* retro digital readout: LED-panel strip in the site palette */
+.desk .readout{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 0 var(--desk-gap)}
+.desk .ro{background:#0B1322;background-image:radial-gradient(rgba(255,255,255,.035) 1px,transparent 1px);background-size:6px 6px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.desk .ro-l{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.desk .ro-v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:20px;font-weight:700;letter-spacing:.06em;line-height:1;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desk .ro-v.digit{font-size:24px;letter-spacing:.12em}
+.desk .ro-v i{font-style:normal;font-size:13px;color:var(--muted);letter-spacing:.04em}
+.desk .ro-v.up{color:var(--up)}.desk .ro-v.down{color:var(--down)}.desk .ro-v.flat{color:var(--warn)}
+/* segment meters: lit cells against unlit ones, like an LED bar */
+.desk .meter-cells i{background:#1A2538;box-shadow:inset 0 0 0 1px rgba(255,255,255,.03)}
+.desk .meter-cells i.up{background:var(--up);box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}.desk .meter-cells i.down{background:var(--down);box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}.desk .meter-cells i.zero{background:var(--warn);box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}
+.desk .tot,.desk .meter-n,.desk .mono{font-variant-numeric:tabular-nums}
+/* right column: run panel + collapsible legend */
+.desk .right-col{display:grid;gap:var(--desk-gap);align-content:start}
+.desk .run-list{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:8px}
+.desk .run-list li{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:start;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.desk .run-list li:last-child{border-bottom:0;padding-bottom:0}
+.desk .run-names{display:flex;flex-wrap:wrap;gap:4px 8px;font-family:var(--mono);font-size:12.5px}
+.desk .run-names b{cursor:pointer;border-bottom:1px dotted var(--line-2)}
+.desk .run-names b:hover{color:var(--brand-text);border-color:var(--brand-text)}
+.desk .run-why{grid-column:2;font-size:11px;color:var(--muted)}
+.desk details.howto summary{list-style:none;cursor:pointer}
+.desk details.howto summary::-webkit-details-marker{display:none}
+.desk details.howto summary h3{margin:0}
+.desk details.howto summary h3::after{content:"+";margin-left:auto;color:var(--muted);font-weight:400}
+.desk details.howto[open] summary h3::after{content:"−"}
+.desk details.howto[open] summary h3{margin-bottom:8px}
+/* institution view */
+.desk .pro-toggle{font:inherit;font-size:11.5px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text-2);cursor:pointer;transition:all .2s cubic-bezier(.16,1,.3,1)}
+.desk .pro-toggle.on{color:var(--brand-text);border-color:rgba(133,167,255,.5);background:var(--brand-tint)}
+.desk .pro-toggle:active{transform:scale(.98)}
+.desk .col-pro{font-size:11.5px}
+.desk th.col-pro{white-space:nowrap}
 @media (max-width: 900px){
+  .desk .readout{grid-template-columns:repeat(3,minmax(0,1fr))}
   .desk .desk-top{grid-template-columns:1fr}
   .desk .gauges{grid-template-columns:repeat(2,minmax(0,1fr))}
   .desk .dd-grid{grid-template-columns:1fr}
@@ -1861,4 +1895,9 @@ tr.day-detail td { background: var(--surface-2); }
   .desk .legend-scale{grid-template-columns:auto 1fr;gap:6px 10px}
   .desk .dd-ind{grid-template-columns:1fr}
   .desk .scan .desk-tbl tr.desk-row{grid-template-areas:"sym sym price" "t m mac" "total read read"}
+  .desk .readout{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .desk .ro-v.digit{font-size:20px}
+  .desk .desk-tbl td.col-pro{display:none}
+  .desk .run-list li{grid-template-columns:1fr}
+  .desk .run-why{grid-column:1}
 }

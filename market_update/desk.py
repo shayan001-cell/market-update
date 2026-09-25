@@ -43,6 +43,33 @@ DECISIONS: dict[str, dict[str, str]] = {
 PILLAR_WORDS = {2: "strong", 1: "positive", 0: "neutral", -1: "weak", -2: "negative"}
 
 
+def _stats(frame, spy_closes: list[float]) -> dict[str, Any]:
+    """What a desk looks at beside the score: relative strength against SPY, volume against normal,
+    money traded per day, distance from the 52-week high, stretch above the 20-day line."""
+    out: dict[str, Any] = {}
+    if frame is None or "Close" not in frame:
+        return out
+    close = [float(x) for x in frame["Close"].dropna().tolist()]
+    vol = [float(x) for x in frame["Volume"].fillna(0).tolist()] if "Volume" in frame else []
+    high = [float(x) for x in frame["High"].dropna().tolist()] if "High" in frame else close
+    def ret(series, n):
+        return (series[-1] / series[-1 - n] - 1) * 100 if len(series) > n and series[-1 - n] else None
+    r1, r3 = ret(close, 21), ret(close, 63)
+    s1, s3 = ret(spy_closes, 21), ret(spy_closes, 63)
+    out["ret_1m"] = round(r1, 1) if r1 is not None else None
+    out["ret_3m"] = round(r3, 1) if r3 is not None else None
+    out["rel_1m"] = round(r1 - s1, 1) if r1 is not None and s1 is not None else None
+    out["rel_3m"] = round(r3 - s3, 1) if r3 is not None and s3 is not None else None
+    if len(vol) >= 22 and sum(vol[-21:-1]) > 0:
+        out["vol_ratio"] = round(vol[-1] / (sum(vol[-21:-1]) / 20), 2)
+    if len(vol) >= 21 and len(close) >= 21:
+        out["dollar_vol"] = round(sum(c * v for c, v in zip(close[-20:], vol[-20:])) / 20)
+    if high:
+        hi = max(high[-252:])
+        out["pct_from_hi52"] = round((close[-1] / hi - 1) * 100, 1) if hi else None
+    return out
+
+
 def _closes(frame) -> list[float]:
     if frame is None or "Close" not in frame:
         return []
@@ -123,9 +150,14 @@ def build_desk(report: dict[str, Any], extra: list[str] | None = None) -> dict[s
     for t, n in config.SECTOR_ETFS.items():
         names.setdefault(t, {"name": n, "kind": "ETF"})
     cards = []
+    spy_closes = series.get("SPY") or []
+    earnings = {st["ticker"]: (st.get("fundamentals") or {}).get("days_to_earnings") for st in report.get("stocks") or []}
     for sym in universe:
         c = _card(sym, series.get(sym) or [], macro_score, names.get(sym) or {})
         if c:
+            c["stats"] = _stats(fetch.frame_for(hist, sym), spy_closes)
+            if isinstance(earnings.get(sym), int):
+                c["stats"]["days_to_earnings"] = earnings[sym]
             cards.append(c)
     order = {"re_entry": 0, "tactical_rebound": 1, "hold_ride": 2, "wait": 3, "observe": 4, "hold_review": 5, "exit_trim": 6, "stay_out": 7, "exit": 8}
     cards.sort(key=lambda c: (order.get(c["flat"]["code"], 9), -c["total"], c["ticker"]))
@@ -154,6 +186,9 @@ def rescore(desk: dict[str, Any], pulled: dict[str, dict[str, Any]]) -> list[dic
         if not c:
             continue
         c["as_of"] = v.get("as_of")
+        for k in ("stats", "sector", "index", "bucket", "market_cap"):
+            if old.get(k) is not None:
+                c[k] = old[k]
         out.append(c)
         if desk.get("cards") is not None:
             if sym in by:
@@ -217,6 +252,7 @@ def scan_mid_to_mega(report: dict[str, Any]) -> dict[str, Any]:
         if not c:
             continue
         usable += 1
+        c["stats"] = _stats(fetch.frame_for(hist, sym), series.get("SPY") or [])
         c["sector"] = m.get("sector") or ""
         c["index"] = m["index"]
         c["bucket"] = _cap_bucket(sym, m["index"], caps)

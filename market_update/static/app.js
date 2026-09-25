@@ -1777,8 +1777,13 @@
     renderGate();
   }
 
+  let lastRenderedView = null;
   function renderAll() {
     const r = report;
+    // same view re-render: do not jump to the top. Whatever scrolls (window, main, or a wrapper) keeps its place.
+    const scrollers = []; for (let el = $("#app"); el; el = el.parentElement) { if (el.scrollTop > 0) scrollers.push([el, el.scrollTop]); }
+    const viewEl = $("#app .view");   // the view pane is the real scroller and is rebuilt on every render
+    const keepY = lastRenderedView === currentView ? { win: window.scrollY, els: scrollers, view: viewEl ? viewEl.scrollTop : 0 } : null;
     ensureLists(r); seedQuotes(r);
     destroyCharts();
     $("#session-line").textContent = r.session_label.split(",")[0] + " " + r.session_date.slice(5).replace("-", "/");
@@ -1795,6 +1800,8 @@
     if (sub) { sub.innerHTML = `${esc(r.session_label.split(",")[0])} ${esc(r.session_date.slice(5).replace("-", "/"))} · report ${esc(r.generated_at.slice(11, 16))} ET · <span data-qstamp>${quoteStamp()}</span>`; }
     app.innerHTML = viewHtml(r);
     firstRender = false;
+    if (keepY != null) { window.scrollTo(0, keepY.win); keepY.els.forEach(([el, y]) => { el.scrollTop = y; }); const nv = $("#app .view"); if (nv && keepY.view) nv.scrollTop = keepY.view; }
+    lastRenderedView = currentView;
     const st = r.ai_stats;
     $("#footer").innerHTML = `<div class="foot">Prices: Yahoo Finance, 15-minute delayed · change is versus the prior close · report built ${r.generated_at.slice(11, 16)} ET${r.ai_enabled ? "" : " · model reads off this build"} · OneView is information, not advice.</div>`;
     mountCharts();
@@ -1930,12 +1937,13 @@
     const bucketWord = { mega: "Mega cap", large: "Large cap", mid: "Mid cap" };
     const capTxt = isNum(c.market_cap) ? (c.market_cap >= 1e12 ? "$" + (c.market_cap / 1e12).toFixed(1) + "T" : "$" + (c.market_cap / 1e9).toFixed(0) + "B") : "";
     const extra = o.scan ? `<td class="col-size small">${esc(bucketWord[c.bucket] || c.bucket || "")}${capTxt ? `<div class="meta2">${capTxt}</div>` : ""}</td><td class="col-sector small">${esc(c.sector || "")}</td>` : "";
-    const cols = o.scan ? 9 : 8;
+    const cols = (o.scan ? 9 : 8) + (o.pro ? 6 : 0);
     const kv = [["Price", fnum(c.price)], ["20-day line", fnum(ind.ema20)], ["50-day line", fnum(ind.ema50)], ["200-day line", fnum(ind.ema200)], ["RSI (14)", isNum(ind.rsi14) ? ind.rsi14.toFixed(0) : "–"], ["MACD histogram", isNum(ind.macd_hist) ? ind.macd_hist.toFixed(2) : "–"], ["Stretch vs 20-day", fpct(fl.stretch_pct, 1)], ["Bollinger %B", isNum(ind.percent_b) ? ind.percent_b.toFixed(2) : "–"], ["Daily bars", c.n_bars || "–"]];
     return `<tr class="desk-row ${open ? "open" : ""}" data-desk-open="${esc(key)}" data-sym="${esc(c.ticker)}"><td class="sym"><b>${esc(c.ticker)}</b><div class="meta2">${esc(c.name || "")}</div></td>${extra}
         <td class="num mono col-price">${fnum(c.price)}</td>
         <td class="col-meter" data-l="Trend">${pillarMeter(c.trend.score)}</td><td class="col-meter" data-l="Momentum">${pillarMeter(c.momentum.score)}</td><td class="col-meter col-macro" data-l="Macro">${pillarMeter(c.macro)}</td>
         <td class="num col-total"><span class="tot ${c.total > 0 ? "up" : c.total < 0 ? "down" : ""}">${c.total > 0 ? "+" : ""}${c.total}</span>${o.max != null ? `<span class="tot-max">/ ${o.max > 0 ? "+" : ""}${o.max}</span>` : ""}</td>
+        ${o.pro ? proCells(c) : ""}
         <td class="col-read"><span class="pill ${dec.cls}">${esc(dec.word)}</span>${c.source === "tradingview" ? ' <span class="src-badge tv" title="Scored on daily bars read from TradingView Desktop">TV</span>' : ""}${fl.death_cross ? ' <span class="tag warn" title="50-day line below the 200-day line and price below the 50-day">downtrend</span>' : ""}</td>
         ${o.flatOnly ? "" : `<td class="col-you"><button class="hold-btn ${held ? "on" : ""}" type="button" data-desk-hold="${esc(c.ticker)}" title="Tell the desk which side you are on. The read changes between 'should I get in' and 'should I stay in'."><span class="hold-dot"></span>${held ? "I hold it" : "I'm flat"}</button></td>`}</tr>
         ${open ? `<tr class="desk-detail"><td colspan="${cols}"><div class="dd-grid">
@@ -1951,6 +1959,7 @@
     const btn = `<button class="btn primary" type="button" data-desk-scan ${running ? "disabled" : ""}>${running ? "Scanning…" : S && S.status === "ok" ? "Scan again" : "Scan mid to mega caps"}</button>`;
     let body = "";
     if (!S || S.status === "none") body = `<p class="lede">Runs the rulebook over every S&amp;P 500 and S&amp;P 400 name, about 900 stocks from mid cap to mega cap, and keeps the ones where trend and momentum are both positive. About a minute.</p>`;
+    else if (S.status === "loading") body = `<table class="tbl"><tbody>${skelRows(3, 9)}</tbody></table>`;
     else if (running) body = `<p class="lede">Downloading two years of daily bars for about 900 names and scoring them${S.started ? ` · ${Math.round(Date.now() / 1000 - S.started)} s` : ""}</p><table class="tbl"><tbody>${skelRows(4, 9)}</tbody></table>`;
     else if (S.status === "error") body = `<p class="lede down">The scan failed: ${esc(S.detail || "")}. Press the button to try again.</p>`;
     else if (S.status === "warming") body = `<p class="lede">The first report is still building; try again in a minute.</p>`;
@@ -1968,7 +1977,7 @@
         <div class="scan-hero"><div class="scan-n"><b>${S.strong_total}</b><span>strong of ${S.usable} scored</span></div><ul class="scan-meaning">${(S.meaning || []).map((m) => `<li>${esc(m)}</li>`).join("")}</ul></div>
         <div class="dist"><div class="dist-bar">${bar}</div><div class="dist-labels">${labels}</div><div class="meta2">How all ${S.usable} names score, from −4 on the left to +4 on the right. Strong names are the two right-hand groups.</div></div>
         <div class="seg">${filters.map(([k, l, n]) => `<button class="seg-btn ${deskScanFilter === k ? "active" : ""}" type="button" data-desk-scan-filter="${k}">${l}<em>${n}</em></button>`).join("")}</div>
-        <div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="col-size">Size</th><th class="col-sector">Sector</th><th class="num">Price</th><th class="col-meter">Trend</th><th class="col-meter">Momentum</th><th class="col-meter col-macro">Macro</th><th class="num">Total</th><th>Read</th></tr></thead><tbody>${rows.map((c) => deskRow(c, { scan: true, flatOnly: true, prefix: "scan:", max: S.max_total })).join("") || '<tr><td colspan="9" class="muted empty">Nothing in this group right now.</td></tr>'}</tbody></table></div>
+        <div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="col-size">Size</th><th class="col-sector">Sector</th><th class="num">Price</th><th class="col-meter">Trend</th><th class="col-meter">Momentum</th><th class="col-meter col-macro">Macro</th><th class="num">Total</th>${deskPro ? proHead() : ""}<th>Read</th></tr></thead><tbody>${rows.map((c) => deskRow(c, { scan: true, flatOnly: true, prefix: "scan:", max: S.max_total, pro: deskPro })).join("") || '<tr><td colspan="9" class="muted empty">Nothing in this group right now.</td></tr>'}</tbody></table></div>
         <div class="meta2">Universe: ${esc(S.universe || "")}. Kept: ${esc(S.criteria || "")}. Scanned ${esc((S.generated_at || "").slice(11, 16))} ET; a result is reused for 30 minutes. Click a row for the reasons.</div></div>`;
     }
     const tv = `<div class="tv-line"><span class="st-dot ${d.tv_available ? "up" : "none"}"></span>TradingView bridge ${d.tv_available ? "connected" : "not running"}${d.tv_available ? `<button class="btn sm ghost" type="button" data-desk-tv title="Reads daily bars from your TradingView chart for the names in view (up to ${d.tv_max || 12}) and re-scores them. About 12 seconds per name; your chart is restored afterwards.">Re-check the list on TradingView</button><span id="desk-tv-msg" class="muted"></span>` : `<span class="muted">open TradingView Desktop with its debug port on the server Mac</span>`}</div>`;
@@ -1986,6 +1995,15 @@
     return `<span class="meter" title="${n == null ? "no data" : (n > 0 ? "+" : "") + n + " on a scale from −2 to +2"}"><span class="meter-cells">${cells}</span><span class="meter-n ${n > 0 ? "up" : n < 0 ? "down" : ""}">${n == null ? "–" : n > 0 ? "+" + n : n}</span></span>`;
   }
   let deskFind = "";
+  let deskPro = false; try { deskPro = localStorage.getItem("mu-desk-pro") === "1"; } catch (e) {}
+  function proHead() { return `<th class="col-pro num" title="One-month return minus the S&amp;P 500's">vs S&amp;P 1m</th><th class="col-pro num" title="Three-month return minus the S&amp;P 500's">vs S&amp;P 3m</th><th class="col-pro num" title="Today's volume against the 20-day average">Vol ×</th><th class="col-pro num" title="Average money traded per day, last 20 days">$/day</th><th class="col-pro num" title="Distance below the 52-week high">52w</th><th class="col-pro num" title="Days to the next earnings report, when known">Earn</th>`; }
+  function proCells(c) {
+    const st = c.stats || {}; const rel = (x) => (isNum(x) ? `<span class="${x > 0 ? "up" : x < 0 ? "down" : ""}">${fpct(x, 1)}</span>` : "–");
+    const money = isNum(st.dollar_vol) ? (st.dollar_vol >= 1e9 ? "$" + (st.dollar_vol / 1e9).toFixed(1) + "B" : "$" + (st.dollar_vol / 1e6).toFixed(0) + "M") : "–";
+    const vr = isNum(st.vol_ratio) ? `<span class="${st.vol_ratio >= 1.5 ? "up" : st.vol_ratio < 0.7 ? "muted" : ""}">${st.vol_ratio.toFixed(1)}×</span>` : "–";
+    const earn = isNum(st.days_to_earnings) ? `<span class="${st.days_to_earnings <= 5 ? "down" : ""}">${st.days_to_earnings}d</span>` : "–";
+    return `<td class="col-pro num mono">${rel(st.rel_1m)}</td><td class="col-pro num mono">${rel(st.rel_3m)}</td><td class="col-pro num mono">${vr}</td><td class="col-pro num mono">${money}</td><td class="col-pro num mono">${isNum(st.pct_from_hi52) ? fpct(st.pct_from_hi52, 1) : "–"}</td><td class="col-pro num mono">${earn}</td>`;
+  }
   function applyDeskFind() { const q = deskFind.trim().toUpperCase(); document.querySelectorAll(".desk-main tr[data-sym]").forEach((tr) => { const hit = !q || tr.getAttribute("data-sym").includes(q) || (tr.querySelector(".meta2") || {}).textContent.toUpperCase().includes(q); tr.hidden = !hit; const det = tr.nextElementSibling; if (det && det.classList.contains("desk-detail")) det.hidden = !hit; }); }
   function secDesk() {
     if (STATIC_MODE) return `<section class="desk"><div class="panel empty-state"><h3>Trading desk</h3><p>The desk runs on the app server. Open the app link rather than the static copy.</p></div></section>`;
@@ -1994,6 +2012,7 @@
     const head = (meta) => `<div class="desk-head"><div><div class="kicker">Three scores per name · one fixed rulebook</div><p class="lede">Trend, momentum and the market backdrop, each from −2 to +2, turned into one read per name by a published rulebook. Information, not advice.</p></div><div class="desk-meta">${meta}</div></div>`;
     if (!d) { loadDesk(); return `<section class="desk">${head('<span class="muted">Loading…</span>')}<div class="panel"><table class="tbl"><tbody>${skelRows(6, 8)}</tbody></table></div></section>`; }
     if (d.status !== "ok") return `<section class="desk">${head('<span class="muted">Warming up</span>')}<div class="panel empty-state"><h3>First scorecards on the way</h3><p>They arrive about a minute after the first report build. This page refreshes on its own.</p></div></section>`;
+    if (isAdmin && deskScan === null) { deskScan = { status: "loading" }; loadDeskScan(false); }
     const m = d.macro || {}; const mc = m.pillar > 0 ? "up" : m.pillar < 0 ? "down" : "flat";
     const mine = new Set(((lists && lists.lists && lists.lists[lists.active]) || []).map((x) => (typeof x === "string" ? x : x.ticker || "").toUpperCase()));
     const byT = {}; (d.cards || []).forEach((c) => { byT[c.ticker] = c; });
@@ -2005,12 +2024,30 @@
     const gauges = (m.components || []).map((c) => `<li class="gauge ${!c.available ? "na" : c.signal > 0 ? "up" : c.signal < 0 ? "down" : "flat"}"><span class="g-arrow" aria-hidden="true">${!c.available ? "·" : c.signal > 0 ? "▲" : c.signal < 0 ? "▼" : "▬"}</span><span class="g-text"><span class="g-name">${esc(GAUGE_NAMES[c.ratio] || c.name)}</span><span class="g-detail">${c.available ? esc(gaugeDetail(c.detail)) : "no data"}</span></span><span class="g-code">${esc(c.ratio)}</span></li>`).join("");
     const counts = Object.entries(d.counts || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => { const w = (DESK_WORDS[k] || pretty(k)); return `<span class="cnt-chip"><b>${v}</b>${esc(w)}</span>`; }).join("");
     const maxTotal = isNum(m.pillar) ? 4 + m.pillar : null;
-    const rows = cards.map((c) => deskRow(c, { max: maxTotal })).join("");
+    const rows = cards.map((c) => deskRow(c, { max: maxTotal, pro: deskPro })).join("");
+    // your run today: what the rulebook says about the active list, grouped by what to do
+    const mineCards = (d.cards || []).filter((c) => mine.has(c.ticker));
+    const side = (c) => (deskHold[c.ticker] ? c.holding : c.flat);
+    const grp = (codes) => mineCards.filter((c) => codes.includes(side(c).code));
+    const runGroups = [["Act on", grp(["re_entry"]), "up", "bounce with healthy structure: confirm with a strong day and heavy trading"], ["Protect", grp(["exit_trim", "exit"]), "down", "you hold it and the rulebook says take profit or leave"], ["Careful", grp(["tactical_rebound", "hold_review"]), "caution", "quick bounce or weakening hold: small size, tight leash"], ["Sit tight", grp(["wait", "hold_ride"]), "flat", "healthy but no fresh trigger: wait for a pullback, or hold and watch"], ["Leave alone", grp(["stay_out", "observe"]), "flat", "nothing to do"]];
+    const weakening = mineCards.filter((c) => ((c.flags || {}).bearish || []).length >= 2 && !["stay_out", "exit", "exit_trim"].includes(side(c).code));
+    const runHtml = mineCards.length ? `<ol class="run-list">${runGroups.filter(([, xs]) => xs.length).map(([l, xs, cls, why]) => `<li><span class="pill ${cls}">${l}</span><span class="run-names">${xs.map((c) => `<b data-desk-jump="${esc(c.ticker)}">${esc(c.ticker)}</b>`).join(" ")}</span><span class="run-why">${why}</span></li>`).join("")}${weakening.length ? `<li><span class="pill caution">Watch</span><span class="run-names">${weakening.map((c) => `<b data-desk-jump="${esc(c.ticker)}">${esc(c.ticker)}</b>`).join(" ")}</span><span class="run-why">two or more weakness signals showing</span></li>` : ""}</ol>` : `<p class="muted">Add names to ${esc(lists && lists.active ? lists.active : "your list")} and this becomes your daily run: what to act on, protect, and leave alone.</p>`;
+    const strongMine = mineCards.filter((c) => c.trend.score >= 1 && c.momentum.score >= 1).length;
+    const fresh = (d.counts || {}).re_entry || 0;
+    const readout = `<div class="readout" aria-label="desk readout">
+      <div class="ro"><span class="ro-l">Regime</span><span class="ro-v ${mc}">${esc((m.regime || "–").toUpperCase())}</span></div>
+      <div class="ro"><span class="ro-l">Macro</span><span class="ro-v digit ${mc}">${m.pillar == null ? "--" : (m.pillar > 0 ? "+" : m.pillar < 0 ? "" : " ") + m.pillar}</span></div>
+      <div class="ro"><span class="ro-l">${esc(lists && lists.active ? lists.active : "My list")} strong</span><span class="ro-v digit">${String(strongMine).padStart(2, "0")}<i>/${String(mineCards.length).padStart(2, "0")}</i></span></div>
+      <div class="ro"><span class="ro-l">Fresh entries</span><span class="ro-v digit up">${String(fresh).padStart(3, "0")}</span></div>
+      <div class="ro"><span class="ro-l">Names scored</span><span class="ro-v digit">${String((d.cards || []).length).padStart(3, "0")}</span></div>
+      <div class="ro"><span class="ro-l">Updated</span><span class="ro-v digit">${esc((d.generated_at || "").slice(11, 16) || "--:--")}</span></div>
+    </div>`;
     const empty = deskScope === "mine"
       ? `<tr><td colspan="8"><div class="empty-state inline"><h3>Nothing from ${esc(lists && lists.active ? lists.active : "your list")} is scored yet</h3><p>Add names on the Watchlist page; the desk picks them up on its next pass (every 30 minutes in market hours).</p><a class="btn sm ghost" href="#view=watch" data-view-link="watch">Open the watchlist</a></div></td></tr>`
       : `<tr><td colspan="8" class="muted empty">No names in this group.</td></tr>`;
     return `<section class="desk">
       ${head(`<span class="st-dot up"></span>Updated ${esc((d.generated_at || "").slice(11, 16))} ET · every 30 min in market hours · daily bars, today included`)}
+      ${readout}
       <div class="desk-top">
         <div class="panel backdrop">
           <h3>Market backdrop <span class="muted">one score shared by every name</span></h3>
@@ -2018,8 +2055,9 @@
           <p class="bd-plain">${esc(m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are moving together, the inflation flag." : ""}</p>
           <ul class="gauges">${gauges}</ul>
         </div>
-        <div class="panel howto">
-          <h3>How to read it</h3>
+        <div class="right-col">
+        <div class="panel run"><h3>Your run today <span class="muted">${esc(lists && lists.active ? lists.active : "my list")}</span></h3>${runHtml}</div>
+        <details class="panel howto"><summary><h3>How to read it</h3></summary>
           <dl class="legend-list">
             <div><dt>Trend</dt><dd>Price against its 20-, 50- and 200-day lines, and which way the 200-day is sloping.</dd></div>
             <div><dt>Momentum</dt><dd>RSI, the MACD histogram and TRIX: is the move still gaining or fading.</dd></div>
@@ -2028,16 +2066,18 @@
           <div class="legend-scale">${pillarMeter(-2)}<span>negative</span>${pillarMeter(0)}<span>neutral</span>${pillarMeter(2)}<span>strong</span></div>
           <div class="legend-reads">${[["re_entry", "up"], ["hold_ride", "up"], ["wait", "flat"], ["tactical_rebound", "caution"], ["exit_trim", "down"], ["stay_out", "down"]].map(([k, cls]) => `<span class="pill ${cls}">${esc(DESK_WORDS[k])}</span>`).join("")}</div>
           <p class="meta2">Total runs from −6 to +6; today's best possible is ${maxTotal == null ? "–" : (maxTotal > 0 ? "+" : "") + maxTotal} because the macro score is ${m.pillar > 0 ? "+" : ""}${m.pillar == null ? "–" : m.pillar}. Switch "I'm flat / I hold it" on a row to see the read from your side of the trade.</p>
+        </details>
         </div>
       </div>
       ${isAdmin ? secDeskScan(d) : ""}
       <div class="desk-tools">
         <div class="seg">${scopes.map(([k, l, n]) => `<button class="seg-btn ${deskScope === k ? "active" : ""}" type="button" data-desk-scope="${k}">${esc(l)}<em>${n}</em></button>`).join("")}</div>
         <label class="find"><input type="search" placeholder="Find a name" value="${esc(deskFind)}" data-desk-find autocomplete="off"></label>
+        <button class="pro-toggle ${deskPro ? "on" : ""}" type="button" data-desk-pro title="Adds what a desk checks beside the score: strength against the S&P 500, volume against normal, money traded per day, distance from the 52-week high, days to earnings">${deskPro ? "Institution view on" : "Institution view"}</button>
         <div class="counts">${counts}</div>
       </div>
       ${missing.length ? `<div class="meta2 missing">Not scored yet (fewer than 60 daily bars, or not in this pass): ${missing.map(esc).join(", ")}</div>` : ""}
-      <div class="panel desk-main"><div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="num">Price</th><th class="col-meter">Trend</th><th class="col-meter">Momentum</th><th class="col-meter col-macro">Macro</th><th class="num">Total</th><th>Read</th><th class="col-you">Your side</th></tr></thead><tbody>${rows || empty}</tbody></table></div></div>
+      <div class="panel desk-main"><div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="num">Price</th><th class="col-meter">Trend</th><th class="col-meter">Momentum</th><th class="col-meter col-macro">Macro</th><th class="num">Total</th>${deskPro ? proHead() : ""}<th>Read</th><th class="col-you">Your side</th></tr></thead><tbody>${rows || empty}</tbody></table></div></div>
       <p class="desk-foot muted">Framework and maths: <a href="${esc((d.source || {}).url || "#")}" target="_blank" rel="noopener">Agentic Trading Desk</a> by ${esc((d.source || {}).author || "")}, open source (MIT), run on OneView data and shown as information. OneView never places orders. Every read here is logged and scored in the Track record.</p>
     </section>`;
   }
@@ -2194,6 +2234,8 @@
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
     document.querySelectorAll("[data-desk-hold]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleHold(b.getAttribute("data-desk-hold")); }));
     document.querySelectorAll("[data-desk-open]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-desk-open"); deskOpen = deskOpen === t ? null : t; renderAll(); }));
+    const pt = $("[data-desk-pro]"); if (pt) pt.addEventListener("click", () => { deskPro = !deskPro; try { localStorage.setItem("mu-desk-pro", deskPro ? "1" : "0"); } catch (e) {} renderAll(); });
+    document.querySelectorAll("[data-desk-jump]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); const t = b.getAttribute("data-desk-jump"); deskScope = "mine"; deskOpen = t; renderAll(); const row = document.querySelector(`.desk-main tr[data-sym="${t}"]`); if (row) row.scrollIntoView({ block: "center", behavior: "smooth" }); }));
     const fb = $("[data-desk-find]"); if (fb) { fb.addEventListener("input", () => { deskFind = fb.value; applyDeskFind(); }); if (deskFind) applyDeskFind(); }
     const scb = $("[data-desk-scan]"); if (scb) scb.addEventListener("click", () => { deskScan = { status: "running", started: Date.now() / 1000 }; renderAll(); loadDeskScan(true); });
     document.querySelectorAll("[data-desk-scan-filter]").forEach((b) => b.addEventListener("click", () => { deskScanFilter = b.getAttribute("data-desk-scan-filter"); renderAll(); }));
