@@ -394,6 +394,10 @@ def _score_day(day: str, close_brief: dict[str, Any]) -> dict[str, Any]:
     tot = db.score_day_directions(day, close_spy or 0, close_qqq or 0, score_direction) if close_spy and close_qqq else {"n": 0, "hits": 0, "scored": 0}
     if close_spy and close_qqq:
         db.score_analysis(day, {"SPY": close_spy, "QQQ": close_qqq}, score_direction)
+    try:
+        _fill_paths(day)
+    except Exception:  # noqa: BLE001
+        log.exception("could not fill the 15/30/60-minute paths")
     reads = db.day_directions(day)
     morning = (state.get("briefs") or {}).get("morning") or {}
     m_call = (((morning.get("indexes") or {}).get("SPY") or {}).get("ai") or {}).get("next_move", {}).get("choice")
@@ -408,9 +412,100 @@ def _score_day(day: str, close_brief: dict[str, Any]) -> dict[str, Any]:
             "how": "Each 15-minute read is a hit when SPY closed on the side it expected (sideways: within 0.15% of the read price). The morning call is scored the same way against the full day."}
 
 
+def _spy_price_at_factory(day: str):
+    """`price_at(ts)` over SPY 5-minute bars for the day: the close of the last bar at or before ts."""
+    try:
+        bars = fetch.download(["SPY"], period="5d", interval="5m", prepost=False)
+        f = fetch.frame_for(bars, "SPY")
+    except Exception:  # noqa: BLE001
+        f = None
+    if f is None or f.empty or "Close" not in f:
+        return lambda ts: None
+    idx = [x.timestamp() for x in f.index]
+    closes = [float(c) for c in f["Close"]]
+    import bisect
+    def price_at(ts: float):
+        i = bisect.bisect_right(idx, ts) - 1
+        if i < 0 or ts - idx[i] > 20 * 60:       # no bar within 20 minutes: market was closed
+            return None
+        return closes[i]
+    return price_at
+
+
+def _fill_paths(day: str) -> int:
+    from .analyze import score_direction
+    return db.fill_direction_paths(day, _spy_price_at_factory(day), score_direction)
+
+
+def _score_pending_days() -> int:
+    """Safety net: score any past day whose reads never got a close score (the close briefing did not run)."""
+    from .analyze import score_direction
+    now = fetch.now_et()
+    today = now.date().isoformat()
+    after_close = now.hour * 60 + now.minute >= 16 * 60 + 10 and now.weekday() < 5
+    days = db.unscored_direction_days((now.date() + timedelta(days=1)).isoformat() if after_close else today)
+    if not days:
+        return 0
+    hist = fetch.download(["SPY", "QQQ"], period="1mo", interval="1d")
+    n = 0
+    for day in days:
+        try:
+            fs, fq = fetch.frame_for(hist, "SPY"), fetch.frame_for(hist, "QQQ")
+            cs = next((float(c) for d, c in zip(fs.index.date, fs["Close"]) if d.isoformat() == day), None) if fs is not None else None
+            cq = next((float(c) for d, c in zip(fq.index.date, fq["Close"]) if d.isoformat() == day), None) if fq is not None else None
+            if day == today and (not cs or not cq):
+                q = fetch.fetch_quotes(["SPY", "QQQ"])
+                cs, cq = (q.get("SPY") or {}).get("last"), (q.get("QQQ") or {}).get("last")
+            if cs and cq:
+                db.score_day_directions(day, cs, cq, score_direction)
+                db.score_analysis(day, {"SPY": cs, "QQQ": cq}, score_direction)
+                _fill_paths(day)
+                n += 1
+                log.info("scored pending direction reads for %s at SPY %.2f", day, cs)
+        except Exception:  # noqa: BLE001
+            log.exception("pending scoring failed for %s", day)
+    return n
+
+
+def _lessons(stats: dict[str, Any]) -> list[str]:
+    """Plain-word takeaways from the scored history: what worked, what did not. Needs scored reads."""
+    out: list[str] = []
+    rate = lambda x: (x.get("hits") or 0) / x["scored"] * 100 if x.get("scored") else None
+    tot = stats.get("totals") or {}
+    if (tot.get("scored") or 0) < 10:
+        return [f"Only {tot.get('scored') or 0} reads scored so far; lessons need at least 10. Every read is being logged and scored at the close and one hour on."]
+    out.append(f"{tot['scored']} reads scored over the window: {round(rate(tot))}% right at the close, {round((tot.get('hits_60') or 0) / tot['scored_60'] * 100) if tot.get('scored_60') else 0}% right one hour later.")
+    def best_worst(rows, label, key):
+        rows = [r for r in rows if (r.get("scored") or 0) >= 5]
+        if len(rows) < 2:
+            return
+        rows.sort(key=lambda r: rate(r))
+        w, b = rows[0], rows[-1]
+        out.append(f"{label}: '{str(b[key]).replace('_', ' ')}' worked best ({round(rate(b))}% of {b['scored']}); '{str(w[key]).replace('_', ' ')}' worked worst ({round(rate(w))}% of {w['scored']}).")
+    best_worst(stats.get("by_driver") or [], "By reason", "driver")
+    best_worst(stats.get("by_expected") or [], "By call", "expected")
+    best_worst(stats.get("by_hour") or [], "By hour (ET)", "hour")
+    conf = {r["conviction"]: r for r in stats.get("by_conviction") or []}
+    if conf.get("high", {}).get("scored", 0) >= 5 and conf.get("low", {}).get("scored", 0) >= 5:
+        hi, lo = rate(conf["high"]), rate(conf["low"])
+        out.append(f"Conviction {'is' if hi > lo + 5 else 'is not'} informative: HIGH reads {round(hi)}% right vs LOW reads {round(lo)}%.")
+    src = {r["source"]: r for r in stats.get("by_source") or []}
+    if src.get("rules", {}).get("scored", 0) >= 5 and src.get("model", {}).get("scored", 0) >= 5:
+        out.append(f"Model reads {round(rate(src['model']))}% right vs backup rules {round(rate(src['rules']))}%.")
+    return out
+
+
 async def direction_loop() -> None:
     """Every 15 minutes of the regular session: a technicals-plus-mood read on where the market goes into the close."""
     from .analyze import Judge, intraday_read
+    if not state.get("direction_at"):
+        # after a restart, continue the 15-minute rhythm from the last stored read instead of reading again at once
+        try:
+            last = db.day_directions(fetch.now_et().date().isoformat())
+            if last:
+                state["direction_at"] = float(last[-1]["ts"])
+        except Exception:  # noqa: BLE001
+            pass
     while True:
         try:
             if state.get("report") and fetch.market_state() == "open" and time.time() - state.get("direction_at", 0) >= 15 * 60:
@@ -418,9 +513,66 @@ async def direction_loop() -> None:
                 read["id"] = db.log_direction(read)
                 state["direction"] = read; state["direction_at"] = time.time()
                 log.info("direction read: %s (%.2f) %s", read.get("expected"), read.get("confidence") or 0, read.get("driver"))
+                await asyncio.to_thread(_fill_paths, read.get("date") or fetch.now_et().date().isoformat())
+            elif fetch.market_state() != "open" and time.time() - state.get("pending_scored_at", 0) >= 3600:
+                state["pending_scored_at"] = time.time()
+                await asyncio.to_thread(_score_pending_days)
+                await asyncio.to_thread(_fill_paths, fetch.now_et().date().isoformat())
         except Exception:  # noqa: BLE001
             log.exception("direction read failed")
         await asyncio.sleep(60)
+
+
+@app.get("/api/direction/check")
+async def api_direction_check(request: Request, day: str = "") -> JSONResponse:
+    """Intraday check: every read of the day, what SPY has done since each one, and the scored history
+    broken down so we can see what works. Signed-in users only (the public track record stays public)."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in")
+    from .analyze import score_direction
+    today = fetch.now_et().date().isoformat()
+    day = day or today
+    reads = await asyncio.to_thread(db.day_directions, day)
+    ms = fetch.market_state()
+    q = fetch.fetch_quotes(["SPY", "QQQ"]) if day == today else {}
+    spy_now = (q.get("SPY") or {}).get("last"); spy_chg = (q.get("SPY") or {}).get("change_pct")
+    qqq_now = (q.get("QQQ") or {}).get("last"); qqq_chg = (q.get("QQQ") or {}).get("change_pct")
+    for r in reads:
+        ref = r.get("close_spy") or (spy_now if day == today else None)
+        r["move_now"] = (ref / r["spy"] - 1) * 100 if ref and r.get("spy") else None
+        live = score_direction(r["expected"], r["move_now"]) if r.get("expected") else None
+        if live is not None and r["expected"] != "sideways" and abs(r["move_now"] or 0) < 0.05:
+            live_status = "flat"                      # too small to call either way yet
+        else:
+            live_status = {1: "on_track", 0: "against"}.get(live, "pending")
+        r["status"] = ("no_read" if not r.get("expected") else "hit" if r.get("hit") == 1 else "miss" if r.get("hit") == 0 else live_status)
+    on_track = sum(1 for r in reads if r["status"] in ("on_track", "hit"))
+    judged = sum(1 for r in reads if r["status"] in ("on_track", "against", "hit", "miss"))
+    morning = (state.get("briefs") or {}).get("morning") if day == today else None
+    if not morning:
+        try:
+            fpath = _brief_file(day, "morning")
+            morning = json.loads(fpath.read_text()) if fpath.exists() else None
+        except Exception:  # noqa: BLE001
+            morning = None
+    m_idx = ((morning or {}).get("indexes") or {})
+    m_call = {sym: (((m_idx.get(sym) or {}).get("ai") or {}).get("next_move") or {}).get("choice") for sym in ("SPY", "QQQ")}
+    m_expected = {"push_higher": "higher", "rebound": "higher", "break_lower": "lower", "pullback_then_higher": "lower", "range_bound": "sideways"}
+    morning_row = {"call": m_call, "expected": m_expected.get(m_call.get("SPY")), "source": (morning or {}).get("source"),
+                   "status": {1: "on_track", 0: "against"}.get(score_direction(m_expected.get(m_call.get("SPY")), spy_chg), "pending") if m_call.get("SPY") else "none"}
+    stats = await asyncio.to_thread(db.direction_stats, 30)
+    close = None
+    try:
+        fpath = _brief_file(day, "close")
+        close = (json.loads(fpath.read_text()) or {}).get("scorecard") if fpath.exists() else None
+    except Exception:  # noqa: BLE001
+        close = None
+    return JSONResponse({"day": day, "market_state": ms, "spy": {"last": spy_now, "chg_pct": spy_chg}, "qqq": {"last": qqq_now, "chg_pct": qqq_chg},
+                         "reads": reads, "summary": {"reads": len(reads), "no_read": sum(1 for r in reads if r["status"] == "no_read"), "on_track": on_track, "judged": judged,
+                                                     "scored": sum(1 for r in reads if r.get("hit") is not None), "hits": sum(1 for r in reads if r.get("hit") == 1)},
+                         "morning": morning_row, "close": close, "stats": stats, "lessons": _lessons(stats),
+                         "how": "A read is on track while SPY is on the side it called (sideways: within 0.15% of the read price). It is scored for good at the close, and again one hour after the read, so we learn which reasons and hours work."},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/direction/day")

@@ -145,6 +145,11 @@ def _migrate(con: sqlite3.Connection) -> None:
     cols_users = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     if "brief_opt_out" not in cols_users:
         con.execute("ALTER TABLE users ADD COLUMN brief_opt_out INTEGER NOT NULL DEFAULT 0")
+    if con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'direction_reads'").fetchone():
+        dcols = {r[1] for r in con.execute("PRAGMA table_info(direction_reads)")}
+        for col, typ in (("source", "TEXT"), ("move_15", "REAL"), ("move_30", "REAL"), ("move_60", "REAL"), ("hit_60", "INTEGER")):
+            if col not in dcols:
+                con.execute(f"ALTER TABLE direction_reads ADD COLUMN {col} {typ}")
     cols = {r["name"] for r in con.execute("PRAGMA table_info(users)")}
     if "name" not in cols:
         con.execute("ALTER TABLE users ADD COLUMN name TEXT")
@@ -444,14 +449,14 @@ def log_direction(read: dict[str, Any]) -> int:
     import json as _json
     f = read.get("facts") or {}
     with connect() as con:
-        cur = con.execute("INSERT INTO direction_reads(ts, day, spy, qqq, expected, confidence, driver, facts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                          (time.time(), read.get("date"), (f.get("spy") or {}).get("last"), (f.get("qqq") or {}).get("last"), read.get("expected"), read.get("confidence"), read.get("driver"), _json.dumps(f)))
+        cur = con.execute("INSERT INTO direction_reads(ts, day, spy, qqq, expected, confidence, driver, facts, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          (time.time(), read.get("date"), (f.get("spy") or {}).get("last"), (f.get("qqq") or {}).get("last"), read.get("expected"), read.get("confidence"), read.get("driver"), _json.dumps(f), read.get("source")))
         return int(cur.lastrowid)
 
 
 def day_directions(day: str) -> list[dict[str, Any]]:
     with connect() as con:
-        return [dict(r) for r in con.execute("SELECT id, ts, spy, qqq, expected, confidence, driver, move_spy_pct, move_qqq_pct, hit FROM direction_reads WHERE day = ? ORDER BY ts", (day,))]
+        return [dict(r) for r in con.execute("SELECT id, ts, spy, qqq, expected, confidence, driver, source, move_15, move_30, move_60, hit_60, move_spy_pct, move_qqq_pct, close_spy, hit FROM direction_reads WHERE day = ? ORDER BY ts", (day,))]
 
 
 def score_day_directions(day: str, close_spy: float, close_qqq: float, scorer) -> dict[str, Any]:
@@ -469,12 +474,55 @@ def score_day_directions(day: str, close_spy: float, close_qqq: float, scorer) -
 
 
 def direction_stats(days: int = 30) -> dict[str, Any]:
+    """Hit rates by day, answer, driver, hour of day, engine and conviction band, at the close and one hour on."""
     since = time.time() - days * 86400
+    agg = ("COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, "
+           "SUM(CASE WHEN hit_60 = 1 THEN 1 ELSE 0 END) AS hits_60, SUM(CASE WHEN hit_60 IS NOT NULL THEN 1 ELSE 0 END) AS scored_60, "
+           "AVG(move_spy_pct) AS avg_move, AVG(move_60) AS avg_move_60")
     with connect() as con:
-        by_day = [dict(r) for r in con.execute("SELECT day, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored FROM direction_reads WHERE ts >= ? GROUP BY day ORDER BY day DESC", (since,))]
-        by_expected = [dict(r) for r in con.execute("SELECT expected, COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, AVG(move_spy_pct) AS avg_move FROM direction_reads WHERE ts >= ? GROUP BY expected", (since,))]
-        tot = dict(con.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored FROM direction_reads WHERE ts >= ?", (since,)).fetchone())
-    return {"by_day": by_day, "by_expected": by_expected, "totals": tot, "days": days}
+        q = lambda group, label: [dict(r) for r in con.execute(f"SELECT {group} AS {label}, {agg} FROM direction_reads WHERE ts >= ? AND expected IS NOT NULL GROUP BY {group} ORDER BY {label}", (since,))]
+        by_day = [dict(r) for r in con.execute(f"SELECT day, {agg} FROM direction_reads WHERE ts >= ? GROUP BY day ORDER BY day DESC", (since,))]
+        by_expected = q("expected", "expected")
+        by_driver = q("driver", "driver")
+        by_source = q("COALESCE(source, 'model')", "source")
+        by_hour = q("strftime('%H', ts - 4 * 3600, 'unixepoch')", "hour")
+        by_conf = q("CASE WHEN confidence >= 0.7 THEN 'high' WHEN confidence >= 0.5 THEN 'med' ELSE 'low' END", "conviction")
+        tot = dict(con.execute(f"SELECT {agg} FROM direction_reads WHERE ts >= ?", (since,)).fetchone())
+        missing = con.execute("SELECT COUNT(*) FROM direction_reads WHERE ts >= ? AND expected IS NULL", (since,)).fetchone()[0]
+    return {"by_day": by_day, "by_expected": by_expected, "by_driver": by_driver, "by_source": by_source, "by_hour": by_hour, "by_conviction": by_conf,
+            "totals": tot, "no_read": missing, "days": days}
+
+
+def fill_direction_paths(day: str, price_at, scorer) -> int:
+    """Fill the SPY move 15, 30 and 60 minutes after each read (`price_at(ts) -> price or None`) once that
+    much time has passed, and score the one-hour hit. Returns the number of rows touched."""
+    now = time.time()
+    n = 0
+    with connect() as con:
+        rows = [dict(r) for r in con.execute("SELECT id, ts, spy, expected, move_15, move_30, move_60 FROM direction_reads WHERE day = ? AND move_60 IS NULL", (day,))]
+        for r in rows:
+            if not r.get("spy"):
+                continue
+            upd: dict[str, Any] = {}
+            for mins, col in ((15, "move_15"), (30, "move_30"), (60, "move_60")):
+                if r.get(col) is None and r["ts"] + mins * 60 <= now:
+                    px = price_at(r["ts"] + mins * 60)
+                    if px:
+                        upd[col] = (px / r["spy"] - 1) * 100
+            if not upd:
+                continue
+            if "move_60" in upd:
+                upd["hit_60"] = scorer(r.get("expected"), upd["move_60"])
+            sets = ", ".join(f"{k} = ?" for k in upd)
+            con.execute(f"UPDATE direction_reads SET {sets} WHERE id = ?", (*upd.values(), r["id"]))
+            n += 1
+    return n
+
+
+def unscored_direction_days(before_day: str) -> list[str]:
+    """Past days that still have reads without a close score (the close briefing did not run)."""
+    with connect() as con:
+        return [r[0] for r in con.execute("SELECT DISTINCT day FROM direction_reads WHERE day < ? AND scored_at IS NULL AND expected IS NOT NULL ORDER BY day", (before_day,))]
 
 
 def log_analysis(day: str, kind: str, symbol: str, price: Any, read: str | None, confidence: Any, facts: dict[str, Any]) -> None:
@@ -509,7 +557,7 @@ def analysis_days(days: int = 60) -> list[dict[str, Any]]:
 def day_detail(day: str) -> dict[str, Any]:
     import json as _json
     with connect() as con:
-        reads = [dict(r) for r in con.execute("SELECT ts, spy, qqq, expected, confidence, driver, move_spy_pct, hit, facts FROM direction_reads WHERE day = ? ORDER BY ts", (day,))]
+        reads = [dict(r) for r in con.execute("SELECT ts, spy, qqq, expected, confidence, driver, source, move_15, move_30, move_60, hit_60, move_spy_pct, hit, facts FROM direction_reads WHERE day = ? ORDER BY ts", (day,))]
         for r in reads:
             try:
                 f = _json.loads(r.pop("facts") or "{}"); r["facts"] = {"spy": {k: (f.get("spy") or {}).get(k) for k in ("above_vwap", "range_pos", "chg_day_pct")}, "sentiment": f.get("sentiment")}

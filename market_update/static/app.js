@@ -18,8 +18,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -46,9 +46,10 @@
     macro: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>',
     watch: '<svg viewBox="0 0 24 24"><path d="M12 3.5 14.6 9l6 .6-4.5 4 1.4 5.9L12 16.4 6.5 19.5 7.9 13.6l-4.5-4 6-.6z"/></svg>',
     admin: '<svg viewBox="0 0 24 24"><path d="M12 3 4 6.5v5c0 4.6 3.4 8.4 8 9.5 4.6-1.1 8-4.9 8-9.5v-5z"/><path d="m9 12 2 2 4-4"/></svg>',
+    check: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   };
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
-  const NAV_GROUPS = [["Workspace", ["home", "watch", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
+  const NAV_GROUPS = [["Workspace", ["home", "watch", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
   let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
   let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
   let gateOpen = true;                   // the sign-in card shows first; the dashboard follows a successful login
@@ -610,7 +611,7 @@
     const verdict = d.market_state !== "open" && scoredToday.length ? `<div class="day-verdict"><b>Day verdict</b> ${hitsToday} of ${scoredToday.length} reads right (${Math.round(hitsToday / scoredToday.length * 100)}%). ${hitsToday / scoredToday.length >= 0.6 ? "The desk read the tape well today." : hitsToday / scoredToday.length >= 0.4 ? "A mixed day: the tape flipped on the desk more than once." : "The desk was wrong-footed today; the reads are logged for the model to learn from."}</div>` : "";
     return `<article class="bcard ${open ? "open" : ""}" data-brief-slot="direction">
       <div class="bcard-h"><b>Intraday direction</b><span class="muted">${esc((L.at || "").slice(11, 16))} ET · ${d.market_state === "open" ? (isNum(d.next_in_s) ? `next in ${Math.ceil(d.next_in_s / 60)} min` : "live") : "last read of the session"}</span></div>
-      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)}${L.source === "rules" ? ` <span class="src-badge" title="The model read service was unavailable, so this read comes from OneView's backup rules (same facts, fixed rules, conviction capped at MED).">backup read</span>` : ""}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
+      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)} <a class="lnk small" href="#view=check" data-view-link="check">today's reads →</a>${L.source === "rules" ? ` <span class="src-badge" title="The model read service was unavailable, so this read comes from OneView's backup rules (same facts, fixed rules, conviction capped at MED).">backup read</span>` : ""}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
       ${facts}
       <div class="dir-strip">${strip || '<span class="muted">no reads yet today</span>'}</div>
       ${verdict}
@@ -1803,6 +1804,7 @@
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
+      case "check": return `<div class="view one">${secCheck()}</div>`;
       case "guide": return `<div class="view one">${secGuide()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
@@ -1896,6 +1898,58 @@
     try { const r2 = await api("/api/stocktwits/status", { cache: "no-store" }); if (r2.ok) { const j = await r2.json(); const el = $("#st-status"); if (el) el.textContent = j.connected ? `Connected · token renews itself · callback ${j.callback}` : `Not connected yet. The sign-in returns to ${j.callback}.`; } } catch (e) {}
   }
   const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() / 1000) - t); return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  let checkData = null, checkDay = "";
+  async function loadCheck(day) {
+    if (STATIC_MODE) return;
+    if (day !== undefined) checkDay = day;
+    try { const res = await api("/api/direction/check" + (checkDay ? `?day=${encodeURIComponent(checkDay)}` : ""), { cache: "no-store" }); if (res.ok) { checkData = await res.json(); if (currentView === "check") renderAll(); } } catch (e) {}
+  }
+  const CHECK_STATUS = { on_track: ["On track", "up"], against: ["Against us", "down"], hit: ["Right", "up"], miss: ["Wrong", "down"], pending: ["Waiting", "flat"], flat: ["Flat so far", "flat"], no_read: ["No read (service down)", "flat"] };
+  function secCheck() {
+    if (STATIC_MODE) return `<section><h2>Intraday check</h2><div class="muted">The live check runs on the app server: open the app link, not the static copy.</div></section>`;
+    const j = checkData; if (!j) { loadCheck(); return `<section><h2>Intraday check</h2><div class="muted">Loading today's reads…</div></section>`; }
+    const S = j.summary || {}, st = j.stats || {}, T = st.totals || {};
+    const rate = (h, n) => (n ? Math.round(h / n * 100) + "%" : "–");
+    const mv = (x) => (isNum(x) ? `<span class="${x > 0.05 ? "up" : x < -0.05 ? "down" : ""}">${x > 0 ? "+" : ""}${x.toFixed(2)}%</span>` : "–");
+    const tile = (l, v, sub) => `<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${sub || ""}</div></div>`;
+    const tm = (ts) => new Date(ts * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
+    const spy = j.spy || {}, m = j.morning || {};
+    const mst = CHECK_STATUS[m.status] || ["–", "flat"];
+    const rows = (j.reads || []).map((r) => {
+      const c = CHECK_STATUS[r.status] || ["–", "flat"]; const d = DIR[r.expected];
+      return `<tr class="${r.status === "no_read" ? "dim" : ""}"><td class="num">${tm(r.ts)}</td><td>${d ? `<span class="pill ${d[1]}">${pretty(r.expected)}</span>` : '<span class="muted">none</span>'}</td><td>${r.expected ? convTag(r.confidence) : ""}</td><td class="small">${r.driver ? (DIR_DRIVER[r.driver] ? pretty(r.driver) : pretty(r.driver)) : "–"}</td><td class="small">${r.source === "rules" ? '<span class="src-badge">backup</span>' : r.expected ? "model" : "–"}</td><td class="num">${fnum(r.spy)}</td><td class="num">${mv(r.move_15)}</td><td class="num">${mv(r.move_30)}</td><td class="num">${mv(r.move_60)}${r.hit_60 === 1 ? ' <span class="up">✓</span>' : r.hit_60 === 0 ? ' <span class="down">✗</span>' : ""}</td><td class="num">${mv(r.move_now)}</td><td><span class="tag ${c[1] === "up" ? "ok" : c[1] === "down" ? "warn" : ""}">${c[0]}</span></td></tr>`;
+    }).join("") || '<tr><td colspan="11" class="muted">No reads for this day. Reads run every 15 minutes while the market is open.</td></tr>';
+    const brk = (label, rows, key, fmt) => `<div class="card"><h3>${label}</h3><table class="tbl"><thead><tr><th>${label.split(" ")[1] || ""}</th><th class="num">Reads</th><th class="num">Right at close</th><th class="num">Right at +1 h</th><th class="num">Avg move to close</th></tr></thead><tbody>${(rows || []).map((x) => `<tr><td>${fmt ? fmt(x[key]) : pretty(String(x[key]))}</td><td class="num">${x.n}</td><td class="num"><b>${rate(x.hits, x.scored)}</b> <span class="muted">${x.scored ? "of " + x.scored : ""}</span></td><td class="num">${rate(x.hits_60, x.scored_60)}</td><td class="num">${isNum(x.avg_move) ? fpct(x.avg_move, 2) : "–"}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">Nothing scored yet.</td></tr>'}</tbody></table></div>`;
+    const lessons = (j.lessons || []).map((l) => `<li>${esc(l)}</li>`).join("");
+    const dayNav = `<div class="wc-actions"><button class="btn sm" type="button" data-check-day="${prevDay(j.day)}">← ${prevDay(j.day)}</button><b>${esc(j.day)}</b>${j.day < todayET() ? `<button class="btn sm" type="button" data-check-day="${nextDay(j.day)}">${nextDay(j.day)} →</button><button class="btn sm" type="button" data-check-day="">Today</button>` : ""}</div>`;
+    return `<section class="check">
+      <h2>Intraday check <span class="muted">what we said every 15 minutes, and what the market did next · ${j.market_state === "open" ? "live, refreshes every minute" : "market closed"}</span></h2>
+      ${dayNav}
+      <div class="grid c6" style="margin:12px 0">
+        ${tile("SPY now", isNum(spy.last) ? fnum(spy.last) : "–", isNum(spy.chg_pct) ? fpct(spy.chg_pct, 2) + " today" : "")}
+        ${tile("Morning call", m.call && m.call.SPY ? pretty(m.call.SPY) : "none", m.call && m.call.SPY ? `<span class="${mst[1]}">${mst[0]}</span>${m.source === "rules" ? " · backup" : ""}` : "")}
+        ${tile("Reads today", S.reads || 0, S.no_read ? `${S.no_read} with no read` : "every 15 min")}
+        ${tile(j.market_state === "open" ? "On track now" : "Right at the close", `${S.on_track || 0} / ${S.judged || 0}`, rate(S.on_track || 0, S.judged || 0))}
+        ${tile("30-day record", rate(T.hits, T.scored), `${T.scored || 0} reads scored`)}
+        ${tile("Right at +1 h", rate(T.hits_60, T.scored_60), `${T.scored_60 || 0} reads`)}
+      </div>
+      <div class="card" style="margin-bottom:12px"><h3>Today's reads <span class="muted">${esc(j.how || "")}</span></h3>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Time ET</th><th>Call</th><th>Conviction</th><th>Reason</th><th>Engine</th><th class="num">SPY at read</th><th class="num">+15 m</th><th class="num">+30 m</th><th class="num">+1 h</th><th class="num">${j.market_state === "open" && j.day === todayET() ? "Now" : "Close"}</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+      <div class="card" style="margin-bottom:12px"><h3>What works, what does not <span class="muted">last ${st.days || 30} days, scored reads only</span></h3><ul class="lessons">${lessons || "<li>Nothing scored yet.</li>"}</ul></div>
+      <div class="admin-grid">
+        ${brk("By reason", st.by_driver, "driver")}
+        ${brk("By call", st.by_expected, "expected")}
+        ${brk("By hour", st.by_hour, "hour", (h) => h + ":00 ET")}
+        ${brk("By conviction", st.by_conviction, "conviction", (c) => String(c).toUpperCase())}
+        ${brk("By engine", st.by_source, "source", (x) => (x === "rules" ? "Backup rules" : "Model"))}
+        ${brk("By day", st.by_day, "day")}
+      </div>
+      <p class="muted small" style="margin-top:10px">Information, not advice. Every read is stored with its inputs; the close briefing scores the day and the model is shown its own hit rates on the next read.</p>
+    </section>`;
+  }
+  function todayET() { return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }); }
+  function prevDay(d) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); }
+  function nextDay(d) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); }
   function secAdmin() {
     const A = adminData; if (!A) return `<section><h2>Admin</h2><div class="muted">Loading the overview…</div></section>`;
     const T = A.traffic, mx = Math.max(1, ...T.series.map((x) => x.requests));
@@ -1906,6 +1960,8 @@
     const recent = A.recent.map((x) => `<tr><td class="num">${new Date(x.at * 1000).toTimeString().slice(0, 8)}</td><td>${esc(x.email || "–")}</td><td><span class="tag ${{ login: "ok", logout: "", link_requested: "acc", watchlist: "acc", analyzed: "warn" }[x.action] || ""}">${pretty(x.action)}</span></td><td class="hl small">${esc(x.detail || "")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No activity yet.</td></tr>';
     return `<section class="admin"><h2>Admin dashboard <span class="muted">${esc(A.admin)} · refreshed ${new Date(A.as_of * 1000).toTimeString().slice(0, 8)} · sessions table in market_update.db</span></h2>
       <div class="grid c6" style="margin-bottom:12px">${tile("Signed in now", A.online.length, "distinct users")}${tile("Active sessions", A.active_sessions, "browsers with a live login")}${tile("Requests, last hour", T.requests_last_hour, `${T.requests_24h} in 24 h`)}${tile("Page loads, 24 h", T.pages_24h, "")}${tile("Logins, 24 h", T.logins_24h, "")}${tile("Accounts", A.users_total, `build ${A.build.build_id || "–"}${A.build.building ? " · building" : ""}`)}</div>
+      <div class="card" style="margin-bottom:12px"><h3>Intraday check <span class="muted">what we said every 15 minutes vs what the market did; scored at the close and one hour on</span></h3>
+        <div class="wc-actions" style="margin-top:8px"><a class="btn sm" href="#view=check" data-view-link="check">Open the intraday check</a><a class="btn sm ghost" href="/track-record" target="_blank" rel="noopener">Public track record</a><span class="meta2">App link for the group: ${esc(location.origin)}/#view=check (sign-in required)</span></div></div>
       <div class="card" style="margin-bottom:12px"><h3>StockTwits connector <span class="muted">reads crowd sentiment through StockTwits' official connector; sign in once as the owner</span></h3>
         <div id="st-status" class="meta2">Checking…</div>
         <div class="wc-actions" style="margin-top:8px"><button class="btn sm" type="button" data-st-connect>Connect StockTwits</button><span class="meta2" id="st-connect-msg"></span></div></div>
@@ -1921,6 +1977,7 @@
     if (!VIEWS.some((v) => v[0] === k)) return;
     if (k === "admin" && !(user && user.role === "admin")) return;
     if (k === "record") loadRecord();
+    if (k === "check") loadCheck();
     currentView = k; try { history.replaceState(null, "", "#view=" + k); } catch (e) {}
     if (report) renderAll();
   }
@@ -1990,6 +2047,7 @@
         row.querySelector("td").innerHTML = `<ul class="bf-list">${morning}${reads || '<li class="muted">no intraday reads that day</li>'}</ul>`; } catch (e) { row.querySelector("td").innerHTML = '<div class="muted">Could not load that day.</div>'; } }));
     document.querySelectorAll("[data-brief-toggle]").forEach((b) => b.addEventListener("click", () => { const slot = b.getAttribute("data-brief-toggle"); briefOpen = briefOpen === slot ? null : slot; const el = $(".briefs"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } }));
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
+    document.querySelectorAll("[data-check-day]").forEach((b) => b.addEventListener("click", () => { checkData = null; loadCheck(b.getAttribute("data-check-day")); renderAll(); }));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
     document.querySelectorAll("#app [data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
     document.querySelectorAll("[data-analyze]").forEach((b) => b.addEventListener("click", () => { requestAnalysis(b.getAttribute("data-analyze")); renderAll(); }));
@@ -2123,6 +2181,7 @@
     setInterval(pollBrief, 300000);
     setTimeout(pollBrief, 2000);
     setInterval(pollDirection, 60000);
+    setInterval(() => { if (currentView === "check") loadCheck(); }, 60000);
     setTimeout(pollDirection, 3000);
     setInterval(pollCrowd, 300000);
     setTimeout(pollCrowd, 3500);
