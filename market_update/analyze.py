@@ -1174,7 +1174,7 @@ def _brief_summary(b: dict[str, Any], slot: str = "morning") -> str:
         for sym in ("SPY", "QQQ"):
             a = reads.get(sym)
             if a and a.get("next_move"):
-                bits.append(f"{sym} 1-hour chart {'into tomorrow ' if slot == 'close' else ''}{words.get(a['next_move']['choice'], a['next_move']['choice'])}")
+                bits.append(f"{sym} 1-hour chart {('into ' + _next_session_name() + ' ') if slot == 'close' else ''}{words.get(a['next_move']['choice'], a['next_move']['choice'])}")
         return ". ".join(x[0].upper() + x[1:] for x in bits) + "." if bits else "No session data yet."
 
     t = {x["symbol"]: x for x in b["tape"]}
@@ -1275,3 +1275,88 @@ def score_direction(expected: str, move_pct: float | None, flat_band: float = 0.
     if expected == "lower":
         return 1 if move_pct < 0 else 0
     return 1 if abs(move_pct) <= flat_band else 0
+
+
+def _next_session_name() -> str:
+    d = datetime.now(tz=config.ET).date() + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d.strftime("%A")
+
+
+def week_and_mood(report: dict[str, Any], desk: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Extras for the after-the-close email: the week so far for SPY and QQQ, the crowd's mood, and the next session's name."""
+    now = datetime.now(tz=config.ET)
+    nxt = now.date() + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    next_session = nxt.strftime("%A")
+    week: dict[str, Any] = {}
+    try:
+        hist = fetch.download(["SPY", "QQQ"], period="1mo", interval="1d", prepost=False)
+        monday = now.date() - timedelta(days=now.weekday())
+        for sym in ("SPY", "QQQ"):
+            f = fetch.frame_for(hist, sym)
+            if f is None or "Close" not in f:
+                continue
+            days = [(i.date(), float(o), float(h), float(lo), float(c)) for i, o, h, lo, c in zip(f.index, f["Open"], f["High"], f["Low"], f["Close"])]
+            this = [d for d in days if d[0] >= monday]
+            before = [d for d in days if d[0] < monday]
+            if not this or not before:
+                continue
+            base = before[-1][4]
+            hi = max(this, key=lambda d: d[2]); lo = min(this, key=lambda d: d[3])
+            close = this[-1][4]
+            rng = hi[2] - lo[3]
+            pos = (close - lo[3]) / rng if rng else 0.5
+            chg = [(d[0], (d[4] / p[4] - 1) * 100) for p, d in zip(before[-1:] + this[:-1], this)]
+            best = max(chg, key=lambda x: x[1]); worst = min(chg, key=lambda x: x[1])
+            ret = (close / base - 1) * 100
+            if ret > 0.3 and pos >= 0.7:
+                shape = "up on the week and finishing near the highs: buyers stayed in control into the close"
+            elif ret > 0.3:
+                shape = "up on the week but off the highs: gains were given back late"
+            elif ret < -0.3 and pos <= 0.3:
+                shape = "down on the week and finishing near the lows: sellers had the last word"
+            elif ret < -0.3:
+                shape = "down on the week but well off the lows: dip buyers showed up"
+            else:
+                shape = "a flat week inside a range: neither side won"
+            week[sym] = {"ret_pct": round(ret, 2), "base": round(base, 2), "close": round(close, 2), "high": round(hi[2], 2), "high_day": hi[0].strftime("%A"),
+                         "low": round(lo[3], 2), "low_day": lo[0].strftime("%A"), "range_pos": round(pos, 2), "days": len(this),
+                         "best_day": (best[0].strftime("%A"), round(best[1], 2)), "worst_day": (worst[0].strftime("%A"), round(worst[1], 2)), "shape": shape}
+    except Exception as e:  # noqa: BLE001
+        log.warning("week summary failed: %s", e)
+    # ---- mood ----
+    st = fetch._cache_get("stocktwits_snapshot", 12 * 3600) or {}
+    moods = st.get("moods") or {}
+    lab = {"EXTREMELY_BULLISH": "very bullish", "BULLISH": "bullish", "NEUTRAL": "neutral", "BEARISH": "bearish", "EXTREMELY_BEARISH": "very bearish"}
+    crowd = {x["ticker"]: x for x in (((report.get("social") or {}).get("crowd") or {}).get("rows") or [])}
+    trump = (report.get("social") or {}).get("trump") or {}
+    posts = [p for p in (trump.get("posts") or []) if p.get("ai") and ((p["ai"].get("market_relevance") or {}).get("p", 0) >= 0.5)]
+    bull = sum(1 for p in posts if (p["ai"].get("direction") or {}).get("choice") == "bullish_for_stocks")
+    bear = sum(1 for p in posts if (p["ai"].get("direction") or {}).get("choice") == "bearish_for_stocks")
+    macro = (desk or {}).get("macro") or {}
+    sent = {"stocktwits": {s: {"label": lab.get((moods.get(s) or {}).get("label"), "no read"), "bullish_pct": (moods.get(s) or {}).get("bullish_pct"), "score": (moods.get(s) or {}).get("score"), "delta": (moods.get(s) or {}).get("bullish_delta")} for s in ("SPY", "QQQ") if moods.get(s)},
+            "reddit": {s: {"sentiment": (crowd.get(s) or {}).get("wsb_sentiment"), "mentions": (crowd.get(s) or {}).get("mentions")} for s in ("SPY", "QQQ") if crowd.get(s)},
+            "reddit_top": [(x["ticker"], x.get("mentions"), x.get("wsb_sentiment")) for x in list(crowd.values())[:5]],
+            "trump": {"bullish": bull, "bearish": bear, "n": len(posts)},
+            "backdrop": {"headline": macro.get("headline"), "verdict": (macro.get("verdict") or {}).get("word"), "text": (macro.get("verdict") or {}).get("text")}}
+    scores = [v["score"] for v in sent["stocktwits"].values() if isinstance(v.get("score"), (int, float))]
+    avg = sum(scores) / len(scores) if scores else None
+    tone = "hot" if avg is not None and avg >= 80 else "warm" if avg is not None and avg >= 60 else "cool" if avg is not None and avg >= 40 else "cold" if avg is not None else "unknown"
+    bits = []
+    if sent["stocktwits"]:
+        bits.append("StockTwits is " + " and ".join(f"{v['label']} on {s}" + (f" ({v['bullish_pct']:.0f}% bullish{', rising' if (v.get('delta') or 0) > 2 else ', fading' if (v.get('delta') or 0) < -2 else ''})" if isinstance(v.get("bullish_pct"), (int, float)) else "") for s, v in sent["stocktwits"].items()))
+    if sent["reddit"]:
+        bits.append("Reddit leans " + " and ".join(f"{(v['sentiment'] or 'neutral').lower()} on {s}" for s, v in sent["reddit"].items()))
+    if posts:
+        bits.append(f"the President's market posts split {bull} bullish, {bear} bearish")
+    if macro.get("headline"):
+        bits.append(f"the backdrop gauges read '{macro['headline'].lower()}', {str((macro.get('verdict') or {}).get('word', '')).lower()} for buyers")
+    meaning = {"hot": "Sentiment is running hot: crowded optimism is when pullbacks surprise people, so keep stops honest.",
+               "warm": "Sentiment is warm but not euphoric: room left before the crowd is all-in.",
+               "cool": "Sentiment is cool: the crowd is not chasing, which is usually healthier for the next leg.",
+               "cold": "Sentiment is cold: fear is high, and that is where rebounds start.", "unknown": ""}[tone]
+    sent["tone"] = tone; sent["summary"] = "; ".join(bits) + ("." if bits else ""); sent["meaning"] = meaning
+    return {"next_session": next_session, "week": week, "sentiment": sent, "week_complete": now.weekday() == 4}

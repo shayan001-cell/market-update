@@ -316,6 +316,11 @@ async def make_brief(day: str, slot: str = "morning") -> None:
                 b["scorecard"] = await asyncio.to_thread(_score_day, day, b)
             except Exception:  # noqa: BLE001
                 log.exception("scorecard failed")
+            try:
+                from .analyze import week_and_mood
+                b["extras"] = await asyncio.to_thread(week_and_mood, state["report"], state.get("desk"))
+            except Exception:  # noqa: BLE001
+                log.exception("close extras failed")
         _brief_file(day, slot).write_text(json.dumps(b, default=str))
         state.setdefault("briefs", {})
         if state.get("briefs_day") != day:
@@ -343,7 +348,26 @@ def _api_root() -> str:
     return "http://localhost:8000"
 
 
-def _watch_for_email(email: str, report: dict[str, Any]) -> list[dict[str, Any]]:
+def _closing_quotes(tickers: list[str]) -> dict[str, dict[str, float]]:
+    """Regular-session close and change for the after-close email (no extended-hours prints)."""
+    out: dict[str, dict[str, float]] = {}
+    if not tickers:
+        return out
+    try:
+        h = fetch.download(list(dict.fromkeys(tickers)), period="5d", interval="1d", prepost=False)
+        for t in tickers:
+            f = fetch.frame_for(h, t)
+            if f is None or "Close" not in f or len(f) < 2:
+                continue
+            c = [float(x) for x in f["Close"].dropna().tolist()]
+            if len(c) >= 2 and c[-2]:
+                out[t] = {"last": c[-1], "chg_pct": (c[-1] / c[-2] - 1) * 100}
+    except Exception as e:  # noqa: BLE001
+        log.warning("closing quotes failed: %s", e)
+    return out
+
+
+def _watch_for_email(email: str, report: dict[str, Any], closing: dict[str, dict[str, float]] | None = None) -> list[dict[str, Any]]:
     prof = db.profile(email) or {}
     tickers = (prof.get("tickers") or [])[:8]
     by_ticker = {s["ticker"]: s for s in report.get("stocks", [])}
@@ -353,7 +377,7 @@ def _watch_for_email(email: str, report: dict[str, Any]) -> list[dict[str, Any]]
     out = []
     for t in tickers:
         s = by_ticker.get(t) or state["adhoc"].get(t, {}).get("stock")
-        q = quotes.get(t) or {}
+        q = (closing or {}).get(t) or (quotes.get(t) if closing is None else {}) or {}
         l = lite.get(t) or {}
         v = (s or {}).get("verdict") or {}
         out.append({"ticker": t, "name": (s or {}).get("name") or l.get("name") or "", "last": q.get("last") or (s or {}).get("last_price") or l.get("last_price"),
@@ -394,11 +418,14 @@ def _mail_close(b: dict[str, Any], day: str) -> None:
     base = os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL
     site = base + "/#view=home&brief=1"
     record = base + "/#view=record"
+    recipients = db.brief_recipients()
+    all_tickers = sorted({t for u in recipients for t in ((db.profile(u["email"]) or {}).get("tickers") or [])[:8]})
+    closing = _closing_quotes(all_tickers)
     sent = 0
-    for u in db.brief_recipients():
+    for u in recipients:
         try:
             unsub = f"{_api_root()}/brief/unsubscribe?t={_sign(u['email'])}"
-            subject, text, html = mail.close_email(u.get("name") or "", b, _watch_for_email(u["email"], report), site, record, unsub)
+            subject, text, html = mail.close_email(u.get("name") or "", b, _watch_for_email(u["email"], report, closing), site, record, unsub)
             mail.send(u["email"], subject, text, html)
             sent += 1
         except Exception as e:  # noqa: BLE001

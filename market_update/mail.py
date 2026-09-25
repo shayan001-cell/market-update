@@ -241,11 +241,16 @@ def announcement_email(name: str, site_url: str, group_url: str, unsubscribe_url
 
 
 def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], site_url: str, record_url: str, unsubscribe_url: str) -> tuple[str, str, str]:
-    """After the close: what the market did, what we said and how it scored, what moved, and the levels into tomorrow."""
+    """After the close: what the market did, how our 15-minute reads went, the week so far, the crowd's mood,
+    what moved, and the levels into the next session."""
     date_label = datetime.strptime(brief["date"], "%Y-%m-%d").strftime("%A, %B %d")
     ses = brief.get("session") or {}
     idx = {x.get("symbol"): x for x in ses.get("indexes") or []}
     sc = brief.get("scorecard") or {}
+    ex = brief.get("extras") or {}
+    next_session = ex.get("next_session") or "tomorrow"
+    week = ex.get("week") or {}
+    mood = ex.get("sentiment") or {}
     e = lambda x: html_mod.escape(str(x))
     names = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "IWM": "Small caps", "DIA": "Dow 30"}
     pct = _fmt_pct
@@ -253,22 +258,16 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         return "#0E8A5F" if isinstance(x, (int, float)) and x > 0 else "#C0394B" if isinstance(x, (int, float)) and x < 0 else "#5B6478"
     spy = (idx.get("SPY") or {}).get("chg_pct")
     subject = f"OneView after the close · {date_label} · S&P 500 {pct(spy)}"
-    call_words = {"push_higher": "we leaned higher", "rebound": "we expected a rebound", "break_lower": "we leaned lower",
-                  "pullback_then_higher": "we expected a dip first", "range_bound": "we expected a range"}
-    m_call = call_words.get(sc.get("morning_call"), "no morning call")
-    m_hit = sc.get("morning_hit")
     hit_rate = sc.get("hit_rate")
     scored, hits = sc.get("scored") or 0, sc.get("hits") or 0
-    if m_hit is None and not scored:
-        verdict = "Nothing to score today."
-    elif m_hit == 0 and (hit_rate or 0) >= 60:
-        verdict = "The open call was wrong, but the 15-minute reads adjusted and came out ahead. That is the process working: the morning lean is a starting point, the live reads are the trade."
-    elif m_hit == 1 and (hit_rate or 0) >= 60:
-        verdict = "Right at the open and right through the day. Days like this are why we keep the score: so you know what a good day looks like when the next bad one comes."
-    elif m_hit == 1:
-        verdict = "The open call was right; the 15-minute reads were noisy. A trending open with a choppy middle is the hardest tape for short reads."
+    if not scored:
+        verdict = "No reads to score today."
+    elif (hit_rate or 0) >= 60:
+        verdict = "The 15-minute reads were on the right side of the tape most of the day. Every read is logged and scored so the process keeps sharpening."
+    elif (hit_rate or 0) >= 45:
+        verdict = "A split day for the reads: the tape changed its mind more than once. All of it is logged and scored so the process keeps sharpening."
     else:
-        verdict = "Not our day: the open call and most of the reads missed. Logged and scored, so the model sees exactly where it was wrong."
+        verdict = "A hard tape for short reads today. Every one is logged and scored, which is exactly how the process gets better."
     timeline = sc.get("timeline") or []
     def tcell(r: dict[str, Any]) -> str:
         h = r.get("hit"); c = "#0E8A5F" if h == 1 else "#C0394B" if h == 0 else "#C9D0DC"
@@ -290,10 +289,22 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
             plans.append((sym, x.get("last"), pl.get("shape") or "", (pl.get("levels") or [])[:3]))
     trump = brief.get("trump") or []
     y = brief.get("yields") or {}
+    week_title = "The week" if ex.get("week_complete") else "The week so far"
+    def week_line(sym: str) -> str:
+        w = week.get(sym) or {}
+        if not w:
+            return ""
+        return (f"{names.get(sym, sym)} {pct(w.get('ret_pct'))} on the week ({w.get('base')} to {w.get('close')}). High {w.get('high')} on {w.get('high_day')}, low {w.get('low')} on {w.get('low_day')}; "
+                f"best day {w.get('best_day', ['', 0])[0]} {pct(w.get('best_day', ['', 0])[1])}, worst {w.get('worst_day', ['', 0])[0]} {pct(w.get('worst_day', ['', 0])[1])}. {w.get('shape')}.")
+    week_lines = [week_line(s) for s in ("SPY", "QQQ") if week.get(s)]
+    # ---- text ----
     lines = [f"Good evening{', ' + name if name else ''}.", "", brief.get("summary", ""), "",
              "The close: " + " · ".join(f"{names.get(k, k)} {pct((idx.get(k) or {}).get('chg_pct'))}" for k in ("SPY", "QQQ", "IWM", "DIA") if idx.get(k)), "",
-             "What we said, what happened:", f"  Morning call: {m_call}; S&P 500 closed {pct(spy)} -> {'right' if m_hit == 1 else 'wrong' if m_hit == 0 else 'not scored'}.",
-             f"  15-minute reads: {hits} of {scored} right ({hit_rate if hit_rate is not None else '-'}%).", f"  {verdict}", ""]
+             f"Our 15-minute reads: {hits} of {scored} right ({hit_rate if hit_rate is not None else '-'}%). {verdict}", ""]
+    if week_lines:
+        lines += [f"{week_title}:"] + [f"  {l}" for l in week_lines] + [""]
+    if mood.get("summary"):
+        lines += ["Market mood: " + mood["summary"], f"  {mood.get('meaning', '')}", ""]
     if leaders:
         lines += [f"Leading: {leaders}. Lagging: {laggards}."]
     if mega:
@@ -303,15 +314,16 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
     if breadth:
         lines += [breadth]
     if plans:
-        lines += ["", "Into tomorrow:"]
+        lines += ["", f"Into {next_session}:"]
         for sym, last, shape, levels in plans:
             lines += [f"  {sym} {_fmt_num(last)}: {shape}"] + [f"    - {l}" for l in levels]
     if watch:
         lines += ["", "Your watchlist at the close:"] + [f"  {w['ticker']}: {_fmt_num(w.get('last'))} ({pct(w.get('chg_pct'))}) · {w.get('read') or 'no read yet'}" for w in watch]
     if trump:
-        lines += ["", f"{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President today; the read on each is on the desk."]
-    lines += ["", f"Open the desk: {site_url}", f"Full track record: {record_url}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
+        lines += ["", f"{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President today; the read on each is on OneView."]
+    lines += ["", f"Open OneView: {site_url}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
     text = "\n".join(lines)
+    # ---- html ----
     def tile(k: str) -> str:
         x = idx.get(k) or {}
         return ('<td style="padding:0 4px;width:25%"><div style="background:#F6F8FB;border:1px solid #E6E9F0;border-radius:10px;padding:10px 12px">'
@@ -321,16 +333,41 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
     tiles = "".join(tile(k) for k in ("SPY", "QQQ", "IWM", "DIA") if idx.get(k))
     def h2(t: str) -> str:
         return '<h2 style="margin:20px 0 8px;font-size:13px;letter-spacing:.06em;color:#5B6478;text-transform:uppercase">' + e(t) + '</h2>'
-    def badge(ok: Any) -> str:
-        bg = "#E3F5EC" if ok == 1 else "#FBE5E8" if ok == 0 else "#EEF1F6"; fg = "#0E8A5F" if ok == 1 else "#C0394B" if ok == 0 else "#5B6478"
-        return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700;background:' + bg + ';color:' + fg + '">' + ("RIGHT" if ok == 1 else "WRONG" if ok == 0 else "NOT SCORED") + '</span>'
     rate_col = "#0E8A5F" if (hit_rate or 0) >= 60 else "#C0394B" if (hit_rate or 0) < 45 else "#0A1220"
-    said = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">'
-            '<tr><td style="padding:8px 0;border-top:1px solid #E6E9F0">Morning call: <b>' + e(m_call) + '</b><div style="font-size:12.5px;color:#5B6478">S&amp;P 500 closed ' + e(pct(spy)) + '</div></td>'
-            '<td style="padding:8px 0;border-top:1px solid #E6E9F0;text-align:right;vertical-align:top">' + badge(m_hit) + '</td></tr>'
-            '<tr><td style="padding:8px 0;border-top:1px solid #E6E9F0">15-minute reads: <b>' + str(hits) + ' of ' + str(scored) + ' right</b><div style="font-size:12.5px;color:#5B6478">scored against the close</div></td>'
-            '<td style="padding:8px 0;border-top:1px solid #E6E9F0;text-align:right;vertical-align:top"><span style="font-size:22px;font-weight:700;color:' + rate_col + '">' + e(hit_rate if hit_rate is not None else "–") + '%</span></td></tr></table>'
-            + strip + '<p style="margin:10px 0 0;font-size:14px;line-height:1.55">' + e(verdict) + '</p>')
+    reads = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">'
+             '<tr><td style="padding:8px 0;border-top:1px solid #E6E9F0">Our 15-minute reads: <b>' + str(hits) + ' of ' + str(scored) + ' right</b><div style="font-size:12.5px;color:#5B6478">each scored against the close</div></td>'
+             '<td style="padding:8px 0;border-top:1px solid #E6E9F0;text-align:right;vertical-align:top"><span style="font-size:22px;font-weight:700;color:' + rate_col + '">' + e(hit_rate if hit_rate is not None else "–") + '%</span></td></tr></table>'
+             + strip + '<p style="margin:10px 0 0;font-size:14px;line-height:1.55">' + e(verdict) + '</p>')
+    def week_card(sym: str) -> str:
+        w = week.get(sym) or {}
+        if not w:
+            return ""
+        pos = max(0.0, min(1.0, float(w.get("range_pos") or 0)))
+        bar = ('<div style="position:relative;height:8px;background:#E6E9F0;border-radius:4px;margin:8px 0 4px"><div style="position:absolute;left:0;top:0;bottom:0;width:' + str(int(pos * 100)) + '%;background:' + col(w.get("ret_pct")) + ';border-radius:4px"></div></div>'
+               '<div style="display:flex;justify-content:space-between;font-size:11px;color:#8A93A6"><span>low ' + e(w.get("low")) + ' (' + e(w.get("low_day")) + ')</span><span>close ' + e(w.get("close")) + '</span><span>high ' + e(w.get("high")) + ' (' + e(w.get("high_day")) + ')</span></div>')
+        bd, wd = w.get("best_day", ["", 0]), w.get("worst_day", ["", 0])
+        return ('<td style="padding:0 4px;width:50%;vertical-align:top"><div style="background:#F6F8FB;border:1px solid #E6E9F0;border-radius:10px;padding:10px 12px">'
+                '<div style="font-size:12px;color:#5B6478">' + e(names.get(sym, sym)) + '</div><div style="font-size:20px;font-weight:700;color:' + col(w.get("ret_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(w.get("ret_pct"))) + ' <span style="font-size:12px;font-weight:500;color:#5B6478">on the week</span></div>'
+                + bar + '<div style="font-size:12.5px;line-height:1.5;margin-top:6px">Best day ' + e(bd[0]) + ' <span style="color:' + col(bd[1]) + '">' + e(pct(bd[1])) + '</span>, worst ' + e(wd[0]) + ' <span style="color:' + col(wd[1]) + '">' + e(pct(wd[1])) + '</span>.</div>'
+                '<div style="font-size:12.5px;line-height:1.5;color:#33405A">' + e(str(w.get("shape") or "").capitalize()) + '.</div></div></td>')
+    week_html = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + week_card("SPY") + week_card("QQQ") + '</tr></table>') if week else ""
+    def mood_chip(label: str, value: str, c: str) -> str:
+        return '<td style="padding:0 3px"><div style="background:#F6F8FB;border:1px solid #E6E9F0;border-radius:10px;padding:8px 10px"><div style="font-size:10.5px;letter-spacing:.08em;color:#5B6478;text-transform:uppercase">' + e(label) + '</div><div style="font-size:13px;font-weight:700;color:' + c + '">' + e(value) + '</div></div></td>'
+    chips = []
+    for s2, v in (mood.get("stocktwits") or {}).items():
+        lbl = v.get("label") or "no read"; c = "#0E8A5F" if "bullish" in lbl else "#C0394B" if "bearish" in lbl else "#0A1220"
+        chips.append(mood_chip("StockTwits " + s2, lbl.capitalize() + (f" · {v['bullish_pct']:.0f}%" if isinstance(v.get("bullish_pct"), (int, float)) else ""), c))
+    for s2, v in (mood.get("reddit") or {}).items():
+        lbl = (v.get("sentiment") or "neutral"); c = "#0E8A5F" if lbl.lower() == "bullish" else "#C0394B" if lbl.lower() == "bearish" else "#0A1220"
+        chips.append(mood_chip("Reddit " + s2, lbl.capitalize() + (f" · {v['mentions']} mentions" if v.get("mentions") else ""), c))
+    tr = mood.get("trump") or {}
+    if tr.get("n"):
+        chips.append(mood_chip("President", f"{tr.get('bullish', 0)} bullish · {tr.get('bearish', 0)} bearish", "#0A1220"))
+    bdp = mood.get("backdrop") or {}
+    if bdp.get("headline"):
+        chips.append(mood_chip("Backdrop", f"{bdp['headline']} · {bdp.get('verdict') or ''}", "#0A1220"))
+    mood_html = (('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + "".join(chips[:4]) + '</tr></table>' if chips else "")
+                 + (('<p style="margin:10px 0 0;font-size:14px;line-height:1.55">' + e(mood.get("meaning") or "") + '</p>') if mood.get("meaning") else "")) if mood else ""
     mega_rows = "".join('<td style="padding:4px 2px;width:12.5%"><div style="background:#F6F8FB;border-radius:8px;padding:6px 4px;text-align:center"><div style="font-size:12px;font-weight:700">' + e(x.get("ticker")) + '</div><div style="font-size:12px;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</div></div></td>' for x in mega[:8])
     mover_rows = "".join('<tr><td style="padding:6px 0;border-top:1px solid #E6E9F0"><b>' + e(x.get("ticker")) + '</b> <span style="color:#5B6478;font-size:12px">' + e((x.get("name") or "")[:30]) + '</span></td><td style="padding:6px 0;border-top:1px solid #E6E9F0;text-align:right;font-weight:600;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</td></tr>' for x in movers)
     plan_html = "".join('<div style="margin:0 0 10px"><div style="font-size:14px"><b>' + e(sym) + ' ' + e(_fmt_num(last)) + '</b> · ' + e(shape) + '</div><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;line-height:1.5;color:#33405A">' + "".join('<li>' + e(l) + '</li>' for l in levels) + '</ul></div>' for sym, last, shape, levels in plans)
@@ -342,20 +379,22 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         '<tr><td style="padding:22px 28px 14px;background:#0B1324;border-radius:14px 14px 0 0">',
         '<div style="font-size:11px;letter-spacing:.16em;color:#85A7FF;font-weight:700">ONEVIEW · AFTER THE CLOSE</div>',
         '<h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:-.02em;color:#fff">' + e(date_label) + '</h1>',
-        '<div style="font-size:13px;color:#A8B4C8">What the market did, what we said, and the levels into tomorrow.</div></td></tr>',
+        '<div style="font-size:13px;color:#A8B4C8">What the market did, how the week went, the mood, and the levels into ' + e(next_session) + '.</div></td></tr>',
         '<tr><td style="padding:18px 24px 8px">',
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + tiles + '</tr></table>',
         '<p style="margin:16px 4px 0;font-size:15px;line-height:1.55">' + e(brief.get("summary", "")) + '</p>',
-        '<div style="padding:0 4px">' + h2("What we said, what happened") + said + '</div>',
+        '<div style="padding:0 4px">' + h2("How our reads went") + reads + '</div>',
+        ('<div style="padding:0 4px">' + h2(week_title + ": S&P 500 and Nasdaq 100") + week_html + '</div>') if week_html else "",
+        ('<div style="padding:0 4px">' + h2("Market mood") + mood_html + '</div>') if mood_html else "",
         '<div style="padding:0 4px">' + h2("What moved") +
         ('<p style="margin:0 0 8px;font-size:14px;line-height:1.5"><b>Leading:</b> ' + e(leaders) + '. <b>Lagging:</b> ' + e(laggards) + '.</p>' if leaders else "") +
         ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + mega_rows + '</tr></table>' if mega else "") +
         ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin-top:6px">' + mover_rows + '</table>' if movers else "") +
         ('<p style="margin:8px 0 0;font-size:13px;color:#5B6478;line-height:1.5">' + e(breadth) + ' 10-year yield ' + e(_fmt_num(y.get("10y"))) + '%.</p>' if breadth else "") + '</div>',
-        ('<div style="padding:0 4px">' + h2("Into tomorrow") + plan_html + '</div>') if plans else "",
+        ('<div style="padding:0 4px">' + h2("Into " + next_session) + plan_html + '</div>') if plans else "",
         ('<div style="padding:0 4px">' + h2("Your watchlist at the close") + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">' + watch_rows + '</table></div>') if watch else "",
-        ('<p style="margin:14px 4px 0;font-size:13.5px;line-height:1.5"><b>' + str(len(trump)) + ' market-relevant post' + ('s' if len(trump) > 1 else '') + ' from the President today.</b> The read on each is on the desk.</p>') if trump else "",
-        '<p style="margin:22px 4px 6px"><a href="' + e(site_url) + '" style="display:inline-block;background:#245BFF;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px;font-size:14px">Open the desk</a> <a href="' + e(record_url) + '" style="display:inline-block;color:#245BFF;text-decoration:none;font-weight:600;padding:12px 14px;font-size:14px">Full track record →</a></p>',
+        ('<p style="margin:14px 4px 0;font-size:13.5px;line-height:1.5"><b>' + str(len(trump)) + ' market-relevant post' + ('s' if len(trump) > 1 else '') + ' from the President today.</b> The read on each is on OneView.</p>') if trump else "",
+        '<p style="margin:22px 4px 6px"><a href="' + e(site_url) + '" style="display:inline-block;background:#245BFF;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;font-size:14px">Open OneView</a></p>',
         '<p style="margin:14px 4px 0;font-size:11.5px;line-height:1.6;color:#8A93A6">OneView is information, not advice. Reads come from public data, fixed rules and typed model judgments, scored every day against what the market actually did, never a guarantee. You receive this because you signed in to OneView. <a href="' + e(unsubscribe_url) + '" style="color:#8A93A6">Stop these emails</a>.</p>',
         '</td></tr></table></td></tr></table></body></html>']
     return subject, text, "".join(parts)

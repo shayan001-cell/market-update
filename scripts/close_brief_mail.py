@@ -18,16 +18,30 @@ try:
     server.state["report"] = json.loads((server.DATA_DIR / "report.json").read_text())
 except Exception:
     server.state["report"] = {}
+if not b.get("extras"):
+    from market_update.analyze import week_and_mood
+    desk = None
+    try:
+        desk = json.loads((server.DATA_DIR / "desk.json").read_text())
+    except Exception:
+        pass
+    b["extras"] = week_and_mood(server.state["report"], desk)
+    server._brief_file(a.day, "close").write_text(json.dumps(b, default=str))
 base = os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL
 site, record = base + "/#view=home&brief=1", base + "/#view=record"
+from market_update.analyze import _brief_summary
+b["summary"] = _brief_summary(b, "close")
+def _rows(email):
+    tickers = ((db.profile(email) or {}).get("tickers") or [])[:8]
+    return server._watch_for_email(email, server.state["report"], server._closing_quotes(tickers))
 if a.preview:
     u = db.profile(a.as_email) or {}
-    subject, text, html = mail.close_email(u.get("name") or "", b, server._watch_for_email(a.as_email, server.state["report"]), site, record, "#")
+    subject, text, html = mail.close_email(u.get("name") or "", b, _rows(a.as_email), site, record, "#")
     Path(a.preview).write_text(html); print("subject:", subject); print("written", a.preview)
 elif a.to:
     u = db.profile(a.to) or {}
     unsub = f"{server._api_root()}/brief/unsubscribe?t={server._sign(a.to)}"
-    subject, text, html = mail.close_email(u.get("name") or "", b, server._watch_for_email(a.to, server.state["report"]), site, record, unsub)
+    subject, text, html = mail.close_email(u.get("name") or "", b, _rows(a.to), site, record, unsub)
     print("sent via", mail.send(a.to, subject, text, html), "->", a.to)
 elif a.all:
     server._mail_close(b, a.day); print("done; marker:", (server._brief_dir() / f"{a.day}-close.mailed").exists())
