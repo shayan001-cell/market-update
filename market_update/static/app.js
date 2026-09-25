@@ -50,6 +50,7 @@
     desk: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2.5 2L17 8"/></svg>',
   };
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
+  const ADMIN_VIEWS = ["admin", "check"];   // menu items and views only the admin sees
   const NAV_GROUPS = [["Workspace", ["home", "watch", "desk", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
   let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
   let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
@@ -612,7 +613,7 @@
     const verdict = d.market_state !== "open" && scoredToday.length ? `<div class="day-verdict"><b>Day verdict</b> ${hitsToday} of ${scoredToday.length} reads right (${Math.round(hitsToday / scoredToday.length * 100)}%). ${hitsToday / scoredToday.length >= 0.6 ? "The desk read the tape well today." : hitsToday / scoredToday.length >= 0.4 ? "A mixed day: the tape flipped on the desk more than once." : "The desk was wrong-footed today; the reads are logged for the model to learn from."}</div>` : "";
     return `<article class="bcard ${open ? "open" : ""}" data-brief-slot="direction">
       <div class="bcard-h"><b>Intraday direction</b><span class="muted">${esc((L.at || "").slice(11, 16))} ET · ${d.market_state === "open" ? (isNum(d.next_in_s) ? `next in ${Math.ceil(d.next_in_s / 60)} min` : "live") : "last read of the session"}</span></div>
-      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)} <a class="lnk small" href="#view=check" data-view-link="check">today's reads →</a>${L.source === "rules" ? ` <span class="src-badge" title="The model read service was unavailable, so this read comes from OneView's backup rules (same facts, fixed rules, conviction capped at MED).">backup read</span>` : ""}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
+      <div class="bc-idx"><span class="pill ${m[1]}">${m[0]}</span> ${convTag(L.confidence)}${user && user.role === "admin" ? ` <a class="lnk small" href="#view=check" data-view-link="check">today's reads →</a>` : ""}${L.source === "rules" ? ` <span class="src-badge" title="The model read service was unavailable, so this read comes from OneView's backup rules (same facts, fixed rules, conviction capped at MED).">backup read</span>` : ""}<div class="meta2">${L.driver ? "Mainly " + (DIR_DRIVER[L.driver] || pretty(L.driver)) + "." : ""}</div></div>
       ${facts}
       <div class="dir-strip">${strip || '<span class="muted">no reads yet today</span>'}</div>
       ${verdict}
@@ -1498,7 +1499,7 @@
   function renderNav() {
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
-    $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
+    $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.filter((k) => isAdmin || !ADMIN_VIEWS.includes(k)).map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
       return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
@@ -1805,7 +1806,7 @@
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
-      case "check": return `<div class="view one">${secCheck()}</div>`;
+      case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": return `<div class="view one">${secDesk()}</div>`;
       case "guide": return `<div class="view one">${secGuide()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
@@ -1986,7 +1987,7 @@
         <p class="mood-why">${esc(m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are moving together (inflation flag)." : ""}</p>
         <div class="facts">${comp}</div></div>
       <div class="tabs subtabs" style="margin-bottom:8px">${scopes.map(([k, l]) => `<button class="tab ${deskScope === k ? "active" : ""}" data-desk-scope="${k}">${l}</button>`).join("")}<span class="muted small" style="margin-left:auto">${tallies}</span></div>
-      ${secDeskScan(d)}
+      ${isAdmin ? secDeskScan(d) : ""}
       ${tvBar}
       ${missing.length ? `<div class="meta2" style="margin-bottom:8px">Not scored yet (need 60+ daily bars or not in this pass): ${missing.map(esc).join(", ")}</div>` : ""}
       <div class="card"><div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="num">Price</th><th>Trend</th><th>Momentum</th><th>Macro</th><th class="num">Total</th><th>Read</th><th>You</th></tr></thead>
@@ -2072,10 +2073,10 @@
   function subTabs(v) { return `<div class="tabs subtabs">${SUBTABS[v].map(([k, l]) => `<button class="tab ${subTab[v] === k ? "active" : ""}" data-sub="${v}:${k}">${l}</button>`).join("")}</div>`; }
   function switchView(k) {
     if (!VIEWS.some((v) => v[0] === k)) return;
-    if (k === "admin" && !(user && user.role === "admin")) return;
+    if (ADMIN_VIEWS.includes(k) && !(user && user.role === "admin")) return;
     if (k === "record") loadRecord();
     if (k === "check") loadCheck();
-    if (k === "desk") { loadDesk(); if (!deskScan) loadDeskScan(false); }
+    if (k === "desk") { loadDesk(); if (!deskScan && user && user.role === "admin") loadDeskScan(false); }
     currentView = k; try { history.replaceState(null, "", "#view=" + k); } catch (e) {}
     if (report) renderAll();
   }

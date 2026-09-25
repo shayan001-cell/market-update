@@ -528,9 +528,8 @@ async def direction_loop() -> None:
 @app.get("/api/direction/check")
 async def api_direction_check(request: Request, day: str = "") -> JSONResponse:
     """Intraday check: every read of the day, what SPY has done since each one, and the scored history
-    broken down so we can see what works. Signed-in users only (the public track record stays public)."""
-    if not _session_email(request):
-        raise HTTPException(status_code=401, detail="sign in")
+    broken down so we can see what works. Admin only (the public track record stays public)."""
+    _require_admin(request)
     from .analyze import score_direction
     today = fetch.now_et().date().isoformat()
     day = day or today
@@ -1465,9 +1464,8 @@ async def _desk_scan_task() -> None:
 
 @app.post("/api/desk/scan")
 async def api_desk_scan_start(request: Request) -> JSONResponse:
-    """Start the mid-to-mega-cap scan (about 40 s). Reuses a result younger than 30 minutes."""
-    if not _session_email(request):
-        raise HTTPException(status_code=401, detail="sign in first")
+    """Start the mid-to-mega-cap scan (about 40 s). Reuses a result younger than 30 minutes. Admin only."""
+    _require_admin(request)
     if not state.get("report"):
         return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
     r = state.get("desk_scan")
@@ -1481,8 +1479,7 @@ async def api_desk_scan_start(request: Request) -> JSONResponse:
 
 @app.get("/api/desk/scan")
 async def api_desk_scan(request: Request) -> JSONResponse:
-    if not _session_email(request):
-        raise HTTPException(status_code=401, detail="sign in first")
+    _require_admin(request)
     if state.get("desk_scan_running"):
         return JSONResponse({"status": "running", "started": state.get("desk_scan_started")}, headers={"Cache-Control": "no-store"})
     r = state.get("desk_scan")
