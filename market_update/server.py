@@ -398,7 +398,7 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
         try:
             unsub = f"{_api_root()}/brief/unsubscribe?t={_sign(u['email'])}"
             subject, text, html = mail.brief_email(u.get("name") or "", b, _watch_for_email(u["email"], report), site, unsub)
-            mail.send(u["email"], subject, text, html)
+            mail.send(u["email"], subject, text, html, unsubscribe_url=unsub)
             sent += 1
         except Exception as e:  # noqa: BLE001
             log.warning("briefing email to %s failed: %s", u["email"], e)
@@ -426,7 +426,7 @@ def _mail_close(b: dict[str, Any], day: str) -> None:
         try:
             unsub = f"{_api_root()}/brief/unsubscribe?t={_sign(u['email'])}"
             subject, text, html = mail.close_email(u.get("name") or "", b, _watch_for_email(u["email"], report, closing), site, record, unsub)
-            mail.send(u["email"], subject, text, html)
+            mail.send(u["email"], subject, text, html, unsubscribe_url=unsub)
             sent += 1
         except Exception as e:  # noqa: BLE001
             log.warning("close email to %s failed: %s", u["email"], e)
@@ -1270,6 +1270,12 @@ async def api_brief() -> JSONResponse:
     if not briefs:
         return JSONResponse({"status": "not_ready", "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "ok", "date": day, "briefs": briefs, "slots": [s for s, _ in BRIEF_SLOTS], "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/brief/unsubscribe")
+async def brief_unsubscribe_post(t: str = "") -> HTMLResponse:
+    """One-click unsubscribe (RFC 8058): mail clients POST to the same link."""
+    return await brief_unsubscribe(t)
 
 
 @app.get("/brief/unsubscribe")

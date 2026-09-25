@@ -89,10 +89,12 @@ def signin_email(link: str, minutes: int) -> tuple[str, str, str]:
     return subject, text, html
 
 
-def send(to: str, subject: str, text: str, html: str | None = None) -> str:
-    """Send one message. Returns the transport used; raises on failure or when unconfigured."""
+def send(to: str, subject: str, text: str, html: str | None = None, unsubscribe_url: str | None = None) -> str:
+    """Send one message. Returns the transport used; raises on failure or when unconfigured.
+    `unsubscribe_url` adds the List-Unsubscribe headers that Gmail and Outlook use for inbox placement."""
     p = provider()
     name, addr = _from()
+    extra = {"List-Unsubscribe": f"<{unsubscribe_url}>", "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"} if unsubscribe_url else {}
     if not p:
         raise RuntimeError("no mail transport configured (set MU_RESEND_API_KEY, MU_SENDGRID_API_KEY or MU_SMTP_*)")
     if not addr:
@@ -101,20 +103,22 @@ def send(to: str, subject: str, text: str, html: str | None = None) -> str:
     if p == "resend":
         r = requests.post("https://api.resend.com/emails", timeout=20,
                           headers={"Authorization": f"Bearer {os.environ['MU_RESEND_API_KEY']}", "Content-Type": "application/json"},
-                          json={"from": sender, "to": [to], "subject": subject, "text": text, "html": html or text})
+                          json={"from": sender, "to": [to], "subject": subject, "text": text, "html": html or text, "headers": extra})
         if r.status_code >= 300:
             raise RuntimeError(f"Resend {r.status_code}: {r.text[:200]}")
         return p
     if p == "sendgrid":
         r = requests.post("https://api.sendgrid.com/v3/mail/send", timeout=20,
                           headers={"Authorization": f"Bearer {os.environ['MU_SENDGRID_API_KEY']}", "Content-Type": "application/json"},
-                          json={"personalizations": [{"to": [{"email": to}]}], "from": {"email": addr, "name": name}, "subject": subject,
+                          json={"personalizations": [{"to": [{"email": to}]}], "from": {"email": addr, "name": name}, "subject": subject, "headers": extra,
                                 "content": [{"type": "text/plain", "value": text}] + ([{"type": "text/html", "value": html}] if html else [])})
         if r.status_code >= 300:
             raise RuntimeError(f"SendGrid {r.status_code}: {r.text[:200]}")
         return p
     msg = EmailMessage()
     msg["Subject"], msg["From"], msg["To"] = subject, sender, to
+    for k, v in extra.items():
+        msg[k] = v
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")
@@ -184,6 +188,7 @@ def brief_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
   <div style="font-size:12px;letter-spacing:.14em;color:#245BFF;font-weight:700">ONEVIEW · MORNING BRIEFING</div>
   <h1 style="margin:10px 0 4px;font-size:22px;letter-spacing:-.02em">{e(date_label)}</h1>
   <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#5B6478">Good morning{(", " + e(name)) if name else ""}. Here is what matters before the open, in three minutes.</p>
+  <p style="margin:-6px 0 14px;font-size:12px;line-height:1.5;color:#8A93A6">First time seeing this address? Add {e(_from()[1])} to your contacts so the briefings land in your inbox.</p>
   <p style="margin:0 0 18px;font-size:15px;line-height:1.55">{e(brief.get("summary", ""))}</p>
   <h2 style="margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478">NUMBERS TO KNOW</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{num_rows}</table>
@@ -383,6 +388,7 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         '<tr><td style="padding:18px 24px 8px">',
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + tiles + '</tr></table>',
         '<p style="margin:16px 4px 0;font-size:15px;line-height:1.55">' + e(brief.get("summary", "")) + '</p>',
+        '<p style="margin:8px 4px 0;font-size:12px;line-height:1.5;color:#8A93A6">First time seeing this address? Add ' + e(_from()[1]) + ' to your contacts so the briefings land in your inbox.</p>',
         '<div style="padding:0 4px">' + h2("How our reads went") + reads + '</div>',
         ('<div style="padding:0 4px">' + h2(week_title + ": S&P 500 and Nasdaq 100") + week_html + '</div>') if week_html else "",
         ('<div style="padding:0 4px">' + h2("Market mood") + mood_html + '</div>') if mood_html else "",

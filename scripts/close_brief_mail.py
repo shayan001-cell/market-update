@@ -42,6 +42,6 @@ elif a.to:
     u = db.profile(a.to) or {}
     unsub = f"{server._api_root()}/brief/unsubscribe?t={server._sign(a.to)}"
     subject, text, html = mail.close_email(u.get("name") or "", b, _rows(a.to), site, record, unsub)
-    print("sent via", mail.send(a.to, subject, text, html), "->", a.to)
+    print("sent via", mail.send(a.to, subject, text, html, unsubscribe_url=unsub), "->", a.to)
 elif a.all:
     server._mail_close(b, a.day); print("done; marker:", (server._brief_dir() / f"{a.day}-close.mailed").exists())
