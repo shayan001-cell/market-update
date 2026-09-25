@@ -37,7 +37,7 @@ def _rows(email):
 if a.preview:
     u = db.profile(a.as_email) or {}
     subject, text, html = mail.close_email(u.get("name") or "", b, _rows(a.as_email), site, record, "#")
-    Path(a.preview).write_text(html); print("subject:", subject); print("written", a.preview)
+    Path(a.preview).write_text(html.replace(f"cid:{mail.LOGO_CID}", mail.logo_url())); print("subject:", subject); print("written", a.preview)
 elif a.to:
     u = db.profile(a.to) or {}
     unsub = f"{server._api_root()}/brief/unsubscribe?t={server._sign(a.to)}"

@@ -67,7 +67,7 @@ def signin_email(link: str, minutes: int) -> tuple[str, str, str]:
     text = (f"Sign in to OneView\n\nOpen this link within {minutes} minutes to sign in:\n{link}\n\n"
             f"The link works once. If it has expired, opening it sends you a fresh one.\n"
             f"If you did not request this, you can ignore this email.\n")
-    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#050505;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#E6EAF2">
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head><body style="margin:0;padding:0;background:#050505;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#E6EAF2">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#050505;padding:32px 16px"><tr><td align="center">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#0B0F17;border:1px solid #262B36;border-radius:20px">
 <tr><td style="padding:32px 32px 8px">
@@ -89,6 +89,19 @@ def signin_email(link: str, minutes: int) -> tuple[str, str, str]:
     return subject, text, html
 
 
+LOGO_CID = "oneview-logo"
+LOGO_PATH = config.STATIC_DIR / "brand" / "oneview-logo-email.png"
+
+
+def logo_url() -> str:
+    """Hosted copy of the email logo, used by API providers and as the fallback for clients that skip inline images."""
+    return (os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL).rstrip("/") + "/static/brand/oneview-logo-email.png"
+
+
+def logo_img(width: int = 150) -> str:
+    return f'<img src="cid:{LOGO_CID}" width="{width}" alt="OneView" style="display:block;width:{width}px;height:auto;border:0;outline:none">'
+
+
 def send(to: str, subject: str, text: str, html: str | None = None, unsubscribe_url: str | None = None) -> str:
     """Send one message. Returns the transport used; raises on failure or when unconfigured.
     `unsubscribe_url` adds the List-Unsubscribe headers that Gmail and Outlook use for inbox placement."""
@@ -100,6 +113,8 @@ def send(to: str, subject: str, text: str, html: str | None = None, unsubscribe_
     if not addr:
         raise RuntimeError("MU_MAIL_FROM is not set")
     sender = formataddr((name, addr))
+    if html and p in ("resend", "sendgrid"):
+        html = html.replace(f"cid:{LOGO_CID}", logo_url())
     if p == "resend":
         r = requests.post("https://api.resend.com/emails", timeout=20,
                           headers={"Authorization": f"Bearer {os.environ['MU_RESEND_API_KEY']}", "Content-Type": "application/json"},
@@ -122,6 +137,8 @@ def send(to: str, subject: str, text: str, html: str | None = None, unsubscribe_
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")
+        if f"cid:{LOGO_CID}" in html and LOGO_PATH.exists():
+            msg.get_payload()[1].add_related(LOGO_PATH.read_bytes(), maintype="image", subtype="png", cid=f"<{LOGO_CID}>", filename="oneview-logo.png")
     host, port = os.environ["MU_SMTP_HOST"], int(os.environ.get("MU_SMTP_PORT", "587"))
     user, pw = os.environ.get("MU_SMTP_USER"), os.environ.get("MU_SMTP_PASS", "")
     if port == 465:
@@ -180,25 +197,26 @@ def brief_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
     text_lines += ["", f"Open today's briefing: {site_url}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
     text = "\n".join(text_lines)
     e = lambda x: html_mod.escape(str(x))
-    num_rows = "".join(f'<tr><td style="padding:6px 0;color:#5B6478;font-size:13px">{e(k)}</td><td style="padding:6px 0;text-align:right;font-size:13px;font-weight:600;color:#0A1220;font-variant-numeric:tabular-nums">{e(v)}</td></tr>' for k, v in rows)
-    watch_rows = "".join(f'<tr><td style="padding:7px 0;border-top:1px solid #E6E9F0"><b>{e(w["ticker"])}</b> <span style="color:#5B6478;font-size:12px">{e((w.get("name") or "")[:28])}</span></td><td style="padding:7px 0;border-top:1px solid #E6E9F0;text-align:right;font-variant-numeric:tabular-nums">{e(_fmt_num(w.get("last")))} <span style="color:{"#0F8F5F" if isinstance(w.get("chg_pct"), (int, float)) and w["chg_pct"] >= 0 else "#C43B4E"}">{e(_fmt_pct(w.get("chg_pct")))}</span></td><td style="padding:7px 0 7px 12px;border-top:1px solid #E6E9F0;font-size:12.5px"><b>{e(w.get("read") or "no read yet")}</b>{(" · " + e(w["why"])) if w.get("why") else ""}</td></tr>' for w in watch)
-    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#F3F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#0A1220">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:28px 16px">
-<table role="presentation" width="560" style="max-width:560px;background:#fff;border:1px solid #E6E9F0;border-radius:12px" cellpadding="0" cellspacing="0"><tr><td style="padding:28px 28px 8px">
-  <div style="font-size:12px;letter-spacing:.14em;color:#245BFF;font-weight:700">ONEVIEW · MORNING BRIEFING</div>
+    num_rows = "".join(f'<tr><td style="padding:6px 0;color:#A8B4C8;font-size:13px">{e(k)}</td><td style="padding:6px 0;text-align:right;font-size:13px;font-weight:600;color:#F5F7FC;font-variant-numeric:tabular-nums">{e(v)}</td></tr>' for k, v in rows)
+    watch_rows = "".join(f'<tr><td style="padding:7px 0;border-top:1px solid #29364C"><b>{e(w["ticker"])}</b> <span style="color:#A8B4C8;font-size:12px">{e((w.get("name") or "")[:28])}</span></td><td style="padding:7px 0;border-top:1px solid #29364C;text-align:right;font-variant-numeric:tabular-nums">{e(_fmt_num(w.get("last")))} <span style="color:{"#66D9A6" if isinstance(w.get("chg_pct"), (int, float)) and w["chg_pct"] >= 0 else "#FF8F9B"}">{e(_fmt_pct(w.get("chg_pct")))}</span></td><td style="padding:7px 0 7px 12px;border-top:1px solid #29364C;font-size:12.5px"><b>{e(w.get("read") or "no read yet")}</b>{(" · " + e(w["why"])) if w.get("why") else ""}</td></tr>' for w in watch)
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head><body style="margin:0;background:#080E1D;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#F5F7FC">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="#080E1D" style="padding:28px 16px;background:#080E1D">
+<table role="presentation" width="560" style="max-width:560px;background:#101A2B;border:1px solid #29364C;border-radius:12px" cellpadding="0" cellspacing="0"><tr><td style="padding:28px 28px 8px">
+  {logo_img(150)}
+  <div style="margin-top:12px;font-size:12px;letter-spacing:.14em;color:#85A7FF;font-weight:700">ONEVIEW · MORNING BRIEFING</div>
   <h1 style="margin:10px 0 4px;font-size:22px;letter-spacing:-.02em">{e(date_label)}</h1>
-  <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#5B6478">Good morning{(", " + e(name)) if name else ""}. Here is what matters before the open, in three minutes.</p>
-  <p style="margin:-6px 0 14px;font-size:12px;line-height:1.5;color:#8A93A6">First time seeing this address? Add {e(_from()[1])} to your contacts so the briefings land in your inbox.</p>
+  <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#A8B4C8">Good morning{(", " + e(name)) if name else ""}. Here is what matters before the open, in three minutes.</p>
+  <p style="margin:-6px 0 14px;font-size:12px;line-height:1.5;color:#8E9BB4">First time seeing this address? Add {e(_from()[1])} to your contacts so the briefings land in your inbox.</p>
   <p style="margin:0 0 18px;font-size:15px;line-height:1.55">{e(brief.get("summary", ""))}</p>
-  <h2 style="margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478">NUMBERS TO KNOW</h2>
+  <h2 style="margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#A8B4C8">NUMBERS TO KNOW</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{num_rows}</table>
-  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478'>SPY AND QQQ, 1-HOUR CHART</h2>" + "".join(f"<p style='margin:0 0 6px;font-size:14px;line-height:1.5'>{e(l)}</p>" for l in idx_lines) if idx_lines else ""}
-  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478'>YOUR WATCHLIST</h2><table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='font-size:14px'>" + watch_rows + "</table>" if watch else "<p style='margin:18px 0 0;font-size:13px;color:#5B6478'>Add names to your watchlist on the desk and they will appear here with their reads.</p>"}
-  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#5B6478'>TODAY</h2>" + "".join(f"<div style='font-size:13.5px;line-height:1.5'>{e(x)}</div>" for x in ev) if ev else ""}
+  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#A8B4C8'>SPY AND QQQ, 1-HOUR CHART</h2>" + "".join(f"<p style='margin:0 0 6px;font-size:14px;line-height:1.5'>{e(l)}</p>" for l in idx_lines) if idx_lines else ""}
+  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#A8B4C8'>YOUR WATCHLIST</h2><table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='font-size:14px'>" + watch_rows + "</table>" if watch else "<p style='margin:18px 0 0;font-size:13px;color:#A8B4C8'>Add names to your watchlist on the desk and they will appear here with their reads.</p>"}
+  {"<h2 style='margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#A8B4C8'>TODAY</h2>" + "".join(f"<div style='font-size:13.5px;line-height:1.5'>{e(x)}</div>" for x in ev) if ev else ""}
   {f"<p style='margin:14px 0 0;font-size:13.5px;line-height:1.5'><b>{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President overnight.</b> The read on each is on the desk.</p>" if trump else ""}
-  <p style="margin:22px 0 6px"><a href="{e(site_url)}" style="display:inline-block;background:#245BFF;color:#fff;text-decoration:none;font-weight:600;padding:13px 22px;border-radius:8px;font-size:15px">Open today's briefing</a></p>
-  <p style="margin:0 0 4px;font-size:12.5px;line-height:1.55;color:#5B6478">Why this lands at 7:00: the overnight tape, the yields and the first posts of the day set the tone before the open. Five minutes on the desk now saves a rushed decision at 9:31.</p>
-  <p style="margin:18px 0 0;font-size:11.5px;line-height:1.6;color:#8A93A6">OneView is information, not advice. Reads come from public data and textbook technicals, never a guarantee. You receive this because you signed in to OneView. <a href="{e(unsubscribe_url)}" style="color:#8A93A6">Stop these emails</a>.</p>
+  <p style="margin:22px 0 6px"><a href="{e(site_url)}" style="display:inline-block;background:#245BFF;color:#FFFFFF;text-decoration:none;font-weight:600;padding:13px 22px;border-radius:8px;font-size:15px">Open today's briefing</a></p>
+  <p style="margin:0 0 4px;font-size:12.5px;line-height:1.55;color:#A8B4C8">Why this lands at 7:00: the overnight tape, the yields and the first posts of the day set the tone before the open. Five minutes on the desk now saves a rushed decision at 9:31.</p>
+  <p style="margin:18px 0 0;font-size:11.5px;line-height:1.6;color:#8E9BB4">OneView is information, not advice. Reads come from public data and textbook technicals, never a guarantee. You receive this because you signed in to OneView. <a href="{e(unsubscribe_url)}" style="color:#8E9BB4">Stop these emails</a>.</p>
 </td></tr></table></td></tr></table></body></html>"""
     return subject, text, html
 
@@ -223,7 +241,7 @@ def announcement_email(name: str, site_url: str, group_url: str, unsubscribe_url
     cards = "".join(f"""<tr><td style="padding:0 0 10px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:14px;overflow:hidden;background:#101A2B;border:1px solid #29364C"><tr>
       <td style="width:6px;background:{c}"></td><td style="padding:14px 16px"><div style="font-size:15px;font-weight:800;color:#F5F7FC;letter-spacing:-.01em">{e(t)}</div><div style="font-size:13.5px;line-height:1.5;color:#A8B4C8;margin-top:4px">{e(d)}</div></td></tr></table></td></tr>"""
                     for (t, d), c in zip(changes, ["#245BFF", "#66D9A6", "#E8BD68", "#FF8F9B", "#85A7FF", "#66D9A6", "#245BFF", "#E8BD68"]))
-    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#080E1D;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#F5F7FC">
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head><body style="margin:0;background:#080E1D;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;color:#F5F7FC">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#080E1D"><tr><td align="center" style="padding:28px 14px">
 <table role="presentation" width="600" style="max-width:600px" cellpadding="0" cellspacing="0">
 <tr><td style="padding:0 0 14px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:18px;overflow:hidden;background:linear-gradient(135deg,#245BFF 0%,#1747D1 45%,#0B1220 100%);background-color:#245BFF"><tr><td style="padding:34px 30px">
@@ -260,7 +278,7 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
     names = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "IWM": "Small caps", "DIA": "Dow 30"}
     pct = _fmt_pct
     def col(x: Any) -> str:
-        return "#0E8A5F" if isinstance(x, (int, float)) and x > 0 else "#C0394B" if isinstance(x, (int, float)) and x < 0 else "#5B6478"
+        return "#66D9A6" if isinstance(x, (int, float)) and x > 0 else "#FF8F9B" if isinstance(x, (int, float)) and x < 0 else "#A8B4C8"
     spy = (idx.get("SPY") or {}).get("chg_pct")
     subject = f"OneView after the close · {date_label} · S&P 500 {pct(spy)}"
     hit_rate = sc.get("hit_rate")
@@ -275,11 +293,11 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         verdict = "A hard tape for short reads today. Every one is logged and scored, which is exactly how the process gets better."
     timeline = sc.get("timeline") or []
     def tcell(r: dict[str, Any]) -> str:
-        h = r.get("hit"); c = "#0E8A5F" if h == 1 else "#C0394B" if h == 0 else "#C9D0DC"
+        h = r.get("hit"); c = "#66D9A6" if h == 1 else "#FF8F9B" if h == 0 else "#34435C"
         t = datetime.fromtimestamp(float(r.get("at") or 0)).strftime("%H:%M") if r.get("at") else ""
         return '<td style="padding:0 1px"><div title="' + e(t) + ' ' + e(r.get("expected") or "") + '" style="height:14px;background:' + c + ';border-radius:2px"></div></td>'
     strip = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 2px"><tr>' + "".join(tcell(r) for r in timeline) + '</tr></table>'
-             '<div style="font-size:11px;color:#8A93A6">Each block is one 15-minute read, 09:30 on the left to the close on the right. Green right, red wrong, grey not scored.</div>') if timeline else ""
+             '<div style="font-size:11px;color:#8E9BB4">Each block is one 15-minute read, 09:30 on the left to the close on the right. Green right, red wrong, grey not scored.</div>') if timeline else ""
     leaders = ", ".join(f"{x.get('label')} {pct(x.get('chg_pct'))}" for x in (ses.get("leaders") or [])[:3])
     laggards = ", ".join(f"{x.get('label')} {pct(x.get('chg_pct'))}" for x in (ses.get("laggards") or [])[:3])
     mega = brief.get("mega") or []
@@ -331,64 +349,65 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
     # ---- html ----
     def tile(k: str) -> str:
         x = idx.get(k) or {}
-        return ('<td style="padding:0 4px;width:25%"><div style="background:#F6F8FB;border:1px solid #E6E9F0;border-radius:10px;padding:10px 12px">'
-                '<div style="font-size:11px;letter-spacing:.08em;color:#5B6478;text-transform:uppercase">' + e(names.get(k, k)) + '</div>'
+        return ('<td style="padding:0 4px;width:25%"><div style="background:#131F33;border:1px solid #29364C;border-radius:10px;padding:10px 12px">'
+                '<div style="font-size:11px;letter-spacing:.08em;color:#A8B4C8;text-transform:uppercase">' + e(names.get(k, k)) + '</div>'
                 '<div style="font-size:20px;font-weight:700;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</div>'
-                '<div style="font-size:12px;color:#5B6478">' + e(_fmt_num(x.get("last"))) + '</div></div></td>')
+                '<div style="font-size:12px;color:#A8B4C8">' + e(_fmt_num(x.get("last"))) + '</div></div></td>')
     tiles = "".join(tile(k) for k in ("SPY", "QQQ", "IWM", "DIA") if idx.get(k))
     def h2(t: str) -> str:
-        return '<h2 style="margin:20px 0 8px;font-size:13px;letter-spacing:.06em;color:#5B6478;text-transform:uppercase">' + e(t) + '</h2>'
-    rate_col = "#0E8A5F" if (hit_rate or 0) >= 60 else "#C0394B" if (hit_rate or 0) < 45 else "#0A1220"
+        return '<h2 style="margin:20px 0 8px;font-size:13px;letter-spacing:.06em;color:#A8B4C8;text-transform:uppercase">' + e(t) + '</h2>'
+    rate_col = "#66D9A6" if (hit_rate or 0) >= 60 else "#FF8F9B" if (hit_rate or 0) < 45 else "#F5F7FC"
     reads = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">'
-             '<tr><td style="padding:8px 0;border-top:1px solid #E6E9F0">Our 15-minute reads: <b>' + str(hits) + ' of ' + str(scored) + ' right</b><div style="font-size:12.5px;color:#5B6478">each scored against the close</div></td>'
-             '<td style="padding:8px 0;border-top:1px solid #E6E9F0;text-align:right;vertical-align:top"><span style="font-size:22px;font-weight:700;color:' + rate_col + '">' + e(hit_rate if hit_rate is not None else "–") + '%</span></td></tr></table>'
+             '<tr><td style="padding:8px 0;border-top:1px solid #29364C">Our 15-minute reads: <b>' + str(hits) + ' of ' + str(scored) + ' right</b><div style="font-size:12.5px;color:#A8B4C8">each scored against the close</div></td>'
+             '<td style="padding:8px 0;border-top:1px solid #29364C;text-align:right;vertical-align:top"><span style="font-size:22px;font-weight:700;color:' + rate_col + '">' + e(hit_rate if hit_rate is not None else "–") + '%</span></td></tr></table>'
              + strip + '<p style="margin:10px 0 0;font-size:14px;line-height:1.55">' + e(verdict) + '</p>')
     def week_card(sym: str) -> str:
         w = week.get(sym) or {}
         if not w:
             return ""
         pos = max(0.0, min(1.0, float(w.get("range_pos") or 0)))
-        bar = ('<div style="position:relative;height:8px;background:#E6E9F0;border-radius:4px;margin:8px 0 4px"><div style="position:absolute;left:0;top:0;bottom:0;width:' + str(int(pos * 100)) + '%;background:' + col(w.get("ret_pct")) + ';border-radius:4px"></div></div>'
-               '<div style="display:flex;justify-content:space-between;font-size:11px;color:#8A93A6"><span>low ' + e(w.get("low")) + ' (' + e(w.get("low_day")) + ')</span><span>close ' + e(w.get("close")) + '</span><span>high ' + e(w.get("high")) + ' (' + e(w.get("high_day")) + ')</span></div>')
+        bar = ('<div style="position:relative;height:8px;background:#29364C;border-radius:4px;margin:8px 0 4px"><div style="position:absolute;left:0;top:0;bottom:0;width:' + str(int(pos * 100)) + '%;background:' + col(w.get("ret_pct")) + ';border-radius:4px"></div></div>'
+               '<div style="display:flex;justify-content:space-between;font-size:11px;color:#8E9BB4"><span>low ' + e(w.get("low")) + ' (' + e(w.get("low_day")) + ')</span><span>close ' + e(w.get("close")) + '</span><span>high ' + e(w.get("high")) + ' (' + e(w.get("high_day")) + ')</span></div>')
         bd, wd = w.get("best_day", ["", 0]), w.get("worst_day", ["", 0])
-        return ('<td style="padding:0 4px;width:50%;vertical-align:top"><div style="background:#F6F8FB;border:1px solid #E6E9F0;border-radius:10px;padding:10px 12px">'
-                '<div style="font-size:12px;color:#5B6478">' + e(names.get(sym, sym)) + '</div><div style="font-size:20px;font-weight:700;color:' + col(w.get("ret_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(w.get("ret_pct"))) + ' <span style="font-size:12px;font-weight:500;color:#5B6478">on the week</span></div>'
+        return ('<td style="padding:0 4px;width:50%;vertical-align:top"><div style="background:#131F33;border:1px solid #29364C;border-radius:10px;padding:10px 12px">'
+                '<div style="font-size:12px;color:#A8B4C8">' + e(names.get(sym, sym)) + '</div><div style="font-size:20px;font-weight:700;color:' + col(w.get("ret_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(w.get("ret_pct"))) + ' <span style="font-size:12px;font-weight:500;color:#A8B4C8">on the week</span></div>'
                 + bar + '<div style="font-size:12.5px;line-height:1.5;margin-top:6px">Best day ' + e(bd[0]) + ' <span style="color:' + col(bd[1]) + '">' + e(pct(bd[1])) + '</span>, worst ' + e(wd[0]) + ' <span style="color:' + col(wd[1]) + '">' + e(pct(wd[1])) + '</span>.</div>'
-                '<div style="font-size:12.5px;line-height:1.5;color:#33405A">' + e(str(w.get("shape") or "").capitalize()) + '.</div></div></td>')
+                '<div style="font-size:12.5px;line-height:1.5;color:#C7D0E0">' + e(str(w.get("shape") or "").capitalize()) + '.</div></div></td>')
     week_html = ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + week_card("SPY") + week_card("QQQ") + '</tr></table>') if week else ""
     def mood_chip(label: str, value: str, c: str) -> str:
-        return '<td style="padding:0 3px"><div style="background:#F6F8FB;border:1px solid #E6E9F0;border-radius:10px;padding:8px 10px"><div style="font-size:10.5px;letter-spacing:.08em;color:#5B6478;text-transform:uppercase">' + e(label) + '</div><div style="font-size:13px;font-weight:700;color:' + c + '">' + e(value) + '</div></div></td>'
+        return '<td style="padding:0 3px"><div style="background:#131F33;border:1px solid #29364C;border-radius:10px;padding:8px 10px"><div style="font-size:10.5px;letter-spacing:.08em;color:#A8B4C8;text-transform:uppercase">' + e(label) + '</div><div style="font-size:13px;font-weight:700;color:' + c + '">' + e(value) + '</div></div></td>'
     chips = []
     for s2, v in (mood.get("stocktwits") or {}).items():
-        lbl = v.get("label") or "no read"; c = "#0E8A5F" if "bullish" in lbl else "#C0394B" if "bearish" in lbl else "#0A1220"
+        lbl = v.get("label") or "no read"; c = "#66D9A6" if "bullish" in lbl else "#FF8F9B" if "bearish" in lbl else "#F5F7FC"
         chips.append(mood_chip("StockTwits " + s2, lbl.capitalize() + (f" · {v['bullish_pct']:.0f}%" if isinstance(v.get("bullish_pct"), (int, float)) else ""), c))
     for s2, v in (mood.get("reddit") or {}).items():
-        lbl = (v.get("sentiment") or "neutral"); c = "#0E8A5F" if lbl.lower() == "bullish" else "#C0394B" if lbl.lower() == "bearish" else "#0A1220"
+        lbl = (v.get("sentiment") or "neutral"); c = "#66D9A6" if lbl.lower() == "bullish" else "#FF8F9B" if lbl.lower() == "bearish" else "#F5F7FC"
         chips.append(mood_chip("Reddit " + s2, lbl.capitalize() + (f" · {v['mentions']} mentions" if v.get("mentions") else ""), c))
     tr = mood.get("trump") or {}
     if tr.get("n"):
-        chips.append(mood_chip("President", f"{tr.get('bullish', 0)} bullish · {tr.get('bearish', 0)} bearish", "#0A1220"))
+        chips.append(mood_chip("President", f"{tr.get('bullish', 0)} bullish · {tr.get('bearish', 0)} bearish", "#F5F7FC"))
     bdp = mood.get("backdrop") or {}
     if bdp.get("headline"):
-        chips.append(mood_chip("Backdrop", f"{bdp['headline']} · {bdp.get('verdict') or ''}", "#0A1220"))
+        chips.append(mood_chip("Backdrop", f"{bdp['headline']} · {bdp.get('verdict') or ''}", "#F5F7FC"))
     mood_html = (('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + "".join(chips[:4]) + '</tr></table>' if chips else "")
                  + (('<p style="margin:10px 0 0;font-size:14px;line-height:1.55">' + e(mood.get("meaning") or "") + '</p>') if mood.get("meaning") else "")) if mood else ""
-    mega_rows = "".join('<td style="padding:4px 2px;width:12.5%"><div style="background:#F6F8FB;border-radius:8px;padding:6px 4px;text-align:center"><div style="font-size:12px;font-weight:700">' + e(x.get("ticker")) + '</div><div style="font-size:12px;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</div></div></td>' for x in mega[:8])
-    mover_rows = "".join('<tr><td style="padding:6px 0;border-top:1px solid #E6E9F0"><b>' + e(x.get("ticker")) + '</b> <span style="color:#5B6478;font-size:12px">' + e((x.get("name") or "")[:30]) + '</span></td><td style="padding:6px 0;border-top:1px solid #E6E9F0;text-align:right;font-weight:600;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</td></tr>' for x in movers)
-    plan_html = "".join('<div style="margin:0 0 10px"><div style="font-size:14px"><b>' + e(sym) + ' ' + e(_fmt_num(last)) + '</b> · ' + e(shape) + '</div><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;line-height:1.5;color:#33405A">' + "".join('<li>' + e(l) + '</li>' for l in levels) + '</ul></div>' for sym, last, shape, levels in plans)
-    watch_rows = "".join('<tr><td style="padding:7px 0;border-top:1px solid #E6E9F0"><b>' + e(w["ticker"]) + '</b> <span style="color:#5B6478;font-size:12px">' + e((w.get("name") or "")[:28]) + '</span></td><td style="padding:7px 0;border-top:1px solid #E6E9F0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">' + e(_fmt_num(w.get("last"))) + ' <span style="color:' + col(w.get("chg_pct")) + '">' + e(pct(w.get("chg_pct"))) + '</span></td><td style="padding:7px 0 7px 10px;border-top:1px solid #E6E9F0;font-size:12.5px;color:#33405A">' + e(w.get("read") or "no read yet") + '</td></tr>' for w in watch)
+    mega_rows = "".join('<td style="padding:4px 2px;width:12.5%"><div style="background:#131F33;border-radius:8px;padding:6px 4px;text-align:center"><div style="font-size:12px;font-weight:700">' + e(x.get("ticker")) + '</div><div style="font-size:12px;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</div></div></td>' for x in mega[:8])
+    mover_rows = "".join('<tr><td style="padding:6px 0;border-top:1px solid #29364C"><b>' + e(x.get("ticker")) + '</b> <span style="color:#A8B4C8;font-size:12px">' + e((x.get("name") or "")[:30]) + '</span></td><td style="padding:6px 0;border-top:1px solid #29364C;text-align:right;font-weight:600;color:' + col(x.get("chg_pct")) + ';font-variant-numeric:tabular-nums">' + e(pct(x.get("chg_pct"))) + '</td></tr>' for x in movers)
+    plan_html = "".join('<div style="margin:0 0 10px"><div style="font-size:14px"><b>' + e(sym) + ' ' + e(_fmt_num(last)) + '</b> · ' + e(shape) + '</div><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;line-height:1.5;color:#C7D0E0">' + "".join('<li>' + e(l) + '</li>' for l in levels) + '</ul></div>' for sym, last, shape, levels in plans)
+    watch_rows = "".join('<tr><td style="padding:7px 0;border-top:1px solid #29364C"><b>' + e(w["ticker"]) + '</b> <span style="color:#A8B4C8;font-size:12px">' + e((w.get("name") or "")[:28]) + '</span></td><td style="padding:7px 0;border-top:1px solid #29364C;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">' + e(_fmt_num(w.get("last"))) + ' <span style="color:' + col(w.get("chg_pct")) + '">' + e(pct(w.get("chg_pct"))) + '</span></td><td style="padding:7px 0 7px 10px;border-top:1px solid #29364C;font-size:12.5px;color:#C7D0E0">' + e(w.get("read") or "no read yet") + '</td></tr>' for w in watch)
     parts = [
-        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#F3F5F9;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Helvetica Neue\',Arial,sans-serif;color:#0A1220">',
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:28px 16px">',
-        '<table role="presentation" width="600" style="max-width:600px;background:#fff;border:1px solid #E6E9F0;border-radius:14px" cellpadding="0" cellspacing="0">',
-        '<tr><td style="padding:22px 28px 14px;background:#0B1324;border-radius:14px 14px 0 0">',
-        '<div style="font-size:11px;letter-spacing:.16em;color:#85A7FF;font-weight:700">ONEVIEW · AFTER THE CLOSE</div>',
-        '<h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:-.02em;color:#fff">' + e(date_label) + '</h1>',
+        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"></head><body style="margin:0;background:#080E1D;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Helvetica Neue\',Arial,sans-serif;color:#F5F7FC">',
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" bgcolor="#080E1D" style="padding:28px 16px;background:#080E1D">',
+        '<table role="presentation" width="600" style="max-width:600px;background:#101A2B;border:1px solid #29364C;border-radius:14px" cellpadding="0" cellspacing="0">',
+        '<tr><td style="padding:22px 28px 14px;background:#0F1B36;border-radius:14px 14px 0 0">',
+        logo_img(150),
+        '<div style="margin-top:12px;font-size:11px;letter-spacing:.16em;color:#85A7FF;font-weight:700">ONEVIEW · AFTER THE CLOSE</div>',
+        '<h1 style="margin:8px 0 2px;font-size:22px;letter-spacing:-.02em;color:#F5F7FC">' + e(date_label) + '</h1>',
         '<div style="font-size:13px;color:#A8B4C8">What the market did, how the week went, the mood, and the levels into ' + e(next_session) + '.</div></td></tr>',
         '<tr><td style="padding:18px 24px 8px">',
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + tiles + '</tr></table>',
         '<p style="margin:16px 4px 0;font-size:15px;line-height:1.55">' + e(brief.get("summary", "")) + '</p>',
-        '<p style="margin:8px 4px 0;font-size:12px;line-height:1.5;color:#8A93A6">First time seeing this address? Add ' + e(_from()[1]) + ' to your contacts so the briefings land in your inbox.</p>',
+        '<p style="margin:8px 4px 0;font-size:12px;line-height:1.5;color:#8E9BB4">First time seeing this address? Add ' + e(_from()[1]) + ' to your contacts so the briefings land in your inbox.</p>',
         '<div style="padding:0 4px">' + h2("How our reads went") + reads + '</div>',
         ('<div style="padding:0 4px">' + h2(week_title + ": S&P 500 and Nasdaq 100") + week_html + '</div>') if week_html else "",
         ('<div style="padding:0 4px">' + h2("Market mood") + mood_html + '</div>') if mood_html else "",
@@ -396,11 +415,11 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         ('<p style="margin:0 0 8px;font-size:14px;line-height:1.5"><b>Leading:</b> ' + e(leaders) + '. <b>Lagging:</b> ' + e(laggards) + '.</p>' if leaders else "") +
         ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + mega_rows + '</tr></table>' if mega else "") +
         ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin-top:6px">' + mover_rows + '</table>' if movers else "") +
-        ('<p style="margin:8px 0 0;font-size:13px;color:#5B6478;line-height:1.5">' + e(breadth) + ' 10-year yield ' + e(_fmt_num(y.get("10y"))) + '%.</p>' if breadth else "") + '</div>',
+        ('<p style="margin:8px 0 0;font-size:13px;color:#A8B4C8;line-height:1.5">' + e(breadth) + ' 10-year yield ' + e(_fmt_num(y.get("10y"))) + '%.</p>' if breadth else "") + '</div>',
         ('<div style="padding:0 4px">' + h2("Into " + next_session) + plan_html + '</div>') if plans else "",
         ('<div style="padding:0 4px">' + h2("Your watchlist at the close") + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">' + watch_rows + '</table></div>') if watch else "",
         ('<p style="margin:14px 4px 0;font-size:13.5px;line-height:1.5"><b>' + str(len(trump)) + ' market-relevant post' + ('s' if len(trump) > 1 else '') + ' from the President today.</b> The read on each is on OneView.</p>') if trump else "",
-        '<p style="margin:22px 4px 6px"><a href="' + e(site_url) + '" style="display:inline-block;background:#245BFF;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;font-size:14px">Open OneView</a></p>',
-        '<p style="margin:14px 4px 0;font-size:11.5px;line-height:1.6;color:#8A93A6">OneView is information, not advice. Reads come from public data, fixed rules and typed model judgments, scored every day against what the market actually did, never a guarantee. You receive this because you signed in to OneView. <a href="' + e(unsubscribe_url) + '" style="color:#8A93A6">Stop these emails</a>.</p>',
+        '<p style="margin:22px 4px 6px"><a href="' + e(site_url) + '" style="display:inline-block;background:#245BFF;color:#FFFFFF;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px;font-size:14px">Open OneView</a></p>',
+        '<p style="margin:14px 4px 0;font-size:11.5px;line-height:1.6;color:#8E9BB4">OneView is information, not advice. Reads come from public data, fixed rules and typed model judgments, scored every day against what the market actually did, never a guarantee. You receive this because you signed in to OneView. <a href="' + e(unsubscribe_url) + '" style="color:#8E9BB4">Stop these emails</a>.</p>',
         '</td></tr></table></td></tr></table></body></html>']
     return subject, text, "".join(parts)
