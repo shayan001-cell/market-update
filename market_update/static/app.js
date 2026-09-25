@@ -1900,7 +1900,47 @@
     try { const r2 = await api("/api/stocktwits/status", { cache: "no-store" }); if (r2.ok) { const j = await r2.json(); const el = $("#st-status"); if (el) el.textContent = j.connected ? `Connected · token renews itself · callback ${j.callback}` : `Not connected yet. The sign-in returns to ${j.callback}.`; } } catch (e) {}
   }
   const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() / 1000) - t); return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
-  let deskData = null, deskOpen = null, deskScope = "mine";
+  let deskData = null, deskOpen = null, deskScope = "mine", deskScan = null, deskScanTimer = null, deskScanFilter = "all";
+  async function loadDeskScan(start) {
+    if (STATIC_MODE) return;
+    try {
+      const res = await api("/api/desk/scan", start ? { method: "POST" } : { cache: "no-store" });
+      const j = await res.json();
+      deskScan = j;
+      if (j.status === "running") { if (!deskScanTimer) deskScanTimer = setInterval(() => loadDeskScan(false), 5000); }
+      else if (deskScanTimer) { clearInterval(deskScanTimer); deskScanTimer = null; }
+      if (currentView === "desk") renderAll();
+    } catch (e) {}
+  }
+  function secDeskScan(d) {
+    const S = deskScan;
+    const btn = `<button class="btn sm" type="button" data-desk-scan ${S && S.status === "running" ? "disabled" : ""}>${S && S.status === "running" ? "Scanning…" : S && S.status === "ok" ? "Scan again" : "Scan mid to mega caps"}</button>`;
+    let body = "";
+    if (!S || S.status === "none") body = `<div class="meta2">Runs the three-score rulebook over every S&P 500 and S&P 400 name (about 900 stocks, mid cap to mega cap) and keeps the ones where trend and momentum are both positive. Takes about a minute.</div>`;
+    else if (S.status === "running") body = `<div class="meta2">Downloading two years of daily bars for about 900 names and scoring them… ${S.started ? Math.round(Date.now() / 1000 - S.started) + " s" : ""}</div>`;
+    else if (S.status === "error") body = `<div class="meta2 down">The scan failed: ${esc(S.detail || "")}</div>`;
+    else if (S.status === "warming") body = `<div class="meta2">The first report is still building; try again in a minute.</div>`;
+    else if (S.status === "ok") {
+      const filters = [["all", `All strong (${S.strong_total || 0})`], ["re_entry", `Fresh entry (${(S.by_read || {}).re_entry || 0})`], ["tactical_rebound", `Quick bounce (${(S.by_read || {}).tactical_rebound || 0})`], ["wait", `Healthy, wait (${(S.by_read || {}).wait || 0})`], ["mega", `Mega cap (${(S.by_bucket || {}).mega || 0})`], ["mid", `Mid cap (${(S.by_bucket || {}).mid || 0})`]];
+      let rows = S.strong || [];
+      if (["re_entry", "tactical_rebound", "wait"].includes(deskScanFilter)) rows = rows.filter((c) => c.flat.code === deskScanFilter);
+      else if (["mega", "mid"].includes(deskScanFilter)) rows = rows.filter((c) => c.bucket === deskScanFilter);
+      const dist = Object.entries(S.distribution || {}).map(([k, v]) => [Number(k), v]).sort((a, b) => b[0] - a[0]).map(([k, v]) => `<span class="tag ${k >= 3 ? "ok" : k <= -3 ? "warn" : ""}">${k > 0 ? "+" : ""}${k}: ${v}</span>`).join(" ");
+      const bucketWord = { mega: "Mega cap", large: "Large cap", mid: "Mid cap" };
+      const capTxt = (c) => (isNum(c.market_cap) ? (c.market_cap >= 1e12 ? (c.market_cap / 1e12).toFixed(1) + " T" : (c.market_cap / 1e9).toFixed(0) + " B") : "");
+      const row = (c) => { const dec = c.flat; const open = deskOpen === "scan:" + c.ticker; const fl = c.flags || {};
+        const flagList = [...(fl.rebound || []).map((x) => ["up", x]), ...(fl.exhaustion || []).map((x) => ["caution", x]), ...(fl.bearish || []).map((x) => ["down", x])];
+        return `<tr class="desk-row ${open ? "open" : ""}" data-desk-open="scan:${esc(c.ticker)}"><td class="sym"><b>${esc(c.ticker)}</b><div class="meta2">${esc(c.name || "")}</div></td><td class="small">${esc(bucketWord[c.bucket] || c.bucket)}${capTxt(c) ? `<div class="meta2">$${capTxt(c)}</div>` : ""}</td><td class="small">${esc(c.sector || "")}</td><td class="num">${fnum(c.price)}</td><td>${pillarChip(c.trend.score, "Trend")}</td><td>${pillarChip(c.momentum.score, "Momentum")}</td><td>${pillarChip(c.macro, "Macro")}</td><td class="num"><b>${c.total > 0 ? "+" : ""}${c.total}</b> <span class="muted">/ ${S.max_total > 0 ? "+" : ""}${S.max_total}</span></td><td><span class="pill ${dec.cls}">${esc(dec.word)}</span></td></tr>
+          ${open ? `<tr class="desk-detail"><td colspan="9"><div class="desk-plain"><b>${esc(dec.word)}.</b> ${esc(dec.plain)}</div><div class="meta2">${esc(dec.rationale)} ${esc(dec.framing)}</div><div class="desk-flags">${flagList.length ? flagList.map(([k, x]) => `<span class="tag ${k === "up" ? "ok" : k === "down" ? "warn" : ""}">${esc(x)}</span>`).join(" ") : '<span class="muted">No warning or bounce signals right now.</span>'}</div><div class="meta2">Trend: ${esc(c.trend.detail)} · Momentum: ${esc(c.momentum.detail)}</div></td></tr>` : ""}`; };
+      body = `<div class="scan-meaning">${(S.meaning || []).map((m) => `<p>${esc(m)}</p>`).join("")}</div>
+        <div class="meta2" style="margin:6px 0">Totals across all ${S.usable} scored names: ${dist}</div>
+        <div class="tabs subtabs" style="margin:8px 0">${filters.map(([k, l]) => `<button class="tab ${deskScanFilter === k ? "active" : ""}" data-desk-scan-filter="${k}">${l}</button>`).join("")}</div>
+        <div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th>Size</th><th>Sector</th><th class="num">Price</th><th>Trend</th><th>Momentum</th><th>Macro</th><th class="num">Total</th><th>Read</th></tr></thead><tbody>${rows.map(row).join("") || '<tr><td colspan="9" class="muted">Nothing in this group.</td></tr>'}</tbody></table></div>
+        <div class="meta2" style="margin-top:6px">Universe: ${esc(S.universe || "")}. Kept: ${esc(S.criteria || "")}. Scanned ${esc((S.generated_at || "").slice(11, 16))} ET; a result is reused for 30 minutes. Click a row for the reasons.</div>`;
+    }
+    return `<div class="card scan-card" style="margin-bottom:12px"><h3>Mid cap to mega cap scan <span class="muted">which big names score high on all three, out of how many, and what it means</span></h3>
+      <div class="wc-actions" style="margin:8px 0">${btn}${S && S.status === "ok" ? `<span class="meta2">${S.strong_total} strong of ${S.usable} scored</span>` : ""}</div>${body}</div>`;
+  }
   let deskHold = {}; try { deskHold = JSON.parse(localStorage.getItem("mu-desk-hold") || "{}") || {}; } catch (e) { deskHold = {}; }
   function toggleHold(t) { deskHold[t] = !deskHold[t]; try { localStorage.setItem("mu-desk-hold", JSON.stringify(deskHold)); } catch (e) {} renderAll(); }
   async function loadDesk() {
@@ -1946,6 +1986,7 @@
         <p class="mood-why">${esc(m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are moving together (inflation flag)." : ""}</p>
         <div class="facts">${comp}</div></div>
       <div class="tabs subtabs" style="margin-bottom:8px">${scopes.map(([k, l]) => `<button class="tab ${deskScope === k ? "active" : ""}" data-desk-scope="${k}">${l}</button>`).join("")}<span class="muted small" style="margin-left:auto">${tallies}</span></div>
+      ${secDeskScan(d)}
       ${tvBar}
       ${missing.length ? `<div class="meta2" style="margin-bottom:8px">Not scored yet (need 60+ daily bars or not in this pass): ${missing.map(esc).join(", ")}</div>` : ""}
       <div class="card"><div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="num">Price</th><th>Trend</th><th>Momentum</th><th>Macro</th><th class="num">Total</th><th>Read</th><th>You</th></tr></thead>
@@ -2034,7 +2075,7 @@
     if (k === "admin" && !(user && user.role === "admin")) return;
     if (k === "record") loadRecord();
     if (k === "check") loadCheck();
-    if (k === "desk") loadDesk();
+    if (k === "desk") { loadDesk(); if (!deskScan) loadDeskScan(false); }
     currentView = k; try { history.replaceState(null, "", "#view=" + k); } catch (e) {}
     if (report) renderAll();
   }
@@ -2106,6 +2147,8 @@
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
     document.querySelectorAll("[data-desk-hold]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleHold(b.getAttribute("data-desk-hold")); }));
     document.querySelectorAll("[data-desk-open]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-desk-open"); deskOpen = deskOpen === t ? null : t; renderAll(); }));
+    const scb = $("[data-desk-scan]"); if (scb) scb.addEventListener("click", () => { deskScan = { status: "running", started: Date.now() / 1000 }; renderAll(); loadDeskScan(true); });
+    document.querySelectorAll("[data-desk-scan-filter]").forEach((b) => b.addEventListener("click", () => { deskScanFilter = b.getAttribute("data-desk-scan-filter"); renderAll(); }));
     const tvb = $("[data-desk-tv]"); if (tvb) tvb.addEventListener("click", async () => {
       const d = deskData || {}; const mine = new Set(((lists && lists.lists && lists.lists[lists.active]) || []).map((x) => (typeof x === "string" ? x : x.ticker || "").toUpperCase()));
       let syms = (d.cards || []).filter((c) => deskScope === "mine" ? mine.has(c.ticker) : deskScope === "index" ? (d.index || []).includes(c.ticker) || (d.sectors || []).includes(c.ticker) : true).map((c) => c.ticker);

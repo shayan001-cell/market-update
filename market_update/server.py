@@ -1435,6 +1435,69 @@ async def api_desk_tv(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "pulled": sorted(pulled), "missing": [s for s in symbols if s not in pulled], "cards": cards}, headers={"Cache-Control": "no-store"})
 
 
+def _desk_scan_sync() -> dict[str, Any]:
+    from .desk import scan_mid_to_mega
+    r = scan_mid_to_mega(state["report"])
+    rows = [{"ticker": c["ticker"], "kind": "desk", "verdict": c["flat"]["code"], "price": c["price"], "build_id": f"scan-{r['generated_at'][:16]}"}
+            for c in r["strong"] if c["flat"]["code"] in ("re_entry", "tactical_rebound")]
+    try:
+        db.log_verdicts(rows)
+    except Exception:  # noqa: BLE001
+        log.exception("desk scan ledger failed")
+    try:
+        (DATA_DIR / "desk_scan.json").write_text(json.dumps(r, default=str))
+    except Exception:  # noqa: BLE001
+        pass
+    log.info("desk scan: %d strong of %d usable", r["strong_total"], r["usable"])
+    return r
+
+
+async def _desk_scan_task() -> None:
+    try:
+        state["desk_scan"] = await asyncio.to_thread(_desk_scan_sync)
+        state["desk_scan_error"] = None
+    except Exception as e:  # noqa: BLE001
+        log.exception("desk scan failed")
+        state["desk_scan_error"] = f"{type(e).__name__}: {e}"
+    finally:
+        state["desk_scan_running"] = False
+
+
+@app.post("/api/desk/scan")
+async def api_desk_scan_start(request: Request) -> JSONResponse:
+    """Start the mid-to-mega-cap scan (about 40 s). Reuses a result younger than 30 minutes."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    if not state.get("report"):
+        return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
+    r = state.get("desk_scan")
+    if r and time.time() - state.get("desk_scan_at", 0) < 1800:
+        return JSONResponse({"status": "ok", "fresh": True, **r}, headers={"Cache-Control": "no-store"})
+    if not state.get("desk_scan_running"):
+        state["desk_scan_running"] = True; state["desk_scan_at"] = time.time(); state["desk_scan_started"] = time.time()
+        asyncio.create_task(_desk_scan_task())
+    return JSONResponse({"status": "running", "started": state.get("desk_scan_started")}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/desk/scan")
+async def api_desk_scan(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    if state.get("desk_scan_running"):
+        return JSONResponse({"status": "running", "started": state.get("desk_scan_started")}, headers={"Cache-Control": "no-store"})
+    r = state.get("desk_scan")
+    if not r and (DATA_DIR / "desk_scan.json").exists():
+        try:
+            r = state["desk_scan"] = json.loads((DATA_DIR / "desk_scan.json").read_text())
+        except Exception:  # noqa: BLE001
+            r = None
+    if state.get("desk_scan_error") and not r:
+        return JSONResponse({"status": "error", "detail": state["desk_scan_error"]}, headers={"Cache-Control": "no-store"})
+    if not r:
+        return JSONResponse({"status": "none"}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", **r}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/desk")
 async def api_desk(request: Request) -> JSONResponse:
     if not _session_email(request):

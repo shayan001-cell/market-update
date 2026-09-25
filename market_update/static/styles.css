@@ -1719,3 +1719,6 @@ tr.day-detail td { background: var(--surface-2); }
 .desk .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px}
 
 .src-badge.tv{color:#85A7FF;background:rgba(36,91,255,.14);border-color:rgba(133,167,255,.45)}
+
+.desk .scan-meaning p{margin:4px 0;font-size:14px;line-height:1.5}
+.desk .scan-meaning p:first-child{font-weight:600}

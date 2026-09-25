@@ -1091,3 +1091,31 @@ def fetch_reddit_crowd() -> dict[str, Any]:
     if sources:
         _cache_put("reddit_crowd", out)
     return out
+
+
+def fetch_index_members() -> list[dict[str, Any]]:
+    """S&P 500 (large and mega caps) and S&P 400 (mid caps) members from Wikipedia, cached for a week.
+    Rows: {symbol, name, sector, index}."""
+    cached = _cache_get("index_members", 7 * 86400)
+    if cached:
+        return cached
+    import io, urllib.request
+    out: list[dict[str, Any]] = []
+    for idx, url in (("sp500", "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"),
+                     ("sp400", "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies")):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (OneView)"})
+            html = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", "ignore")
+            df = pd.read_html(io.StringIO(html))[0]
+            for _, r in df.iterrows():
+                sym = str(r.get("Symbol") or "").strip().replace(".", "-")
+                if sym and sym != "nan":
+                    out.append({"symbol": sym, "name": str(r.get("Security") or sym), "sector": str(r.get("GICS Sector") or ""), "index": idx})
+        except Exception as e:  # noqa: BLE001
+            log.warning("index members %s failed: %s", idx, e)
+    if out:
+        _cache_put("index_members", out)
+    else:
+        cached = _cache_get("index_members", -1)
+        return cached or []
+    return out

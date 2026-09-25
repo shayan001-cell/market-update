@@ -161,3 +161,89 @@ def rescore(desk: dict[str, Any], pulled: dict[str, dict[str, Any]]) -> list[dic
             else:
                 desk["cards"].append(c)
     return out
+
+
+# Names above roughly $200B when the market-cap cache has no figure (refreshed by hand; the cache wins when present).
+MEGA_CAPS = {"AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "AVGO", "BRK-B", "LLY", "JPM", "WMT", "V", "MA", "XOM", "UNH", "ORCL",
+             "COST", "NFLX", "JNJ", "HD", "PG", "ABBV", "BAC", "CVX", "KO", "AMD", "CRM", "TMUS", "CSCO", "PM", "WFC", "MRK", "ABT", "LIN", "MCD",
+             "PEP", "IBM", "GE", "ACN", "MS", "GS", "ISRG", "AXP", "NOW", "TMO", "DIS", "QCOM", "INTU", "CAT", "TXN", "VZ", "BKNG", "ADBE", "AMGN",
+             "RTX", "PLTR", "UBER", "T", "SPGI", "PFE", "MU", "INTC", "ANET", "APP", "GEV", "LRCX", "AMAT", "KLAC", "BLK", "NEE", "LOW", "PGR", "HON"}
+
+
+def _cap_bucket(sym: str, index: str, caps: dict[str, float]) -> str:
+    cap = caps.get(sym)
+    if isinstance(cap, (int, float)) and cap > 0:
+        return "mega" if cap >= 2e11 else "large" if cap >= 1e10 else "mid"
+    if sym in MEGA_CAPS:
+        return "mega"
+    return "large" if index == "sp500" else "mid"
+
+
+def scan_mid_to_mega(report: dict[str, Any]) -> dict[str, Any]:
+    """Score every S&P 500 and S&P 400 name with the three-pillar framework and keep the strong ones:
+    trend and momentum both positive and a total of +3 or better out of +6."""
+    members = fetch.fetch_index_members()
+    syms = list(dict.fromkeys(m["symbol"] for m in members))
+    meta = {m["symbol"]: m for m in members}
+    hist = fetch.download(list(dict.fromkeys(MACRO_SYMBOLS + syms)), period="2y", interval="1d", prepost=False)
+    series = {s: _closes(fetch.frame_for(hist, s)) for s in list(dict.fromkeys(MACRO_SYMBOLS + syms))}
+    macro = _macro({s: series[s] for s in MACRO_SYMBOLS}, report)
+    macro_score = macro["pillar"] if macro else None
+    caps: dict[str, float] = {}
+    for t, q in (report.get("lite") or {}).items():
+        mc = ((q.get("fundamentals") or {}).get("market_cap"))
+        if isinstance(mc, (int, float)):
+            caps[t] = float(mc)
+    for st in report.get("stocks") or []:
+        mc = (st.get("fundamentals") or {}).get("market_cap")
+        if isinstance(mc, (int, float)):
+            caps[st["ticker"]] = float(mc)
+    try:
+        store = fetch._cache_get("info_last_good", -1) or {}
+        for t, v in store.items():
+            mc = (v.get("data") or v).get("market_cap") if isinstance(v, dict) else None
+            if isinstance(mc, (int, float)) and t not in caps:
+                caps[t] = float(mc)
+    except Exception:  # noqa: BLE001
+        pass
+    cards, usable = [], 0
+    dist: dict[str, int] = {}
+    for sym in syms:
+        closes = series.get(sym) or []
+        if len(closes) < 210:
+            continue
+        m = meta[sym]
+        c = _card(sym, closes, macro_score, {"name": m["name"], "kind": "Stock"})
+        if not c:
+            continue
+        usable += 1
+        c["sector"] = m.get("sector") or ""
+        c["index"] = m["index"]
+        c["bucket"] = _cap_bucket(sym, m["index"], caps)
+        c["market_cap"] = caps.get(sym)
+        dist[str(c["total"])] = dist.get(str(c["total"]), 0) + 1
+        if c["trend"]["score"] >= 1 and c["momentum"]["score"] >= 1 and c["total"] >= 3:
+            cards.append(c)
+    cards.sort(key=lambda c: (-c["total"], -c["momentum"]["score"], -c["trend"]["score"], c["ticker"]))
+    max_total = 4 + (macro_score if macro_score is not None else 0)
+    by_read: dict[str, int] = {}
+    by_bucket: dict[str, int] = {}
+    by_sector: dict[str, int] = {}
+    for c in cards:
+        by_read[c["flat"]["code"]] = by_read.get(c["flat"]["code"], 0) + 1
+        by_bucket[c["bucket"]] = by_bucket.get(c["bucket"], 0) + 1
+        by_sector[c["sector"]] = by_sector.get(c["sector"], 0) + 1
+    top_sectors = sorted(by_sector.items(), key=lambda x: -x[1])[:4]
+    fresh = by_read.get("re_entry", 0); bounce = by_read.get("tactical_rebound", 0); wait = by_read.get("wait", 0)
+    meaning = [
+        f"{len(cards)} of {usable} mid-, large- and mega-cap names have both a positive trend score and a positive momentum score with a total of +3 or better. The best possible total today is {max_total:+d}, because the shared macro score is {macro_score:+d}." if macro_score is not None else
+        f"{len(cards)} of {usable} names have a positive trend and momentum score with a total of +3 or better (macro score unavailable).",
+        f"{wait} of them read 'wait, do not chase': the trend is healthy but the move is already under way, so the framework wants a pullback to the 20-day line before treating it as an entry." if wait else "",
+        f"{fresh} show a fresh-entry trigger (a bounce with the longer-term structure intact) and {bounce} a quick-bounce-only read inside a downtrend." if (fresh or bounce) else "No name in the strong group shows a fresh-entry trigger right now: strength is established, not just starting.",
+        ("Strength is concentrated in " + ", ".join(f"{k} ({v})" for k, v in top_sectors) + ".") if top_sectors else "",
+        "A high total means the trend and momentum maths agree, not that the stock will keep going: the same framework flags 'exhaustion' when a strong name stretches too far. Information, not advice.",
+    ]
+    return {"generated_at": datetime.now(tz=config.ET).isoformat(), "scanned": len(syms), "usable": usable, "macro": macro, "max_total": max_total,
+            "strong": cards[:120], "strong_total": len(cards), "distribution": dist, "by_read": by_read, "by_bucket": by_bucket, "by_sector": dict(top_sectors),
+            "meaning": [x for x in meaning if x], "universe": "S&P 500 (large and mega caps) plus S&P 400 (mid caps), members from Wikipedia, refreshed weekly",
+            "criteria": "trend score >= +1, momentum score >= +1, total >= +3 (out of +6)"}
