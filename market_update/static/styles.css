@@ -1717,3 +1717,5 @@ tr.day-detail td { background: var(--surface-2); }
 .desk .tag.ok{color:var(--positive,#66D9A6);border-color:rgba(102,217,166,.4)}
 .desk .tag.warn{color:var(--negative,#FF8F9B);border-color:rgba(255,143,155,.4)}
 .desk .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px}
+
+.src-badge.tv{color:#85A7FF;background:rgba(36,91,255,.14);border-color:rgba(133,167,255,.45)}

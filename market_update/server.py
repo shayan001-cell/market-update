@@ -657,10 +657,15 @@ async def _startup() -> None:
     asyncio.create_task(live_scanner())
 
 
+from .render import static_version as _static_version
+_APP_VERSION = _static_version()
+
+
 @app.get("/")
 async def index(request: Request) -> HTMLResponse:
     """Serve index.html with asset URLs versioned by file mtime, so a deploy never fights a browser cache."""
     html = (config.STATIC_DIR / "index.html").read_text()
+    html = html.replace('<script src="/static/app.js"></script>', f'<script>window.MU_VERSION = "{_APP_VERSION}";</script>\n<script src="/static/app.js"></script>')
     html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request)).replace("__APP_URL__", "").replace("__API_URL__", "")
     for name in ("app.js", "styles.css"):
         v = int((config.STATIC_DIR / name).stat().st_mtime)
@@ -689,6 +694,7 @@ async def api_status() -> dict[str, Any]:
         "next_scheduled_in_s": max(0, int(_interval() - (now - (state["last_build_finished"] or 0)))),
         "refresh_available_in_s": max(0, int(config.REFRESH_COOLDOWN_S - (now - state["last_manual_refresh"]))),
         "ai_enabled": USE_AI,
+        "app_version": _APP_VERSION,
     }
 
 
@@ -1396,6 +1402,39 @@ async def desk_loop() -> None:
         await asyncio.sleep(60)
 
 
+_tv_probe: dict[str, Any] = {"at": 0.0, "ok": False}
+_tv_lock = asyncio.Lock()
+
+
+def _tv_available() -> bool:
+    from . import tvbridge
+    if time.time() - _tv_probe["at"] > 60:
+        _tv_probe["ok"] = tvbridge.available(); _tv_probe["at"] = time.time()
+    return bool(_tv_probe["ok"])
+
+
+@app.post("/api/desk/tv")
+async def api_desk_tv(request: Request) -> JSONResponse:
+    """Admin: re-score up to a dozen names with daily bars read from the owner's TradingView Desktop chart.
+    Drives that chart one symbol at a time (about 12 s each), then restores it."""
+    _require_admin(request)
+    from . import tvbridge
+    from .desk import rescore
+    body = await request.json()
+    symbols = [str(x).upper() for x in (body.get("symbols") or []) if str(x).strip()][: tvbridge.MAX_SYMBOLS]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="no symbols")
+    if not await asyncio.to_thread(tvbridge.available):
+        return JSONResponse({"status": "unavailable", "detail": "TradingView Desktop is not running with its debug port on the server machine."}, headers={"Cache-Control": "no-store"})
+    if _tv_lock.locked():
+        return JSONResponse({"status": "busy", "detail": "A TradingView pull is already running."}, headers={"Cache-Control": "no-store"})
+    async with _tv_lock:
+        pulled = await asyncio.to_thread(tvbridge.daily_closes, symbols)
+        d = state.get("desk") or {}
+        cards = await asyncio.to_thread(rescore, d, pulled)
+    return JSONResponse({"status": "ok", "pulled": sorted(pulled), "missing": [s for s in symbols if s not in pulled], "cards": cards}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/desk")
 async def api_desk(request: Request) -> JSONResponse:
     if not _session_email(request):
@@ -1408,7 +1447,7 @@ async def api_desk(request: Request) -> JSONResponse:
             d = None
     if not d:
         return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
-    return JSONResponse({"status": "ok", **d}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", "tv_available": await asyncio.to_thread(_tv_available), "tv_max": 12, **d}, headers={"Cache-Control": "no-store"})
 
 
 async def stocktwits_loop() -> None:

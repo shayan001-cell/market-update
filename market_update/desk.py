@@ -90,7 +90,7 @@ def _card(sym: str, closes: list[float], macro_score: int | None, meta: dict[str
     f = flat_d["flags"]
     rnd = lambda v: round(v, 4) if isinstance(v, float) else v
     return {
-        "ticker": sym, "name": meta.get("name") or sym, "kind": meta.get("kind") or "Stock",
+        "ticker": sym, "name": meta.get("name") or sym, "kind": meta.get("kind") or "Stock", "source": meta.get("source") or "yahoo",
         "price": closes[-1], "n_bars": ind["n_bars"], "warning": ind["warning"],
         "trend": {"score": t, "detail": td, "word": PILLAR_WORDS.get(t, "")},
         "momentum": {"score": m, "detail": md, "word": PILLAR_WORDS.get(m, "")},
@@ -139,3 +139,25 @@ def build_desk(report: dict[str, Any], extra: list[str] | None = None) -> dict[s
                     "Momentum: RSI, the MACD histogram and TRIX. Macro: one score for the whole market from six cross-asset ratios. "
                     "The decision follows the framework's fixed rules for a short-term rotation style: enter on a bounce, ride, take profit when the buying tires, wait for the next trigger. "
                     "Daily bars include today's session so far. Information, not advice; no orders are placed by OneView.")}
+
+
+def rescore(desk: dict[str, Any], pulled: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-score the names in `pulled` ({sym: {closes, source, as_of}}) with the desk's current macro score and
+    swap the new cards into the desk in place. Returns the new cards."""
+    macro_score = (desk.get("macro") or {}).get("pillar")
+    by = {c["ticker"]: c for c in desk.get("cards") or []}
+    out = []
+    for sym, v in pulled.items():
+        old = by.get(sym) or {}
+        meta = {"name": old.get("name"), "kind": old.get("kind"), "source": v.get("source") or "tradingview"}
+        c = _card(sym, v.get("closes") or [], macro_score, meta)
+        if not c:
+            continue
+        c["as_of"] = v.get("as_of")
+        out.append(c)
+        if desk.get("cards") is not None:
+            if sym in by:
+                desk["cards"][desk["cards"].index(by[sym])] = c
+            else:
+                desk["cards"].append(c)
+    return out

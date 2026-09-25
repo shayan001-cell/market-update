@@ -8,6 +8,16 @@ from typing import Any
 from . import config, fetch
 
 
+def static_version() -> str:
+    """Short hash of the page, script and stylesheet: changes with every deploy, so a browser holding an
+    old copy can tell it is old by comparing with /api/status."""
+    import hashlib
+    h = hashlib.sha1()
+    for name in ("index.html", "styles.css", "app.js"):
+        h.update((config.STATIC_DIR / name).read_bytes())
+    return h.hexdigest()[:10]
+
+
 def render_html(report: dict[str, Any]) -> str:
     html = (config.STATIC_DIR / "index.html").read_text()
     css = (config.STATIC_DIR / "styles.css").read_text()
@@ -18,5 +28,6 @@ def render_html(report: dict[str, Any]) -> str:
     symbols = json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")).replace("</", "<\\/")
     html = html.replace('<script src="/static/app.js"></script>',
                         f'<script id="report-data" type="application/json">{data}</script>\n'
-                        f'<script id="symbols-data" type="application/json">{symbols}</script>\n<script>\n{js}\n</script>')
+                        f'<script id="symbols-data" type="application/json">{symbols}</script>\n'
+                        f'<script>window.MU_VERSION = "{static_version()}";</script>\n<script>\n{js}\n</script>')
     return html

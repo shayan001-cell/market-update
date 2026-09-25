@@ -1922,6 +1922,8 @@
     const missing = deskScope === "mine" ? [...mine].filter((t) => !byT[t]) : [];
     const comp = (m.components || []).map((c) => `<div class="fact"><span class="fact-l">${esc(c.ratio)}</span><span class="fact-v ${c.signal > 0 ? "up" : c.signal < 0 ? "down" : ""}">${c.available ? (c.signal > 0 ? "▲" : c.signal < 0 ? "▼" : "─") + " " + esc(c.detail) : "no data"}</span></div>`).join("");
     const tallies = Object.entries(d.counts || {}).map(([k, v]) => `<span class="tag">${esc(pretty(k))}: ${v}</span>`).join(" ");
+    const isAdmin = user && user.role === "admin";
+    const tvBar = isAdmin ? `<div class="meta2" style="margin:6px 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span>TradingView bridge: ${d.tv_available ? '<span class="up">connected</span>' : '<span class="muted">not running</span> (open TradingView Desktop with the debug port on the server Mac)'}</span>${d.tv_available ? `<button class="btn sm" type="button" data-desk-tv title="Reads daily bars from your TradingView chart for the names in view (up to ${d.tv_max || 12}) and re-scores them. About 12 seconds per name; your chart is restored afterwards.">Re-check these on TradingView</button><span id="desk-tv-msg"></span>` : ""}</div>` : "";
     const row = (c) => {
       const held = !!deskHold[c.ticker]; const dec = held ? c.holding : c.flat; const open = deskOpen === c.ticker;
       const fl = c.flags || {}; const flagList = [...(fl.rebound || []).map((x) => ["up", x]), ...(fl.exhaustion || []).map((x) => ["caution", x]), ...(fl.bearish || []).map((x) => ["down", x])];
@@ -1930,7 +1932,7 @@
         <td class="num">${fnum(c.price)}</td>
         <td>${pillarChip(c.trend.score, "Trend")}</td><td>${pillarChip(c.momentum.score, "Momentum")}</td><td>${pillarChip(c.macro, "Macro")}</td>
         <td class="num"><b>${c.total > 0 ? "+" : ""}${c.total}</b></td>
-        <td><span class="pill ${dec.cls}">${esc(dec.word)}</span>${fl.death_cross ? ' <span class="tag warn" title="50-day line below the 200-day line and price below the 50-day">downtrend structure</span>' : ""}</td>
+        <td><span class="pill ${dec.cls}">${esc(dec.word)}</span>${c.source === "tradingview" ? ' <span class="src-badge tv" title="Scored on daily bars read from TradingView Desktop">TV</span>' : ""}${fl.death_cross ? ' <span class="tag warn" title="50-day line below the 200-day line and price below the 50-day">downtrend structure</span>' : ""}</td>
         <td><button class="hold-btn ${held ? "on" : ""}" type="button" data-desk-hold="${esc(c.ticker)}" title="Tell the desk whether you hold this name; the read changes between 'should I get in' and 'should I stay in'">${held ? "I hold it" : "I'm flat"}</button></td></tr>
         ${open ? `<tr class="desk-detail"><td colspan="8"><div class="desk-plain"><b>${esc(dec.word)}.</b> ${esc(dec.plain)}</div>
           <div class="meta2">${esc(dec.rationale)} ${esc(dec.framing)}</div>
@@ -1944,6 +1946,7 @@
         <p class="mood-why">${esc(m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are moving together (inflation flag)." : ""}</p>
         <div class="facts">${comp}</div></div>
       <div class="tabs subtabs" style="margin-bottom:8px">${scopes.map(([k, l]) => `<button class="tab ${deskScope === k ? "active" : ""}" data-desk-scope="${k}">${l}</button>`).join("")}<span class="muted small" style="margin-left:auto">${tallies}</span></div>
+      ${tvBar}
       ${missing.length ? `<div class="meta2" style="margin-bottom:8px">Not scored yet (need 60+ daily bars or not in this pass): ${missing.map(esc).join(", ")}</div>` : ""}
       <div class="card"><div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="num">Price</th><th>Trend</th><th>Momentum</th><th>Macro</th><th class="num">Total</th><th>Read</th><th>You</th></tr></thead>
         <tbody>${cards.map(row).join("") || `<tr><td colspan="8" class="muted">${deskScope === "mine" ? "Nothing from your active list is scored yet. Add names to your watchlist; they are picked up on the next pass." : "No names."}</td></tr>`}</tbody></table></div>
@@ -2103,6 +2106,20 @@
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
     document.querySelectorAll("[data-desk-hold]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleHold(b.getAttribute("data-desk-hold")); }));
     document.querySelectorAll("[data-desk-open]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-desk-open"); deskOpen = deskOpen === t ? null : t; renderAll(); }));
+    const tvb = $("[data-desk-tv]"); if (tvb) tvb.addEventListener("click", async () => {
+      const d = deskData || {}; const mine = new Set(((lists && lists.lists && lists.lists[lists.active]) || []).map((x) => (typeof x === "string" ? x : x.ticker || "").toUpperCase()));
+      let syms = (d.cards || []).filter((c) => deskScope === "mine" ? mine.has(c.ticker) : deskScope === "index" ? (d.index || []).includes(c.ticker) || (d.sectors || []).includes(c.ticker) : true).map((c) => c.ticker);
+      if (deskScope === "mine") syms = [...new Set([...syms, ...mine])];
+      syms = syms.slice(0, d.tv_max || 12);
+      const msg = $("#desk-tv-msg"); tvb.disabled = true; if (msg) msg.textContent = `Reading ${syms.length} names from your TradingView chart… about ${Math.ceil(syms.length * 12 / 60)} min.`;
+      try {
+        const res = await api("/api/desk/tv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: syms }) });
+        const j = await res.json();
+        if (j.status === "ok") { (j.cards || []).forEach((c) => { const i = (deskData.cards || []).findIndex((x) => x.ticker === c.ticker); if (i >= 0) deskData.cards[i] = c; else deskData.cards.push(c); }); renderAll(); const m2 = $("#desk-tv-msg"); if (m2) m2.textContent = `Done: ${(j.pulled || []).length} re-scored from TradingView${(j.missing || []).length ? ", not found: " + j.missing.join(", ") : ""}.`; }
+        else if (msg) msg.textContent = j.detail || j.status;
+      } catch (e) { if (msg) msg.textContent = "The pull failed."; }
+      tvb.disabled = false;
+    });
     document.querySelectorAll("[data-desk-scope]").forEach((b) => b.addEventListener("click", () => { deskScope = b.getAttribute("data-desk-scope"); renderAll(); }));
     document.querySelectorAll("[data-check-day]").forEach((b) => b.addEventListener("click", () => { checkData = null; loadCheck(b.getAttribute("data-check-day")); renderAll(); }));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
@@ -2150,6 +2167,19 @@
     return res.json();
   }
 
+  // A page that is older than the server's copy reloads itself with a cache-busting URL: at most once every
+  // ten minutes per version, so a deploy that is still publishing cannot cause a loop.
+  function checkVersion(v) {
+    try {
+      if (!v || !window.MU_VERSION || v === window.MU_VERSION) return;
+      const last = JSON.parse(sessionStorage.getItem("mu-reloaded") || "null");
+      if (last && last.v === v && Date.now() - last.at < 600000) return;
+      sessionStorage.setItem("mu-reloaded", JSON.stringify({ v, at: Date.now() }));
+      const u = new URL(location.href); u.searchParams.set("v", v); location.replace(u.toString());
+    } catch (e) {}
+  }
+  addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !STATIC_MODE) poll(); });
   async function poll() {
     try {
       const st = await (await api("/api/status", { cache: "no-store" })).json();
@@ -2158,6 +2188,7 @@
       else if (st.refresh_available_in_s > 0) { btn.disabled = true; setLabel(btn, `Refresh (${st.refresh_available_in_s}s)`); }
       else { btn.disabled = false; setLabel(btn, "Refresh"); }
       if (st.last_error) notice("Last build failed: " + st.last_error);
+      checkVersion(st.app_version);
       if (st.build_id && report && st.build_id !== report.build_id && (!pendingReport || pendingReport.build_id !== st.build_id)) {
         pendingReport = await fetchReport();
       }
