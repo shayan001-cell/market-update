@@ -325,6 +325,8 @@ async def make_brief(day: str, slot: str = "morning") -> None:
         log.info("%s briefing generated for %s", slot, day)
         if slot == "morning":
             await asyncio.to_thread(_mail_brief, b, day)
+        if slot == "close":
+            await asyncio.to_thread(_mail_close, b, day)
     except Exception:  # noqa: BLE001
         log.exception("%s briefing failed", slot)
     finally:
@@ -381,6 +383,31 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
     else:
         log.error("briefing emailed to nobody; will retry")
     log.info("briefing emailed to %d users", sent)
+
+
+def _mail_close(b: dict[str, Any], day: str) -> None:
+    """One after-the-close email per signed-in user, once per day."""
+    marker = _brief_dir() / f"{day}-close.mailed"
+    if marker.exists() or not mail.status().get("configured"):
+        return
+    report = state.get("report") or {}
+    base = os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL
+    site = base + "/#view=home&brief=1"
+    record = base + "/#view=record"
+    sent = 0
+    for u in db.brief_recipients():
+        try:
+            unsub = f"{_api_root()}/brief/unsubscribe?t={_sign(u['email'])}"
+            subject, text, html = mail.close_email(u.get("name") or "", b, _watch_for_email(u["email"], report), site, record, unsub)
+            mail.send(u["email"], subject, text, html)
+            sent += 1
+        except Exception as e:  # noqa: BLE001
+            log.warning("close email to %s failed: %s", u["email"], e)
+    if sent:
+        marker.write_text(str(sent))
+    else:
+        log.error("close briefing emailed to nobody; will retry")
+    log.info("close briefing emailed to %d users", sent)
 
 
 def _score_day(day: str, close_brief: dict[str, Any]) -> dict[str, Any]:
@@ -613,6 +640,11 @@ async def brief_scheduler() -> None:
             if morning and mins >= 7 * 60 and mins < 12 * 60 and not (_brief_dir() / f"{today}.mailed").exists() and time.time() - state.get("brief_mail_try", 0) >= 1800:
                 state["brief_mail_try"] = time.time()
                 await asyncio.to_thread(_mail_brief, morning, today)
+            # the after-close email retries every 30 minutes until 21:00
+            closing = (state.get("briefs") or {}).get("close")
+            if closing and mins >= 16 * 60 + 30 and mins < 21 * 60 and not (_brief_dir() / f"{today}-close.mailed").exists() and time.time() - state.get("close_mail_try", 0) >= 1800:
+                state["close_mail_try"] = time.time()
+                await asyncio.to_thread(_mail_close, closing, today)
             weekday = now.weekday() < 5
             for i, (slot, start) in enumerate(BRIEF_SLOTS):
                 end = BRIEF_SLOTS[i + 1][1] if i + 1 < len(BRIEF_SLOTS) else 24 * 60 + 7 * 60
