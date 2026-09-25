@@ -1360,3 +1360,55 @@ def week_and_mood(report: dict[str, Any], desk: dict[str, Any] | None = None) ->
                "cold": "Sentiment is cold: fear is high, and that is where rebounds start.", "unknown": ""}[tone]
     sent["tone"] = tone; sent["summary"] = "; ".join(bits) + ("." if bits else ""); sent["meaning"] = meaning
     return {"next_session": next_session, "week": week, "sentiment": sent, "week_complete": now.weekday() == 4}
+
+
+def close_whatsapp_text(brief: dict[str, Any], keep_url: str = "", site_url: str = "") -> str:
+    """Short after-the-close post for the WhatsApp group: the close, our reads, the week, the mood, the levels."""
+    ses = brief.get("session") or {}
+    idx = {x.get("symbol"): x for x in ses.get("indexes") or []}
+    sc = brief.get("scorecard") or {}
+    ex = brief.get("extras") or {}
+    nxt = ex.get("next_session") or "tomorrow"
+    pct = lambda x: ("+" if x >= 0 else "−") + f"{abs(x):.1f}%" if isinstance(x, (int, float)) else "–"
+    names = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "IWM": "Small caps", "DIA": "Dow"}
+    date_label = datetime.strptime(brief["date"], "%Y-%m-%d").strftime("%A %b %d")
+    L = [f"*OneView · After the close · {date_label}*", ""]
+    L.append(" · ".join(f"{names.get(k, k)} {pct((idx.get(k) or {}).get('chg_pct'))}" for k in ("SPY", "QQQ", "IWM", "DIA") if idx.get(k)))
+    leaders = ", ".join(f"{x.get('label')} {pct(x.get('chg_pct'))}" for x in (ses.get("leaders") or [])[:2])
+    laggards = ", ".join(f"{x.get('label')} {pct(x.get('chg_pct'))}" for x in (ses.get("laggards") or [])[:2])
+    if leaders:
+        L.append(f"Leading: {leaders}. Lagging: {laggards}.")
+    movers = (ses.get("movers") or [])[:4]
+    if movers:
+        L.append("Big moves: " + ", ".join(f"{x.get('ticker')} {pct(x.get('chg_pct'))}" for x in movers))
+    if sc.get("scored"):
+        L += ["", f"*Our 15-minute reads:* {sc.get('hits', 0)} of {sc['scored']} right ({sc.get('hit_rate')}%)"]
+    week = ex.get("week") or {}
+    if week:
+        L += ["", "*The week*"] + [f"{names.get(s, s)} {pct((week.get(s) or {}).get('ret_pct'))} · high {(week.get(s) or {}).get('high')} ({(week.get(s) or {}).get('high_day')}) · low {(week.get(s) or {}).get('low')} ({(week.get(s) or {}).get('low_day')})" for s in ("SPY", "QQQ") if week.get(s)]
+        shape = (week.get("SPY") or {}).get("shape")
+        if shape:
+            L.append(shape[0].upper() + shape[1:] + ".")
+    mood = ex.get("sentiment") or {}
+    if mood.get("summary"):
+        L += ["", "*Market mood*", mood["summary"]]
+        if mood.get("meaning"):
+            L.append(mood["meaning"])
+    plans = []
+    for sym in ("SPY", "QQQ"):
+        x = (brief.get("indexes") or {}).get(sym) or {}
+        pl = x.get("plan") or {}
+        if pl:
+            plans.append((sym, x.get("last"), (pl.get("levels") or [])[:3]))
+    if plans:
+        L += ["", f"*Into {nxt}*"]
+        for sym, last, levels in plans:
+            L.append(f"{sym} {last:.2f}" if isinstance(last, (int, float)) else sym)
+            L += [f"• {l}" for l in levels]
+    L += [""]
+    if site_url:
+        L.append(f"Full read with your watchlist: {site_url}")
+    if keep_url:
+        L.append(f"Emails landing in junk? Tap once: {keep_url}")
+    L.append("_Information, not advice._")
+    return "\n".join(L)

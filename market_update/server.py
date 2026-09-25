@@ -332,6 +332,7 @@ async def make_brief(day: str, slot: str = "morning") -> None:
             await asyncio.to_thread(_mail_brief, b, day)
         if slot == "close":
             await asyncio.to_thread(_mail_close, b, day)
+            await asyncio.to_thread(_post_whatsapp, b, day)
     except Exception:  # noqa: BLE001
         log.exception("%s briefing failed", slot)
     finally:
@@ -450,6 +451,34 @@ def _mail_close(b: dict[str, Any], day: str) -> None:
                 break
     marker.write_text(json.dumps({"sent": sorted(done), "remaining": len(db.brief_recipients()) - len(done), "throttled": throttled}))
     log.info("close briefing emailed to %d users this run, %d done, %d remaining%s", sent, len(done), len(db.brief_recipients()) - len(done), " (provider throttled; will retry)" if throttled else "")
+
+
+def _post_whatsapp(b: dict[str, Any], day: str) -> None:
+    """Post the short after-the-close summary to the WhatsApp group through the linked account (tools/whatsapp)."""
+    group = os.environ.get("MU_WA_GROUP", "").strip()
+    session = Path(os.environ.get("MU_WA_SESSION") or (DATA_DIR / "wa-session"))
+    marker = _brief_dir() / f"{day}-close.whatsapp"
+    if not group or not session.exists() or marker.exists():
+        return
+    from .analyze import close_whatsapp_text
+    import subprocess, tempfile
+    base = os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL
+    text = close_whatsapp_text(b, keep_url=f"{_api_root()}/keep-in-inbox", site_url=base)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(text); path = f.name
+    try:
+        r = subprocess.run(["node", str(Path(__file__).resolve().parents[1] / "tools" / "whatsapp" / "wa.js"), "send", group, path], capture_output=True, text=True, timeout=240)
+        if r.returncode == 0:
+            marker.write_text(r.stdout.strip()); log.info("whatsapp: %s", r.stdout.strip())
+        else:
+            log.error("whatsapp post failed: %s %s", r.stdout.strip()[-200:], r.stderr.strip()[-200:])
+    except Exception:  # noqa: BLE001
+        log.exception("whatsapp post failed")
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def _score_day(day: str, close_brief: dict[str, Any]) -> dict[str, Any]:
