@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "Daily pre-market preview dashboard for day traders, powered by TypeSafe judgments"
 requires-python = ">=3.11"
 dependencies = [
+    "msal>=1.28",
     "typesafe-sdk",
     "yfinance>=0.2.50",
     "requests",

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import html as html_mod
 import os
+import pathlib
 from datetime import datetime
 import smtplib
 from email.message import EmailMessage
@@ -39,7 +40,55 @@ def _from() -> tuple[str, str]:
     return (name or SENDER_NAME, addr)
 
 
+MS_SCOPES = ["https://outlook.office.com/SMTP.Send"]
+MS_AUTHORITY = "https://login.microsoftonline.com/consumers"      # personal Microsoft accounts (outlook.com, hotmail, live)
+MS_CACHE = config.OUTPUT_DIR / "ms_token_cache.json"
+
+
+def _ms_app():
+    import msal
+    cache = msal.SerializableTokenCache()
+    if MS_CACHE.exists():
+        cache.deserialize(MS_CACHE.read_text())
+    app = msal.PublicClientApplication(os.environ["MU_MS_CLIENT_ID"], authority=MS_AUTHORITY, token_cache=cache)
+    return app, cache
+
+
+def _ms_save(cache) -> None:
+    if cache.has_state_changed:
+        MS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        MS_CACHE.write_text(cache.serialize())
+
+
+def ms_token() -> str:
+    """Access token for Outlook SMTP from the saved sign-in; refreshes silently. Raises when a sign-in is needed."""
+    app, cache = _ms_app()
+    accounts = app.get_accounts()
+    result = app.acquire_token_silent(MS_SCOPES, account=accounts[0]) if accounts else None
+    _ms_save(cache)
+    if not result or "access_token" not in result:
+        raise RuntimeError("Outlook sign-in needed: run  python scripts/outlook_signin.py")
+    return result["access_token"]
+
+
+def ms_signin() -> dict:
+    """One-time device-code sign-in: prints a code, the user enters it at microsoft.com/devicelogin as the OneView account."""
+    app, cache = _ms_app()
+    flow = app.initiate_device_flow(scopes=MS_SCOPES)
+    if "user_code" not in flow:
+        raise RuntimeError(f"could not start sign-in: {flow.get('error_description') or flow}")
+    print(flow["message"], flush=True)
+    result = app.acquire_token_by_device_flow(flow)
+    _ms_save(cache)
+    if "access_token" not in result:
+        raise RuntimeError(f"sign-in failed: {result.get('error_description') or result}")
+    acct = (app.get_accounts() or [{}])[0]
+    return {"signed_in_as": acct.get("username"), "expires_in": result.get("expires_in")}
+
+
 def provider() -> str | None:
+    if os.environ.get("MU_MS_CLIENT_ID"):
+        return "outlook"
     if os.environ.get("MU_RESEND_API_KEY"):
         return "resend"
     if os.environ.get("MU_SENDGRID_API_KEY"):
@@ -53,7 +102,7 @@ def status() -> dict[str, object]:
     name, addr = _from()
     p = provider()
     host = os.environ.get("MU_SMTP_HOST", "")
-    label = {"resend": "Resend API", "sendgrid": "SendGrid API", "smtp": f"SMTP via {host}"}.get(p or "", "not configured")
+    label = {"outlook": "Outlook (token sign-in)", "resend": "Resend API", "sendgrid": "SendGrid API", "smtp": f"SMTP via {host}"}.get(p or "", "not configured")
     placeholder = "YOUR-ADDRESS" in addr or os.environ.get("MU_SMTP_PASS", "").startswith("xxxx")
     ok = bool(p and addr) and not placeholder
     return {"configured": ok, "provider": p, "transport": label, "from_name": name, "from_address": addr,
@@ -139,6 +188,16 @@ def send(to: str, subject: str, text: str, html: str | None = None, unsubscribe_
         msg.add_alternative(html, subtype="html")
         if f"cid:{LOGO_CID}" in html and LOGO_PATH.exists():
             msg.get_payload()[1].add_related(LOGO_PATH.read_bytes(), maintype="image", subtype="png", cid=f"<{LOGO_CID}>", filename="oneview-logo.png")
+    if p == "outlook":
+        user = os.environ.get("MU_SMTP_USER") or addr
+        token = ms_token()
+        with smtplib.SMTP("smtp-mail.outlook.com", 587, timeout=25) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.auth("XOAUTH2", lambda challenge=None: f"user={user}\x01auth=Bearer {token}\x01\x01", initial_response_ok=True)
+            smtp.send_message(msg)
+        return p
     host, port = os.environ["MU_SMTP_HOST"], int(os.environ.get("MU_SMTP_PORT", "587"))
     user, pw = os.environ.get("MU_SMTP_USER"), os.environ.get("MU_SMTP_PASS", "")
     if port == 465:
