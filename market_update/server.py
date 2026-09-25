@@ -90,9 +90,45 @@ def _interval() -> int:
     return config.INTERVAL_OFF_S
 
 
-def _run_build_sync() -> dict[str, Any]:
+AI_REPORT_PATH = DATA_DIR / "report_ai.json"      # the last build whose model reads succeeded
+AI_INTERVAL_S = int(os.environ.get("MU_AI_INTERVAL", "1800"))   # re-judge at most this often; prices still refresh every build
+
+
+def _run_build_sync(use_ai: bool) -> dict[str, Any]:
     # build_report is async but its fetchers block; give it its own loop in a worker thread.
-    return asyncio.run(build_report(use_ai=USE_AI))
+    return asyncio.run(build_report(use_ai=use_ai))
+
+
+def _carry_ai(new: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
+    """When a build has no model reads (credits out, provider down, or a deliberate no-AI build), keep the
+    last good reads next to the fresh prices instead of showing empty cards. Everything carried is stamped."""
+    if not old:
+        return new
+    if not new.get("regime") and old.get("regime"):
+        new["regime"] = old["regime"]
+    for key in ("horizons", "theme", "options", "smart_money"):
+        if isinstance(new.get(key), dict) and isinstance(old.get(key), dict) and not new[key].get("ai") and old[key].get("ai"):
+            new[key]["ai"] = old[key]["ai"]
+    def by(rows, k): return {r.get(k): r for r in (rows or []) if isinstance(r, dict) and r.get(k)}
+    for path, k, fields in (("stocks", "ticker", ("ai", "verdict", "scores", "tags", "plan", "checklist")), ("headlines", "id", ("ai",)),
+                            (("scan", "rows"), "ticker", ("ai",)), (("low_float", "rows"), "ticker", ("ai",)), (("smart_money", "rows"), "ticker", ("ai",)),
+                            (("options", "rows"), "ticker", ("ai",)), (("theme", "rows"), "ticker", ("ai", "rank")), ("earnings", "symbol", ("ai",))):
+        nrows = new.get(path) if isinstance(path, str) else (new.get(path[0]) or {}).get(path[1])
+        orows = old.get(path) if isinstance(path, str) else (old.get(path[0]) or {}).get(path[1])
+        om = by(orows, k)
+        for r in nrows or []:
+            o = om.get(r.get(k))
+            if not o:
+                continue
+            for f in fields:
+                if r.get(f) in (None, [], {}) and o.get(f) not in (None, [], {}):
+                    r[f] = o[f]
+            for sub in ("smart", "options"):
+                if isinstance(r.get(sub), dict) and isinstance(o.get(sub), dict) and not r[sub].get("ai") and o[sub].get("ai"):
+                    r[sub]["ai"] = o[sub]["ai"]
+    new["ai_from"] = old.get("ai_from") or old.get("generated_at")
+    new["ai_enabled"] = True
+    return new
 
 
 async def do_build(reason: str) -> bool:
@@ -103,7 +139,23 @@ async def do_build(reason: str) -> bool:
         state["last_build_started"] = time.time()
         log.info("build start (%s)", reason)
         try:
-            report = await asyncio.to_thread(_run_build_sync)
+            use_ai = USE_AI and (time.time() - state.get("ai_at", 0) >= AI_INTERVAL_S or reason == "manual")
+            report = await asyncio.to_thread(_run_build_sync, use_ai)
+            if (report.get("ai_stats") or {}).get("calls", 0) > 0 and report.get("regime"):
+                state["ai_at"] = time.time(); state["ai_report"] = report
+                try:
+                    AI_REPORT_PATH.write_text(json.dumps(report, default=str))
+                except Exception:  # noqa: BLE001
+                    log.exception("could not save the AI report")
+            else:
+                if not state.get("ai_report") and AI_REPORT_PATH.exists():
+                    try:
+                        state["ai_report"] = json.loads(AI_REPORT_PATH.read_text())
+                    except Exception:  # noqa: BLE001
+                        pass
+                report = _carry_ai(report, state.get("ai_report"))
+                if use_ai:
+                    log.error("model reads failed this build (%s failures); carrying reads from %s", (report.get("ai_stats") or {}).get("failures"), report.get("ai_from"))
             state["report"] = report
             state["last_error"] = None
             state["builds"] += 1

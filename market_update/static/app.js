@@ -442,12 +442,12 @@
     return `<div class="playbook"><div class="pb-col"><h4>Day trader</h4><ul>${day.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div><div class="pb-col"><h4>Swing trader</h4><ul>${swing.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div></div>`;
   }
   function moodPanel(r) {
-    const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">Model read unavailable this build.</div></section>`;
+    const g = r.regime; if (!g) return `<section class="panel mood flat"><h3>Market mood</h3><div class="muted">${r.ai_enabled === false || (r.ai_stats && r.ai_stats.calls === 0 && r.ai_stats.failures > 0) ? "The model reads did not run this build (the read service is unavailable or out of credits). Prices and scans are still live; reads return as soon as the service does." : "Model read unavailable this build."}</div></section>`;
     const volL = ["quiet", "normal", "elevated", "extreme"];
     const tone = g.tone.choice, cl = { risk_on: "up", risk_off: "down", mixed: "flat" }[tone];
     const fact = (label, value, c) => `<div class="fact"><span class="fact-l">${label}</span><span class="fact-v ${c || ""}">${value}</span></div>`;
     return `<section class="panel mood ${cl}">
-      <h3>Market mood · ${esc(r.session_label.split(",")[0])}</h3>
+      <h3>Market mood · ${esc(r.session_label.split(",")[0])}${r.ai_from ? ` <span class="muted" style="text-transform:none;letter-spacing:0" title="The read service was unavailable on the latest build, so the reads from the last good build are shown next to live prices">reads as of ${esc(String(r.ai_from).slice(11, 16))} ET</span>` : ""}</h3>
       <div class="mood-row"><span class="mood-tone">${pretty(tone).toUpperCase()}</span><span class="mood-conf">${convTag(g.tone.confidence)}</span></div>
       <p class="mood-why">${EX.tone[tone]}</p>
       <div class="facts">
