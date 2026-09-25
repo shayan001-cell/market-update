@@ -253,7 +253,7 @@ def brief_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         text_lines += ["", "Today:"] + [f"  {e}" for e in ev]
     if trump:
         text_lines += ["", f"{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President overnight; details on the desk."]
-    text_lines += ["", f"Open today's briefing: {site_url}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
+    text_lines += ["", f"Open today's briefing: {site_url}", f"Landed in junk? Add OneView to your contacts, once: {keep_url(unsubscribe_url, site_url)}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
     text = "\n".join(text_lines)
     e = lambda x: html_mod.escape(str(x))
     num_rows = "".join(f'<tr><td style="padding:6px 0;color:#A8B4C8;font-size:13px">{e(k)}</td><td style="padding:6px 0;text-align:right;font-size:13px;font-weight:600;color:#F5F7FC;font-variant-numeric:tabular-nums">{e(v)}</td></tr>' for k, v in rows)
@@ -265,7 +265,7 @@ def brief_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
   <div style="margin-top:12px;font-size:12px;letter-spacing:.14em;color:#85A7FF;font-weight:700">ONEVIEW · MORNING BRIEFING</div>
   <h1 style="margin:10px 0 4px;font-size:22px;letter-spacing:-.02em">{e(date_label)}</h1>
   <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#A8B4C8">Good morning{(", " + e(name)) if name else ""}. Here is what matters before the open, in three minutes.</p>
-  <p style="margin:-6px 0 14px;font-size:12px;line-height:1.5;color:#8E9BB4">First time seeing this address? Add {e(_from()[1])} to your contacts so the briefings land in your inbox.</p>
+  <p style="margin:-6px 0 14px;font-size:12px;line-height:1.5;color:#8E9BB4">Landed in junk? <a href="{e(keep_url(unsubscribe_url, site_url))}" style="color:#85A7FF;font-weight:600">Add OneView to your contacts</a>, once, and every briefing lands in your inbox.</p>
   <p style="margin:0 0 18px;font-size:15px;line-height:1.55">{e(brief.get("summary", ""))}</p>
   <h2 style="margin:18px 0 6px;font-size:14px;letter-spacing:.04em;color:#A8B4C8">NUMBERS TO KNOW</h2>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">{num_rows}</table>
@@ -320,6 +320,13 @@ def announcement_email(name: str, site_url: str, group_url: str, unsubscribe_url
 <p style="margin:14px 0 0;font-size:11.5px;line-height:1.6;color:#6B7690">OneView is information, not advice. Reads come from public data and typed questions to a model; nothing here is a recommendation or a guarantee. You receive this because you signed in to the desk. <a href="{e(unsubscribe_url)}" style="color:#6B7690">Stop these emails</a>.</p></td></tr>
 </table></td></tr></table></body></html>"""
     return subject, text, html
+
+
+def keep_url(unsubscribe_url: str, site_url: str) -> str:
+    """The keep-in-inbox page lives next to the unsubscribe endpoint on the app server."""
+    if unsubscribe_url and "/brief/unsubscribe" in unsubscribe_url:
+        return unsubscribe_url.split("/brief/unsubscribe")[0] + "/keep-in-inbox"
+    return site_url
 
 
 def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], site_url: str, record_url: str, unsubscribe_url: str) -> tuple[str, str, str]:
@@ -403,7 +410,7 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         lines += ["", "Your watchlist at the close:"] + [f"  {w['ticker']}: {_fmt_num(w.get('last'))} ({pct(w.get('chg_pct'))}) · {w.get('read') or 'no read yet'}" for w in watch]
     if trump:
         lines += ["", f"{len(trump)} market-relevant post{'s' if len(trump) > 1 else ''} from the President today; the read on each is on OneView."]
-    lines += ["", f"Open OneView: {site_url}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
+    lines += ["", f"Open OneView: {site_url}", f"Landed in junk? Add OneView to your contacts, once: {keep_url(unsubscribe_url, site_url)}", "", "OneView is information, not advice. You receive this because you signed in to OneView.", f"Stop these emails: {unsubscribe_url}"]
     text = "\n".join(lines)
     # ---- html ----
     def tile(k: str) -> str:
@@ -466,7 +473,7 @@ def close_email(name: str, brief: dict[str, Any], watch: list[dict[str, Any]], s
         '<tr><td style="padding:18px 24px 8px">',
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' + tiles + '</tr></table>',
         '<p style="margin:16px 4px 0;font-size:15px;line-height:1.55">' + e(brief.get("summary", "")) + '</p>',
-        '<p style="margin:8px 4px 0;font-size:12px;line-height:1.5;color:#8E9BB4">First time seeing this address? Add ' + e(_from()[1]) + ' to your contacts so the briefings land in your inbox.</p>',
+        '<p style="margin:8px 4px 0;font-size:12px;line-height:1.5;color:#8E9BB4">Landed in junk? <a href="' + e(keep_url(unsubscribe_url, site_url)) + '" style="color:#85A7FF;font-weight:600">Add OneView to your contacts</a>, once, and every briefing lands in your inbox.</p>',
         '<div style="padding:0 4px">' + h2("How our reads went") + reads + '</div>',
         ('<div style="padding:0 4px">' + h2(week_title + ": S&P 500 and Nasdaq 100") + week_html + '</div>') if week_html else "",
         ('<div style="padding:0 4px">' + h2("Market mood") + mood_html + '</div>') if mood_html else "",

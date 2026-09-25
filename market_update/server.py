@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Response, Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi import Request, Response
@@ -1270,6 +1270,28 @@ async def api_brief() -> JSONResponse:
     if not briefs:
         return JSONResponse({"status": "not_ready", "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "ok", "date": day, "briefs": briefs, "slots": [s for s, _ in BRIEF_SLOTS], "building": bool(state.get("brief_building"))}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/contact.vcf")
+async def contact_vcf() -> Response:
+    """One-tap 'add OneView to contacts': the strongest whitelist signal every mail app honours."""
+    name, addr = mail._from()
+    site = (os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL)
+    card = f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:{name}\r\nORG:OneView\r\nEMAIL;TYPE=INTERNET,PREF:{addr}\r\nURL:{site}\r\nNOTE:Daily market briefings from OneView. Added so they land in your inbox.\r\nEND:VCARD\r\n"
+    return Response(card, media_type="text/vcard", headers={"Content-Disposition": 'attachment; filename="OneView.vcf"', "Cache-Control": "no-store"})
+
+
+@app.get("/keep-in-inbox")
+async def keep_in_inbox() -> HTMLResponse:
+    name, addr = mail._from()
+    st = "margin:0;color:#A8B4C8;font-size:14px;line-height:1.5"
+    steps = (f'<div style="display:grid;gap:12px;text-align:left">'
+             f'<p style="{st}"><b style="color:#F5F7FC">Outlook, Hotmail, Live</b><br>Open the junked message and press <b>Not junk</b>. Then in <a href="https://outlook.live.com/mail/0/options/mail/junkEmail" style="color:#85A7FF">Settings, Junk email</a> add <span style="font-family:ui-monospace,Menlo,monospace;color:#F5F7FC">{addr}</span> under Safe senders and domains.</p>'
+             f'<p style="{st}"><b style="color:#F5F7FC">Gmail</b><br>Open the message in Spam and press <b>Not spam</b>. To make it permanent, <a href="https://mail.google.com/mail/u/0/#settings/filters" style="color:#85A7FF">Settings, Filters</a>: create a filter for the address with Never send it to Spam.</p>'
+             f'<p style="{st}"><b style="color:#F5F7FC">Yahoo</b><br>Open the message in Spam, press <b>Not spam</b>, and save the sender to contacts with the button above.</p>'
+             f'<p style="{st}"><b style="color:#F5F7FC">Apple Mail (iPhone, Mac)</b><br>In Junk choose <b>Move to Inbox</b>, and save the sender to Contacts with the button above.</p></div>')
+    action = f'<a class="pill" href="/contact.vcf">Add OneView to my contacts</a><p class="muted">Saves a contact card for {addr}. Mail apps never junk a contact.</p><p class="muted" style="margin-top:8px"><b style="color:#F5F7FC">Or tell your mail app directly</b></p>{steps}'
+    return HTMLResponse(_PAGE.format(eyebrow="Keep OneView in your inbox", title="Two clicks, once", body="Mail apps decide what is junk inside your own mailbox, so one small step on your side keeps every OneView briefing in the inbox from then on.", action=action, foot=f"Sender: {name} &lt;{addr}&gt;. Information, not advice."))
 
 
 @app.post("/brief/unsubscribe")
