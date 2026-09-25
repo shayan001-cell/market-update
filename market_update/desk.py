@@ -1,0 +1,141 @@
+"""Trading desk: the open-source Agentic Trading Desk three-pillar framework
+(Trend / Momentum / Macro, each -2..+2) run over OneView's universe with
+OneView's own data. Information only: no broker, no orders.
+
+Framework and maths: https://github.com/Oft3r/agentic-trading-desk (MIT, Oft3r),
+vendored unmodified under `market_update.atd`.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Any
+
+from . import config, fetch
+from . import atd
+
+log = logging.getLogger(__name__)
+
+MACRO_SYMBOLS = ["SPY", "RSP", "IWM", "HYG", "LQD", "TLT", "XLY", "XLP"]
+
+# The framework's decision strings -> a short code for the ledger and plain words for the page.
+DECISIONS: dict[str, dict[str, str]] = {
+    "EXIT / TRIM": {"code": "exit_trim", "word": "TAKE PROFIT", "cls": "down",
+                    "plain": "The buying has run out of steam. Someone holding it would sell part or all here and wait for the next dip to come back in."},
+    "EXIT": {"code": "exit", "word": "EXIT", "cls": "down",
+             "plain": "The selling is relentless. Someone holding it would get out and not add on the way down."},
+    "RE-ENTRY (new cycle)": {"code": "re_entry", "word": "FRESH ENTRY", "cls": "up",
+                             "plain": "It is bouncing and the longer-term structure is healthy: this is what the start of a new up-leg looks like. Confirm with a strong day and heavy trading before treating it as real."},
+    "TACTICAL REBOUND (counter-trend)": {"code": "tactical_rebound", "word": "QUICK BOUNCE ONLY", "cls": "caution",
+                                         "plain": "It is bouncing inside a downtrend. A quick trade at best: small, with a close target, and out fast if the bounce stalls."},
+    "HOLD (ride the cycle)": {"code": "hold_ride", "word": "HOLD", "cls": "up",
+                              "plain": "Trend and momentum are both positive. Someone holding it would stay in and watch for the buying to tire, not add more."},
+    "HOLD (under review)": {"code": "hold_review", "word": "HOLD, WATCH CLOSELY", "cls": "caution",
+                            "plain": "Structure and momentum are weak but there is no full exit signal yet. Do not add; be ready to leave if more warning signs appear."},
+    "WAIT (do not chase)": {"code": "wait", "word": "WAIT, DO NOT CHASE", "cls": "flat",
+                            "plain": "The trend is healthy but there is no fresh trigger. Buying mid-move is chasing; wait for a pullback to the 20-day line and a turn back up."},
+    "STAY OUT / AVOID": {"code": "stay_out", "word": "STAY OUT", "cls": "down",
+                         "plain": "Structure and momentum are negative and nothing is turning yet. The next thing to wait for is a real bounce."},
+    "HOLD / OBSERVE": {"code": "observe", "word": "NO ACTION", "cls": "flat", "plain": "Mixed signals. Nothing to do; look again after the next close."},
+    "OBSERVE": {"code": "observe", "word": "NO ACTION", "cls": "flat", "plain": "Mixed signals. Nothing to do; look again after the next close."},
+}
+
+PILLAR_WORDS = {2: "strong", 1: "positive", 0: "neutral", -1: "weak", -2: "negative"}
+
+
+def _closes(frame) -> list[float]:
+    if frame is None or "Close" not in frame:
+        return []
+    return [float(x) for x in frame["Close"].dropna().tolist()]
+
+
+def _macro(series: dict[str, list[float]], report: dict[str, Any]) -> dict[str, Any] | None:
+    spread_hist = ((((report.get("rates") or {}).get("spreads") or {}).get("2s10s") or {}).get("history") or [])
+    spread = [x["v"] / 100.0 for x in spread_hist if isinstance(x.get("v"), (int, float))][-60:]   # bp -> percentage points
+    data = {"as_of": datetime.now(tz=config.ET).date().isoformat(), "series": {k: v for k, v in series.items() if v}}
+    if spread:
+        data["yield_spread"] = spread
+    try:
+        r = atd.score_macro(data)
+    except Exception as e:  # noqa: BLE001
+        log.warning("macro pillar failed: %s", e)
+        return None
+    comps = []
+    for c in r.components:
+        comps.append({"name": c["name"], "ratio": c["ratio"], "weight": c["weight"], "signal": c["signal"], "detail": c["detail"], "available": c["available"]})
+    words = {"Broadening": "More stocks are joining the move: healthy, broad participation.",
+             "Concentration": "A few big names carry the market while the rest lag: fragile leadership.",
+             "Contraction": "Credit and breadth are weakening together: risk is being taken off.",
+             "Inflationary": "Stocks and bonds are falling together: inflation worry, nowhere to hide.",
+             "Transitional": "No clear regime: the signals disagree."}
+    return {"as_of": r.as_of, "composite": r.composite, "regime": r.regime, "regime_plain": words.get(r.regime, ""), "pillar": r.pillar_score,
+            "label": r.pillar_label, "inflationary": r.inflationary_flag, "spy_tlt_corr": r.spy_tlt_corr, "components": comps, "notes": r.notes}
+
+
+def _card(sym: str, closes: list[float], macro_score: int | None, meta: dict[str, Any]) -> dict[str, Any] | None:
+    if len(closes) < 60:
+        return None
+    try:
+        ind = atd.compute_indicators(closes)
+        t, td = atd.score_trend(ind)
+        m, md = atd.score_momentum(ind)
+        flat_d = atd.decide(ind, t, m, macro_score, False)
+        held_d = atd.decide(ind, t, m, macro_score, True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("desk score failed for %s: %s", sym, e)
+        return None
+    def dec(d: dict[str, Any]) -> dict[str, Any]:
+        w = DECISIONS.get(d["action"]) or {"code": "observe", "word": d["action"], "cls": "flat", "plain": d["rationale"]}
+        return {"action": d["action"], **w, "rationale": d["rationale"], "framing": d["framing"]}
+    f = flat_d["flags"]
+    rnd = lambda v: round(v, 4) if isinstance(v, float) else v
+    return {
+        "ticker": sym, "name": meta.get("name") or sym, "kind": meta.get("kind") or "Stock",
+        "price": closes[-1], "n_bars": ind["n_bars"], "warning": ind["warning"],
+        "trend": {"score": t, "detail": td, "word": PILLAR_WORDS.get(t, "")},
+        "momentum": {"score": m, "detail": md, "word": PILLAR_WORDS.get(m, "")},
+        "macro": macro_score, "total": t + m + (macro_score if macro_score is not None else 0),
+        "flat": dec(flat_d), "holding": dec(held_d),
+        "flags": {"exhaustion": f["exhaustion"], "bearish": f["bearish"], "rebound": f["rebound"], "death_cross": f["death_cross"], "stretch_pct": f["stretch_pct"]},
+        "indicators": {k: rnd(ind.get(k)) for k in ("ema20", "ema50", "ema200", "rsi14", "macd_hist", "trix", "trix_signal", "percent_b", "bb_upper", "bb_lower", "bars_since_below_ema20")},
+    }
+
+
+def build_desk(report: dict[str, Any], extra: list[str] | None = None) -> dict[str, Any]:
+    """One pass over the whole universe: macro pillar once, then a card per symbol."""
+    from . import db
+    lite = report.get("lite") or {}
+    universe = list(dict.fromkeys(
+        list(config.INDEX_ETFS) + list(config.SECTOR_ETFS) + [s["ticker"] for s in report.get("stocks", [])]
+        + [t for t in lite] + list(extra or []) + [t.upper() for t in db.all_watchlist_tickers()]
+    ))
+    universe = [t for t in universe if t and not t.startswith("^") and "=" not in t and "-" not in t]
+    symbols = list(dict.fromkeys(MACRO_SYMBOLS + universe))
+    hist = fetch.download(symbols, period="2y", interval="1d", prepost=False)
+    series = {s: _closes(fetch.frame_for(hist, s)) for s in symbols}
+    macro = _macro({s: series[s] for s in MACRO_SYMBOLS}, report)
+    macro_score = macro["pillar"] if macro else None
+    names = {s["ticker"]: {"name": s.get("name"), "kind": s.get("kind")} for s in report.get("stocks", [])}
+    for t, q in lite.items():
+        names.setdefault(t, {"name": q.get("name"), "kind": q.get("kind")})
+    for t, n in config.INDEX_ETFS.items():
+        names.setdefault(t, {"name": n, "kind": "ETF"})
+    for t, n in config.SECTOR_ETFS.items():
+        names.setdefault(t, {"name": n, "kind": "ETF"})
+    cards = []
+    for sym in universe:
+        c = _card(sym, series.get(sym) or [], macro_score, names.get(sym) or {})
+        if c:
+            cards.append(c)
+    order = {"re_entry": 0, "tactical_rebound": 1, "hold_ride": 2, "wait": 3, "observe": 4, "hold_review": 5, "exit_trim": 6, "stay_out": 7, "exit": 8}
+    cards.sort(key=lambda c: (order.get(c["flat"]["code"], 9), -c["total"], c["ticker"]))
+    counts: dict[str, int] = {}
+    for c in cards:
+        counts[c["flat"]["code"]] = counts.get(c["flat"]["code"], 0) + 1
+    return {"generated_at": datetime.now(tz=config.ET).isoformat(), "macro": macro, "cards": cards, "counts": counts,
+            "index": [t for t in config.INDEX_ETFS], "sectors": [t for t in config.SECTOR_ETFS],
+            "source": {"name": "Agentic Trading Desk", "url": "https://github.com/Oft3r/agentic-trading-desk", "license": "MIT", "author": "Oft3r"},
+            "how": ("Each name gets three scores from -2 to +2. Trend: price against its 20-, 50- and 200-day lines and the slope of the 200-day. "
+                    "Momentum: RSI, the MACD histogram and TRIX. Macro: one score for the whole market from six cross-asset ratios. "
+                    "The decision follows the framework's fixed rules for a short-term rotation style: enter on a bounce, ride, take profit when the buying tires, wait for the next trigger. "
+                    "Daily bars include today's session so far. Information, not advice; no orders are placed by OneView.")}

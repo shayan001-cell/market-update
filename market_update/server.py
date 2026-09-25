@@ -77,6 +77,8 @@ state: dict[str, Any] = {
     "adhoc_inflight": set(),
     "live_scan": None,    # minute-by-minute intraday scan (numbers only; the hourly build adds the model reads)
     "live_scan_at": 0.0,
+    "desk": None,         # three-pillar trading desk scorecards (Agentic Trading Desk framework, MIT)
+    "desk_at": 0.0,
 }
 _lock = asyncio.Lock()
 
@@ -651,6 +653,7 @@ async def _startup() -> None:
     asyncio.create_task(brief_scheduler())
     asyncio.create_task(direction_loop())
     asyncio.create_task(stocktwits_loop())
+    asyncio.create_task(desk_loop())
     asyncio.create_task(live_scanner())
 
 
@@ -1360,6 +1363,52 @@ def _stocktwits_sync() -> dict[str, Any]:
         log.exception("crowd log failed")
     fetch._cache_put("stocktwits_snapshot", out)
     return out
+
+
+def _desk_sync() -> dict[str, Any]:
+    from .desk import build_desk
+    d = build_desk(state["report"], extra=list(state.get("adhoc") or {}))
+    # the desk's decisions join the verdict ledger so the track record scores them like everything else
+    rows = [{"ticker": c["ticker"], "kind": "desk", "verdict": c["flat"]["code"], "price": c["price"], "build_id": f"desk-{d['generated_at'][:16]}"}
+            for c in d["cards"] if c["flat"]["code"] in ("re_entry", "tactical_rebound", "stay_out")]
+    try:
+        n = db.log_verdicts(rows)
+        log.info("desk: %d cards, %d ledger rows, macro %s", len(d["cards"]), n, (d.get("macro") or {}).get("regime"))
+    except Exception:  # noqa: BLE001
+        log.exception("desk ledger failed")
+    try:
+        (DATA_DIR / "desk.json").write_text(json.dumps(d, default=str))
+    except Exception:  # noqa: BLE001
+        pass
+    return d
+
+
+async def desk_loop() -> None:
+    """Three-pillar scorecards over the universe: every 30 min while the market is open, every 4 h otherwise."""
+    while True:
+        try:
+            if state.get("report"):
+                interval = 1800 if fetch.market_state() in ("pre", "open", "post") else 4 * 3600
+                if time.time() - state.get("desk_at", 0) >= interval:
+                    state["desk"] = await asyncio.to_thread(_desk_sync); state["desk_at"] = time.time()
+        except Exception:  # noqa: BLE001
+            log.exception("desk loop error")
+        await asyncio.sleep(60)
+
+
+@app.get("/api/desk")
+async def api_desk(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    d = state.get("desk")
+    if not d and (DATA_DIR / "desk.json").exists():
+        try:
+            d = json.loads((DATA_DIR / "desk.json").read_text())
+        except Exception:  # noqa: BLE001
+            d = None
+    if not d:
+        return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", **d}, headers={"Cache-Control": "no-store"})
 
 
 async def stocktwits_loop() -> None:

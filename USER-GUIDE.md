@@ -29,6 +29,7 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 
 ## The other sections
 - **Watchlist.** Each name as a card with three columns: day trade, swing, long term. The Day / Swing / Long term switch at the top brings the column you care about to the front and re-sorts the Stocks table.
+- **Trading desk.** Every name scored three ways from −2 to +2: Trend (price against its 20-, 50- and 200-day lines), Momentum (RSI, MACD, TRIX) and one shared Macro score for the whole market. A fixed rulebook turns the scores into one read per name: fresh entry, quick bounce only, hold, wait, take profit, stay out. Tap "I'm flat / I hold it" to see the read from your side of the trade. Click a row for the reasons. Built on the open-source Agentic Trading Desk framework (MIT); OneView shows the read as information and never places orders.
 - **Scanner.** Names trading far above normal for the time of day on the 15-minute, 30-minute, 1-hour and 2-hour charts, with a read on each. "Thin stocks" lists low-float names that can move violently.
 - **Stocks.** Every analysed name in one table with the read for your chosen timeframe, and a full breakdown on click.
 - **Themes.** The data-centre build-out by part of the stack, who is leading and who could run next.

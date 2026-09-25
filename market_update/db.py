@@ -355,9 +355,11 @@ def import_legacy_json(users_path: Path) -> int:
 
 
 # ---- verdict ledger: every call the model makes, with the price at the time, evaluated later --------
-BULLISH = {"buy_now", "buy_the_dip", "long_momentum", "buy_dip_to_support", "accumulate", "trend_up", "momentum_up", "drifting_up", "pullback_in_uptrend", "buying_today"}
-BEARISH = {"short_setup", "short_momentum", "trim", "avoid", "fade_the_gap", "trend_down", "momentum_down", "drifting_down", "selling_today"}
-HORIZON = {"swing": 7, "intraday": 1, "long_term": 90}          # calendar days until a call is scored
+BULLISH = {"buy_now", "buy_the_dip", "long_momentum", "buy_dip_to_support", "accumulate", "trend_up", "momentum_up", "drifting_up", "pullback_in_uptrend", "buying_today",
+           "re_entry", "tactical_rebound", "hold_ride"}
+BEARISH = {"short_setup", "short_momentum", "trim", "avoid", "fade_the_gap", "trend_down", "momentum_down", "drifting_down", "selling_today",
+           "stay_out", "exit", "exit_trim"}
+HORIZON = {"swing": 7, "intraday": 1, "long_term": 90, "desk": 7}          # calendar days until a call is scored
 
 
 def log_verdicts(rows: list[dict[str, Any]]) -> int:

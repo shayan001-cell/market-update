@@ -18,8 +18,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -47,9 +47,10 @@
     watch: '<svg viewBox="0 0 24 24"><path d="M12 3.5 14.6 9l6 .6-4.5 4 1.4 5.9L12 16.4 6.5 19.5 7.9 13.6l-4.5-4 6-.6z"/></svg>',
     admin: '<svg viewBox="0 0 24 24"><path d="M12 3 4 6.5v5c0 4.6 3.4 8.4 8 9.5 4.6-1.1 8-4.9 8-9.5v-5z"/><path d="m9 12 2 2 4-4"/></svg>',
     check: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    desk: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2.5 2L17 8"/></svg>',
   };
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
-  const NAV_GROUPS = [["Workspace", ["home", "watch", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
+  const NAV_GROUPS = [["Workspace", ["home", "watch", "desk", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
   let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
   let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
   let gateOpen = true;                   // the sign-in card shows first; the dashboard follows a successful login
@@ -1805,6 +1806,7 @@
       case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": return `<div class="view one">${secCheck()}</div>`;
+      case "desk": return `<div class="view one">${secDesk()}</div>`;
       case "guide": return `<div class="view one">${secGuide()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;
@@ -1898,6 +1900,57 @@
     try { const r2 = await api("/api/stocktwits/status", { cache: "no-store" }); if (r2.ok) { const j = await r2.json(); const el = $("#st-status"); if (el) el.textContent = j.connected ? `Connected · token renews itself · callback ${j.callback}` : `Not connected yet. The sign-in returns to ${j.callback}.`; } } catch (e) {}
   }
   const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() / 1000) - t); return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${(s / 3600).toFixed(1)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  let deskData = null, deskOpen = null, deskScope = "mine";
+  let deskHold = {}; try { deskHold = JSON.parse(localStorage.getItem("mu-desk-hold") || "{}") || {}; } catch (e) { deskHold = {}; }
+  function toggleHold(t) { deskHold[t] = !deskHold[t]; try { localStorage.setItem("mu-desk-hold", JSON.stringify(deskHold)); } catch (e) {} renderAll(); }
+  async function loadDesk() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/desk", { cache: "no-store" }); if (res.ok) { deskData = await res.json(); if (currentView === "desk") renderAll(); } } catch (e) {}
+  }
+  function pillarChip(v, label) { const c = v == null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat"; return `<span class="pchip ${c}" title="${label}: ${v == null ? "no data" : v > 0 ? "+" + v : v}">${v == null ? "–" : v > 0 ? "+" + v : v}</span>`; }
+  function secDesk() {
+    if (STATIC_MODE) return `<section><h2>Trading desk</h2><div class="muted">The desk runs on the app server: open the app link, not the static copy.</div></section>`;
+    const d = deskData; if (!d) { loadDesk(); return `<section><h2>Trading desk</h2><div class="muted">Loading the scorecards…</div></section>`; }
+    if (d.status !== "ok") return `<section><h2>Trading desk</h2><div class="muted">Warming up: the first scorecards arrive a minute after the first report build.</div></section>`;
+    const m = d.macro || {}; const mc = m.pillar > 0 ? "up" : m.pillar < 0 ? "down" : "flat";
+    const mine = new Set(((lists && lists.lists && lists.lists[lists.active]) || []).map((x) => (typeof x === "string" ? x : x.ticker || "").toUpperCase()));
+    const byT = {}; (d.cards || []).forEach((c) => { byT[c.ticker] = c; });
+    const scopes = [["mine", `My list (${[...mine].filter((t) => byT[t]).length})`], ["index", "Indexes & sectors"], ["all", `Everything (${(d.cards || []).length})`]];
+    let cards = d.cards || [];
+    if (deskScope === "mine") cards = cards.filter((c) => mine.has(c.ticker));
+    else if (deskScope === "index") cards = cards.filter((c) => (d.index || []).includes(c.ticker) || (d.sectors || []).includes(c.ticker));
+    const missing = deskScope === "mine" ? [...mine].filter((t) => !byT[t]) : [];
+    const comp = (m.components || []).map((c) => `<div class="fact"><span class="fact-l">${esc(c.ratio)}</span><span class="fact-v ${c.signal > 0 ? "up" : c.signal < 0 ? "down" : ""}">${c.available ? (c.signal > 0 ? "▲" : c.signal < 0 ? "▼" : "─") + " " + esc(c.detail) : "no data"}</span></div>`).join("");
+    const tallies = Object.entries(d.counts || {}).map(([k, v]) => `<span class="tag">${esc(pretty(k))}: ${v}</span>`).join(" ");
+    const row = (c) => {
+      const held = !!deskHold[c.ticker]; const dec = held ? c.holding : c.flat; const open = deskOpen === c.ticker;
+      const fl = c.flags || {}; const flagList = [...(fl.rebound || []).map((x) => ["up", x]), ...(fl.exhaustion || []).map((x) => ["caution", x]), ...(fl.bearish || []).map((x) => ["down", x])];
+      const ind = c.indicators || {};
+      return `<tr class="desk-row ${open ? "open" : ""}" data-desk-open="${esc(c.ticker)}"><td class="sym"><b>${esc(c.ticker)}</b><div class="meta2">${esc(c.name || "")}</div></td>
+        <td class="num">${fnum(c.price)}</td>
+        <td>${pillarChip(c.trend.score, "Trend")}</td><td>${pillarChip(c.momentum.score, "Momentum")}</td><td>${pillarChip(c.macro, "Macro")}</td>
+        <td class="num"><b>${c.total > 0 ? "+" : ""}${c.total}</b></td>
+        <td><span class="pill ${dec.cls}">${esc(dec.word)}</span>${fl.death_cross ? ' <span class="tag warn" title="50-day line below the 200-day line and price below the 50-day">downtrend structure</span>' : ""}</td>
+        <td><button class="hold-btn ${held ? "on" : ""}" type="button" data-desk-hold="${esc(c.ticker)}" title="Tell the desk whether you hold this name; the read changes between 'should I get in' and 'should I stay in'">${held ? "I hold it" : "I'm flat"}</button></td></tr>
+        ${open ? `<tr class="desk-detail"><td colspan="8"><div class="desk-plain"><b>${esc(dec.word)}.</b> ${esc(dec.plain)}</div>
+          <div class="meta2">${esc(dec.rationale)} ${esc(dec.framing)}</div>
+          <div class="desk-flags">${flagList.length ? flagList.map(([k, x]) => `<span class="tag ${k === "up" ? "ok" : k === "down" ? "warn" : ""}">${esc(x)}</span>`).join(" ") : '<span class="muted">No warning or bounce signals right now.</span>'}</div>
+          <div class="desk-ind meta2">Trend: ${esc(c.trend.detail)} · Momentum: ${esc(c.momentum.detail)} · 20-day ${fnum(ind.ema20)} · 50-day ${fnum(ind.ema50)} · 200-day ${fnum(ind.ema200)} · RSI ${isNum(ind.rsi14) ? ind.rsi14.toFixed(0) : "–"} · stretch vs 20-day ${fpct(fl.stretch_pct, 1)} · ${c.n_bars} daily bars${c.warning ? " · " + esc(c.warning) : ""}</div></td></tr>` : ""}`;
+    };
+    return `<section class="desk">
+      <h2>Trading desk <span class="muted">three scores per name, one fixed rulebook · updated ${esc((d.generated_at || "").slice(11, 16))} ET · every 30 min in market hours</span></h2>
+      <div class="card" style="margin-bottom:12px"><h3>Market backdrop <span class="muted">one macro score shared by every name</span></h3>
+        <div class="mood-row"><span class="mood-tone ${mc}">${esc(m.regime || "–")}</span> <span class="pill ${mc}">macro ${m.pillar > 0 ? "+" : ""}${m.pillar == null ? "–" : m.pillar}</span> <span class="muted">${esc(m.label || "")}</span></div>
+        <p class="mood-why">${esc(m.regime_plain || "")}${m.inflationary ? " Stocks and bonds are moving together (inflation flag)." : ""}</p>
+        <div class="facts">${comp}</div></div>
+      <div class="tabs subtabs" style="margin-bottom:8px">${scopes.map(([k, l]) => `<button class="tab ${deskScope === k ? "active" : ""}" data-desk-scope="${k}">${l}</button>`).join("")}<span class="muted small" style="margin-left:auto">${tallies}</span></div>
+      ${missing.length ? `<div class="meta2" style="margin-bottom:8px">Not scored yet (need 60+ daily bars or not in this pass): ${missing.map(esc).join(", ")}</div>` : ""}
+      <div class="card"><div class="tbl-wrap"><table class="tbl desk-tbl"><thead><tr><th>Name</th><th class="num">Price</th><th>Trend</th><th>Momentum</th><th>Macro</th><th class="num">Total</th><th>Read</th><th>You</th></tr></thead>
+        <tbody>${cards.map(row).join("") || `<tr><td colspan="8" class="muted">${deskScope === "mine" ? "Nothing from your active list is scored yet. Add names to your watchlist; they are picked up on the next pass." : "No names."}</td></tr>`}</tbody></table></div>
+        <div class="meta2" style="margin-top:8px">Click a row for the reasons. Scores run from −2 to +2 per pillar (total −6 to +6). ${esc(d.how || "")}</div></div>
+      <p class="muted small" style="margin-top:10px">Framework and maths: <a href="${esc((d.source || {}).url || "#")}" target="_blank" rel="noopener">Agentic Trading Desk</a> by ${esc((d.source || {}).author || "")}, open source (MIT). OneView runs its calculations on OneView data and shows the result as information. The original project's broker link and automatic order placement are not part of OneView. Each read here is logged and scored in the Track record like everything else.</p>
+    </section>`;
+  }
   let checkData = null, checkDay = "";
   async function loadCheck(day) {
     if (STATIC_MODE) return;
@@ -1978,6 +2031,7 @@
     if (k === "admin" && !(user && user.role === "admin")) return;
     if (k === "record") loadRecord();
     if (k === "check") loadCheck();
+    if (k === "desk") loadDesk();
     currentView = k; try { history.replaceState(null, "", "#view=" + k); } catch (e) {}
     if (report) renderAll();
   }
@@ -2047,6 +2101,9 @@
         row.querySelector("td").innerHTML = `<ul class="bf-list">${morning}${reads || '<li class="muted">no intraday reads that day</li>'}</ul>`; } catch (e) { row.querySelector("td").innerHTML = '<div class="muted">Could not load that day.</div>'; } }));
     document.querySelectorAll("[data-brief-toggle]").forEach((b) => b.addEventListener("click", () => { const slot = b.getAttribute("data-brief-toggle"); briefOpen = briefOpen === slot ? null : slot; const el = $(".briefs"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } }));
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
+    document.querySelectorAll("[data-desk-hold]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); toggleHold(b.getAttribute("data-desk-hold")); }));
+    document.querySelectorAll("[data-desk-open]").forEach((b) => b.addEventListener("click", () => { const t = b.getAttribute("data-desk-open"); deskOpen = deskOpen === t ? null : t; renderAll(); }));
+    document.querySelectorAll("[data-desk-scope]").forEach((b) => b.addEventListener("click", () => { deskScope = b.getAttribute("data-desk-scope"); renderAll(); }));
     document.querySelectorAll("[data-check-day]").forEach((b) => b.addEventListener("click", () => { checkData = null; loadCheck(b.getAttribute("data-check-day")); renderAll(); }));
     document.querySelectorAll("[data-add-ticker]").forEach((b) => b.addEventListener("click", () => addTicker(b.getAttribute("data-add-ticker"))));
     document.querySelectorAll("#app [data-remove]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }));
@@ -2182,6 +2239,7 @@
     setTimeout(pollBrief, 2000);
     setInterval(pollDirection, 60000);
     setInterval(() => { if (currentView === "check") loadCheck(); }, 60000);
+    setInterval(() => { if (currentView === "desk") loadDesk(); }, 300000);
     setTimeout(pollDirection, 3000);
     setInterval(pollCrowd, 300000);
     setTimeout(pollCrowd, 3500);

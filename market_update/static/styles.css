@@ -1700,3 +1700,20 @@ tr.day-detail td { background: var(--surface-2); }
 .check .tag.warn{color:var(--negative,#FF8F9B);border-color:rgba(255,143,155,.4)}
 .lnk.small{font-size:11px;margin-left:8px;color:var(--brand-accessible,#85A7FF);text-decoration:none}
 .lnk.small:hover{text-decoration:underline}
+
+/* trading desk */
+.desk .pchip{display:inline-block;min-width:30px;text-align:center;padding:2px 6px;border-radius:6px;font-weight:700;font-size:12px;border:1px solid var(--line,#1E2A3D);color:var(--text-muted,#9AA7BD)}
+.desk .pchip.up{color:var(--positive,#66D9A6);border-color:rgba(102,217,166,.4)}
+.desk .pchip.down{color:var(--negative,#FF8F9B);border-color:rgba(255,143,155,.4)}
+.desk .pill.caution{color:var(--caution,#E8BD68);border-color:rgba(232,189,104,.45)}
+.desk .mood-tone.up{color:var(--positive,#66D9A6)}.desk .mood-tone.down{color:var(--negative,#FF8F9B)}
+.desk .hold-btn{font:inherit;font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line,#1E2A3D);background:transparent;color:var(--text-muted,#9AA7BD);cursor:pointer}
+.desk .hold-btn.on{color:var(--brand-accessible,#85A7FF);border-color:rgba(133,167,255,.5);background:rgba(36,91,255,.12)}
+.desk tr.desk-row{cursor:pointer}
+.desk tr.desk-row.open td{border-bottom:none}
+.desk tr.desk-detail td{background:rgba(255,255,255,.02);padding:10px 12px 14px}
+.desk .desk-plain{font-size:14px;line-height:1.5;margin-bottom:4px}
+.desk .desk-flags{margin:8px 0;display:flex;flex-wrap:wrap;gap:6px}
+.desk .tag.ok{color:var(--positive,#66D9A6);border-color:rgba(102,217,166,.4)}
+.desk .tag.warn{color:var(--negative,#FF8F9B);border-color:rgba(255,143,155,.4)}
+.desk .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px}
