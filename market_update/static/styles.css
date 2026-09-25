@@ -1661,3 +1661,30 @@ tr.day-detail td { background: var(--surface-2); }
 .guide .gd { margin: 14px 0 0; } .guide .gd h3 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
 .gd-list { margin: 0; padding: 0 0 0 18px; display: grid; gap: 5px; font-size: 13.5px; line-height: 1.5; max-width: 90ch; } .gd-list b { color: var(--text); }
 .side-item.v-guide { --vc: #66D9A6; }
+
+
+/* FIX 1: a hidden gate never intercepts the mouse; a visible gate never covers the navigation.
+   --gate-left / --gate-top are set by positionGate() from the real navigation element; the defaults match a 236px sidebar. */
+.gate { --gate-left: 236px; --gate-top: 0px; left: var(--gate-left); top: var(--gate-top); }
+.shell.collapsed ~ .gate { --gate-left: 64px; }
+.gate[hidden] { display: none !important; pointer-events: none !important; }
+.gate.leaving { pointer-events: none !important; }
+@media (max-width: 900px) { .gate, .shell.collapsed ~ .gate { --gate-left: 0px; left: 0; } }
+/* FIX 4: share link sits beside the more/less toggle on the morning card */
+.bc-actions { display: flex; gap: 14px; align-items: center; } .bc-share { font-size: 12px; color: #25D366; }
+/* FIX 5: alerts button, Pro badge and the settings modal */
+.pro-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: linear-gradient(90deg, #FFD66B, #FFB454); color: #0A1220; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; vertical-align: middle; }
+@media (max-width: 1399px) { .top-actions .pro-badge { display: none; } }
+@media (max-width: 1400px) { #alerts-btn .lbl { display: none; } }
+.modal { position: fixed; inset: 0; z-index: 150; background: rgba(4, 8, 18, .72); display: grid; place-items: center; padding: 20px; }
+.modal[hidden] { display: none !important; }
+.modal-card { width: min(560px, 100%); background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; padding: 20px 22px; display: grid; gap: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.5); position: relative; }
+.modal-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; } .modal-h h3 { margin: 0; font-size: 17px; font-weight: 600; }
+.modal-card .gate-x { position: static; width: 32px; height: 32px; }
+.al-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.al-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr); gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.al-name { display: flex; align-items: center; gap: 8px; } .al-name input { width: 18px; height: 18px; accent-color: var(--brand); }
+.al-th { color: var(--text-2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.al-th input { width: 72px; min-height: 36px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
+.modal-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 700px) { .al-row { grid-template-columns: 1fr; } .modal-card { padding: 16px; } }

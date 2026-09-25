@@ -982,10 +982,17 @@ def _hourly_read(sym: str, f: pd.DataFrame | None) -> dict[str, Any] | None:
     res = min([v for v in highs if v > last], default=None)
     sup = max([v for v in lows if v < last], default=None)
     ret24 = (last / float(close.iloc[-25]) - 1) * 100 if len(close) >= 25 else None
-    prev_day_close = None
+    # "yesterday" is the last completed session BEFORE today (ET), whether or not today's bars exist yet.
+    today_et = datetime.now(tz=config.ET).date()
     days = sorted(set(d.index.date))
-    if len(days) >= 2:
-        prev_day_close = float(d[d.index.date == days[-2]]["Close"].iloc[-1])
+    before = [x for x in days if x < today_et]
+    prev_day = before[-1] if before else None
+    prev_day_close = None
+    if prev_day is not None:
+        if days[-1] > prev_day:                     # today's bars are in: change is today vs yesterday's close
+            prev_day_close = float(d[d.index.date == prev_day]["Close"].iloc[-1])
+        elif len(before) >= 2:                      # no bars today yet: the chart's last session IS yesterday; its change is vs the day before
+            prev_day_close = float(d[d.index.date == before[-2]]["Close"].iloc[-1])
     return {
         "symbol": sym, "last": _r(last), "change_1d_pct": _r((last / prev_day_close - 1) * 100) if prev_day_close else None,
         "ret_24_bars_pct": _r(ret24), "rsi_1h": _r(T.rsi(close, 14), 1), "sma20": _r(sma20), "sma50": _r(sma50),
@@ -994,8 +1001,9 @@ def _hourly_read(sym: str, f: pd.DataFrame | None) -> dict[str, Any] | None:
         "structure": sp.get("structure"), "nearest_support": _r(sup), "nearest_resistance": _r(res),
         "dist_support_pct": _r((last / sup - 1) * 100) if sup else None, "dist_resistance_pct": _r((res / last - 1) * 100) if res else None,
         "range_24_bars": [_r(float(d["Low"].tail(24).min())), _r(float(d["High"].tail(24).max()))],
-        "prev_high": _r(float(d[d.index.date == days[-2]]["High"].max())) if len(days) >= 2 else None,
-        "prev_low": _r(float(d[d.index.date == days[-2]]["Low"].min())) if len(days) >= 2 else None,
+        "prev_high": _r(float(d[d.index.date == prev_day]["High"].max())) if prev_day is not None else None,
+        "prev_low": _r(float(d[d.index.date == prev_day]["Low"].min())) if prev_day is not None else None,
+        "prev_day": prev_day.isoformat() if prev_day is not None else None,
         "bars": [{"t": ts.isoformat(), "o": _r(float(o)), "h": _r(float(h)), "l": _r(float(lo)), "c": _r(float(c))} for ts, o, h, lo, c in
                  zip(d.index[-48:], d["Open"].tail(48), d["High"].tail(48), d["Low"].tail(48), d["Close"].tail(48))],
     }
@@ -1014,18 +1022,21 @@ def _index_plan(x: dict[str, Any]) -> dict[str, Any]:
     if isinstance(x.get("rsi_1h"), (int, float)):
         r = x["rsi_1h"]; see.append(f"1-hour RSI {r:.0f}" + (" (overbought)" if r >= 70 else " (oversold)" if r <= 30 else ""))
     if ph and pl:
-        see.append(f"yesterday's range {pl:,.2f} to {ph:,.2f}")
+        see.append(f"{x.get('prev_day') or 'yesterday'} range {pl:,.2f} to {ph:,.2f}")
     levels = []
     if res:
         levels.append(f"Above {res:,.2f}: the ceiling gives way and a push toward the next high is on.")
     if ph and res and abs(ph - res) / (last or 1) > 0.002:
-        levels.append(f"Yesterday's high {ph:,.2f} is the first test on the way up.")
+        levels.append(f"{x.get('prev_day') or 'Yesterday'} high {ph:,.2f} is the first test on the way up.")
     if sup:
         levels.append(f"Below {sup:,.2f}: the trend read flips lower and sellers get the ball.")
     if pl and sup and abs(pl - sup) / (last or 1) > 0.002:
-        levels.append(f"Yesterday's low {pl:,.2f} is the line the bulls must hold.")
+        levels.append(f"{x.get('prev_day') or 'Yesterday'} low {pl:,.2f} is the line the bulls must hold.")
     if sup and res:
         levels.append(f"Between {sup:,.2f} and {res:,.2f}: expect two-way trade until one side breaks.")
+    if isinstance(x.get("now_price"), (int, float)) and isinstance(x.get("now_chg_pct"), (int, float)):
+        gap = x["now_chg_pct"]
+        see.insert(0, f"trading {x['now_price']:,.2f} right now, {'up' if gap >= 0 else 'down'} {abs(gap):.2f}% from yesterday's close" + (", above the resistance the chart closed under" if x.get("now_vs_resistance") == "above" else ", already under support" if x.get("now_vs_support") == "below" else ""))
     nh = (a.get("next_hours") or {}).get("choice")
     shape = {"push_and_extend": "the likelier shape for the first hours is an open above the prior high that keeps going",
              "fade_after_open": "the likelier shape is an early push that fails at resistance and gives the gain back",
@@ -1036,14 +1047,17 @@ def _index_plan(x: dict[str, Any]) -> dict[str, Any]:
 
 def _brief_inputs(report: dict[str, Any]) -> dict[str, Any]:
     """Everything the briefing needs, fetched synchronously (run in a thread)."""
-    quotes = fetch.fetch_quotes(MEGA_CAPS + ["^FVX", "^TNX"])
     by_ticker = {s["ticker"]: s for s in report.get("stocks", [])}
     lite = report.get("lite") or {}
+    missing = [t for t in MEGA_CAPS if not (lite.get(t) or {}).get("last_price") and not (by_ticker.get(t) or {}).get("last_price")]
+    quotes = fetch.fetch_quotes(missing + ["^FVX"])
     mega = []
     for t in MEGA_CAPS:
-        q = quotes.get(t) or {}
-        s = by_ticker.get(t)
-        mega.append({"ticker": t, "name": (s or {}).get("name") or (lite.get(t) or {}).get("name") or t, "last": q.get("last"), "chg_pct": q.get("change_pct"),
+        s = by_ticker.get(t); l = lite.get(t) or {}; q = quotes.get(t) or {}
+        # the report's snapshot includes pre-market prints and the change against the prior close; fast_info is only a fallback
+        last = (s or {}).get("last_price") or l.get("last_price") or q.get("last")
+        chg = (s or {}).get("chg_pct") if s and s.get("chg_pct") is not None else (l.get("chg_pct") if l.get("chg_pct") is not None else q.get("change_pct"))
+        mega.append({"ticker": t, "name": (s or {}).get("name") or l.get("name") or t, "last": last, "chg_pct": chg,
                      "verdict": (s or {}).get("verdict"), "market_cap": ((s or {}).get("fundamentals") or {}).get("market_cap")})
     macro = {m["symbol"]: m for m in report.get("macro", [])}
     tape = []
@@ -1051,16 +1065,28 @@ def _brief_inputs(report: dict[str, Any]) -> dict[str, Any]:
         m = macro.get(sym)
         if m:
             tape.append({"symbol": sym, "label": label, "last": m.get("last"), "chg_pct": m.get("change_pct"), "kind": m.get("kind")})
-    y10 = quotes.get("^TNX") or {}
+    y10 = macro.get("^TNX") or {}
     y5 = quotes.get("^FVX") or {}
     yields = {"10y": _r(y10.get("last")), "10y_chg_bp": _r((y10.get("change") or 0) * 100, 0) if y10.get("change") is not None else None,
               "5y": _r(y5.get("last")), "5y_chg_bp": _r((y5.get("change") or 0) * 100, 0) if y5.get("change") is not None else None}
     hourly = fetch.download(["SPY", "QQQ"], period="1mo", interval="1h")
     idx = {sym: _hourly_read(sym, fetch.frame_for(hourly, sym)) for sym in ("SPY", "QQQ")}
+    # the 1-hour chart stops at the last regular close; add where the index trades NOW (pre-market or live) and the gap
+    for sym, x in idx.items():
+        if not x:
+            continue
+        l = lite.get(sym) or {}
+        ind = next((i for i in report.get("indices", []) if i.get("symbol") == sym), None) or {}
+        now_px = l.get("last_price") or ind.get("last")
+        now_chg = l.get("chg_pct") if l.get("chg_pct") is not None else ind.get("chg_pct")
+        x["as_of_close"] = x.get("bars", [{}])[-1].get("t") if x.get("bars") else None
+        x["now_price"] = _r(now_px); x["now_chg_pct"] = _r(now_chg)
+        x["now_vs_resistance"] = "above" if now_px and x.get("nearest_resistance") and now_px > x["nearest_resistance"] else ("below" if now_px and x.get("nearest_resistance") else None)
+        x["now_vs_support"] = "below" if now_px and x.get("nearest_support") and now_px < x["nearest_support"] else ("above" if now_px and x.get("nearest_support") else None)
     social = report.get("social") or {}
     cutoff = (datetime.now(tz=config.ET) - timedelta(hours=24)).isoformat()
     trump = [p for p in (social.get("trump") or {}).get("posts", []) if p.get("ai") and ((p["ai"].get("market_relevance") or {}).get("p", 0) >= 0.5) and (p.get("posted") or "") >= cutoff[:19]]
-    events = [c for c in report.get("calendar", []) if (c.get("relevance") or 0) >= 2][:6]
+    events = [c for c in report.get("calendar", []) if (c.get("relevance") or 0) >= 1.5][:6] or report.get("calendar", [])[:4]
     # the session so far: index ETFs, sector leaders and laggards, the biggest movers among analysed names, scanner count
     ind = {i["symbol"]: i for i in report.get("indices", [])}
     session = {"indexes": [{"symbol": k, "name": v.get("name"), "last": v.get("last"), "chg_pct": v.get("chg_pct")} for k, v in ind.items() if k in ("SPY", "QQQ", "IWM", "DIA")]}
@@ -1111,6 +1137,10 @@ def _brief_summary(b: dict[str, Any], slot: str = "morning") -> str:
     y = b["yields"]
     if isinstance(y.get("10y"), (int, float)):
         bits.append(f"10-year at {y['10y']:.2f}%")
+    for sym in ("SPY", "QQQ"):
+        x = b["indexes"].get(sym) or {}
+        if isinstance(x.get("now_chg_pct"), (int, float)) and abs(x["now_chg_pct"]) >= 0.15:
+            bits.append(f"{sym} {'up' if x['now_chg_pct'] >= 0 else 'down'} {abs(x['now_chg_pct']):.1f}% pre-market")
     reads = {k: (v or {}).get("ai") for k, v in b["indexes"].items()}
     words = {"push_higher": "pointing higher", "pullback_then_higher": "stretched, a dip is likelier first", "range_bound": "range-bound", "break_lower": "at risk of breaking lower", "rebound": "set up for a rebound"}
     for sym in ("SPY", "QQQ"):
@@ -1126,7 +1156,7 @@ async def morning_brief(report: dict[str, Any], judge: "Judge", slot: str = "mor
     b = await asyncio.to_thread(_brief_inputs, report)
     b["slot"] = slot
     b["title"] = {"morning": "Morning briefing", "close": "After the close"}.get(slot, slot)
-    states = [{k: v for k, v in (b["indexes"][sym] or {}).items() if k != "bars"} | {"name": {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF"}[sym]} for sym in ("SPY", "QQQ") if b["indexes"].get(sym)]
+    states = [{k: v for k, v in (b["indexes"][sym] or {}).items() if k != "bars"} | {"name": {"SPY": "S&P 500 ETF", "QQQ": "Nasdaq 100 ETF"}[sym], "note": "the 1-hour facts describe the chart at the last regular close; now_price / now_chg_pct is where it trades at this moment (pre-market when before 09:30)"} for sym in ("SPY", "QQQ") if b["indexes"].get(sym)]
     ans = await judge.run_many(states, J.BRIEF_INDEX_QUESTIONS)
     for st, a in zip(states, ans):
         if b["indexes"].get(st["symbol"]) is not None:

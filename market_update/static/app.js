@@ -108,8 +108,9 @@
   }
   function applyLiveQuotes(j) {
     const ts = j.quotes_at || j.as_of || 0; if (!j.quotes) return;
-    Object.entries(j.quotes).forEach(([t, q]) => qset(t, q.last, q.chg_pct, ts, { rvol: q.rvol, above_vwap: q.above_vwap, dollar_vol: q.dollar_vol, vol: q.vol, score: q.score, direction: q.direction, range_pos: q.range_pos, live: true }));
-    Q.liveAt = ts; Q.at = Math.max(Q.at, ts);
+    let newest = 0;                                  // each quote carries its own time; bar prices are only as fresh as their bar
+    Object.entries(j.quotes).forEach(([t, q]) => { const qts = isNum(q.ts) ? q.ts : ts; qset(t, q.last, q.chg_pct, qts, { rvol: q.rvol, above_vwap: q.above_vwap, dollar_vol: q.dollar_vol, vol: q.vol, score: q.score, direction: q.direction, range_pos: q.range_pos, live: true }); if (Q.map[t] && Q.map[t].ts === qts) newest = Math.max(newest, qts); });
+    Q.liveAt = Math.max(Q.liveAt || 0, newest || 0, Q.reportAt || 0); Q.at = Math.max(Q.at, Q.liveAt);
   }
   // qp(ticker, fallbackObject) -> {last, chg}: the store first, the object's own numbers only when the store has nothing
   const qp = (t, o) => { const q = Q.map[t]; if (q && isNum(q.last)) return q; const last = o ? [o.last_price, o.last, o.price, o.spot].find(isNum) : null; return { last: isNum(last) ? last : null, chg: o ? qchg(o) : null, ts: 0 }; };
@@ -430,7 +431,7 @@
       tone === "risk_on" ? "Buy strength: longs through yesterday's high on above-normal volume; avoid shorting dips." : tone === "risk_off" ? "Sell strength: short pops into resistance and fade gaps; do not buy the first dip." : "No lead: trade the range between yesterday's high and low, and wait for the first 30 minutes.",
       mv ? `Size for a ${mv}% day on the S&P${vol >= 2 ? "; ranges will be wide, so stops need room" : "; ranges should stay ordinary"}.` : "",
       nq != null ? `${nq} names have unusual volume right now: start in SCAN, take the ones above VWAP with a breakout read.` : "",
-      lead && lead !== "unclear" ? `Leadership: ${pretty(lead)}. Trade in that group first.` : "",
+      leadingSector(r) ? `Leadership: ${leaderLabel(r)}. Trade in that group first.` : (lead && lead !== "unclear" ? `Leadership: ${pretty(lead)}. Trade in that group first.` : ""),
     ].filter(Boolean);
     const swing = [
       tone === "risk_on" ? "Add to the strongest names on pullbacks to the 20-day average; let winners run." : tone === "risk_off" ? "Cut losers, hold cash, and only take setups with a tight stop and 2× reward." : "Keep size small until the tone resolves; favour names with a clear level.",
@@ -452,7 +453,7 @@
       <div class="facts">
         ${fact("Swings", volL[Math.round(g.volatility.score)], g.volatility.score >= 2 ? "warn" : "")}
         ${fact("Driver", pretty(g.driver.choice))}
-        ${fact("Leading", pretty(g.leadership.choice))}
+        ${fact("Leading", esc(leaderLabel(r, pretty(g.leadership.choice))), leadingSector(r) ? cls(leadingSector(r).chg) : "")}
         ${fact("Rates", pretty(g.rates_read.choice), { tailwind: "up", headwind: "down" }[g.rates_read.choice] || "")}
         ${fact("Money flow", pretty(g.flow_read.choice))}
       </div>
@@ -542,10 +543,25 @@
     return `<section class="world"><h3>Around the world <span class="muted">${esc(line)}</span></h3><div class="world-grid">${W.map((x) => `<div class="wi ${cls(x.chg_pct)}"><span class="wi-r">${esc(x.region)}</span><b>${esc(x.label)}</b><span class="mono">${fnum(x.last, 0)}</span><span class="delta ${cls(x.chg_pct)}">${arrow(x.chg_pct)} ${fpct(x.chg_pct)}</span></div>`).join("")}</div></section>`;
   }
   const INDEX_ETFS = { SPY: "S&P 500", QQQ: "Nasdaq 100", DIA: "Dow 30", IWM: "Small caps" };
+  // FIX 3: one source for sector performance. Every "leading" label on the page comes from the top row of this list.
+  function sectorRows(r) {
+    return ((r.flows || {}).sectors || []).map((x) => ({ ...x, chg: qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg })).filter((x) => isNum(x.chg)).sort((a, b) => b.chg - a.chg);
+  }
+  function leadingSector(r) { const rows = sectorRows(r); return rows.length ? rows[0] : null; }
+  const leaderLabel = (r, fallback) => { const l = leadingSector(r); return l ? `${l.label} (${fpct(l.chg, 1)})` : fallback; };
+  // FIX 2: the activity phrase is derived from the same classification as the verdict pill, so the two can never disagree.
+  function pressingFor(v, q) {
+    const code = v && v.code;
+    if (["selling_today", "momentum_down", "drifting_down", "trend_down", "short_setup", "avoid"].includes(code)) return ["sellers pressing", "down"];
+    if (["buying_today", "momentum_up", "drifting_up", "pullback_in_uptrend", "trend_up", "buy_now", "buy_the_dip"].includes(code)) return ["buyers pressing", "up"];
+    if (code) return ["two-way", "flat"];
+    const d = q && q.direction;                        // no verdict at all: fall back to the scanner's direction
+    return d === "up" ? ["buyers pressing", "up"] : d === "down" ? ["sellers pressing", "down"] : ["two-way", "flat"];
+  }
   const bigCap = (t, r) => { const s = stockFor(t); if (s && isNum((s.fundamentals || {}).market_cap)) return s.fundamentals.market_cap >= 10e9; const q = (r.lite || {})[t]; return !!(q && isNum(q.avg_dollar_volume) && q.avg_dollar_volume >= 1e9 && q.kind !== "ETF"); };
   const flowOf = (t, r) => { const q = Q.map[t] || {}; if (isNum(q.rvol)) return q; const l = ((r.lite || {})[t] || {}).scan; return l ? { rvol: l.rvol_tod, above_vwap: l.above_vwap, score: l.score, direction: l.direction } : {}; };
   function secBigMoney(r) {
-    const sectors = ((r.flows || {}).sectors || []).map((x) => ({ ...x, chg: qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg })).filter((x) => isNum(x.chg)).sort((a, b) => b.chg - a.chg);
+    const sectors = sectorRows(r);
     const idx = Object.keys(INDEX_ETFS).map((t) => { const q = qp(t, (r.lite || {})[t] || (r.indices || []).find((i) => i.symbol === t)); const f = flowOf(t, r); return { t, q, f }; }).filter((x) => isNum(x.q.last));
     const tile = (x) => { const busy = isNum(x.f.rvol) ? (x.f.rvol >= 1.5 ? "up" : x.f.rvol <= 0.7 ? "down" : "flat") : "flat";
       const act = isNum(x.f.rvol) ? `<b class="${busy}">${x.f.rvol.toFixed(1)}×</b> the usual activity` : '<span class="muted">activity n/a</span>';
@@ -553,7 +569,7 @@
       return `<div class="bm-tile ${cls(x.q.chg)}" data-ticker-page="${esc(x.t)}"><div class="bm-h"><b>${esc(x.t)}</b><span class="muted">${INDEX_ETFS[x.t]}</span></div>${priceHtml(x.t, null)}<div class="bm-act">${act}</div><div class="bm-side">${side}</div></div>`; };
     const large = Object.entries(Q.map).filter(([t, q]) => bigCap(t, r) && isNum(q.rvol) && q.rvol >= 1.3 && isNum(q.last)).map(([t, q]) => ({ t, q })).sort((a, b) => (b.q.dollar_vol || 0) - (a.q.dollar_vol || 0) || b.q.rvol - a.q.rvol).slice(0, 8);
     const nm = (t) => { const s = stockFor(t); return (s && s.name) || ((r.lite || {})[t] || {}).name || ""; };
-    const rows = large.slice(0, 6).map(({ t, q }) => { const v = verdictFor(stockFor(t)); return `<tr class="clickable" data-ticker-page="${esc(t)}"><td class="sym"><b>${esc(t)}</b><div class="meta2">${esc(nm(t))}</div></td><td class="num">${priceHtml(t, null)}</td><td class="num"><b>${isNum(q.dollar_vol) ? fcap(q.dollar_vol) : "–"}</b><div class="meta2">traded today</div></td><td class="num"><b class="${q.rvol >= 2 ? "up" : ""}">${q.rvol.toFixed(1)}×</b><div class="meta2 ${q.direction === "up" ? "up" : q.direction === "down" ? "down" : ""}">${q.direction === "up" ? "buyers pressing" : q.direction === "down" ? "sellers pressing" : "two-way"}</div></td><td>${v ? `<span class="pill ${v.cls}">${v.word}</span>` : '<span class="muted">not analysed</span>'}</td></tr>`; }).join("");
+    const rows = large.slice(0, 6).map(({ t, q }) => { const v = verdictFor(stockFor(t)); return `<tr class="clickable" data-ticker-page="${esc(t)}"><td class="sym"><b>${esc(t)}</b><div class="meta2">${esc(nm(t))}</div></td><td class="num">${priceHtml(t, null)}</td><td class="num"><b>${isNum(q.dollar_vol) ? fcap(q.dollar_vol) : "–"}</b><div class="meta2">traded today</div></td><td class="num"><b class="${q.rvol >= 2 ? "up" : ""}">${q.rvol.toFixed(1)}×</b><div class="meta2 ${pressingFor(v, q)[1]}">${pressingFor(v, q)[0]}</div></td><td>${v ? `<span class="pill ${v.cls}">${v.word}</span>` : '<span class="muted">not analysed</span>'}</td></tr>`; }).join("");
     const mx = Math.max(0.1, ...sectors.map((x) => Math.abs(x.chg)));
     const lead = sectors[0], lag = sectors[sectors.length - 1];
     const secLine = lead && lag && Math.abs(lead.chg) >= 0.15 ? `${esc(lead.label)} is the strongest group (${fpct(lead.chg, 1)}), ${esc(lag.label)} the weakest (${fpct(lag.chg, 1)}).` : sectors.length ? "No sector stands out yet: every group is within a fraction of a percent." : "";
@@ -631,6 +647,13 @@
     const trump = (b.trump || []).map((p) => { const a = p.ai || {}; const d = a.direction ? TP.dir[a.direction.choice] : null; return `<li><span class="pill ${d ? d[1] : "flat"}">${d ? d[0] : "read"}</span> ${esc(p.text.slice(0, 140))}${p.text.length > 140 ? "…" : ""} ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open</a>` : ""}</li>`; }).join("");
     const ev = (b.events || []).slice(0, 4).map((c) => `<li><samp>${esc(c.time_et)}</samp> ${esc(c.title)}</li>`).join("");
     const open = briefOpen === slot;
+    let share = "";
+    if (slot === "morning") {                          // FIX 4: plain-text summary for WhatsApp, morning briefing only
+      const lv = ["SPY", "QQQ"].map((sym) => { const x = (b.indexes || {})[sym]; if (!x) return null; const a = (x.ai || {}).next_move; return `${sym} ${fnum(x.last)} · support ${fnum(x.nearest_support)} · resistance ${fnum(x.nearest_resistance)}${a && BRIEF_MOVE[a.choice] ? " · " + BRIEF_MOVE[a.choice][0].toLowerCase() : ""}`; }).filter(Boolean);
+      const mv = (b.mega || []).filter((m) => isNum(m.chg_pct)).sort((a, c) => Math.abs(c.chg_pct) - Math.abs(a.chg_pct)).slice(0, 4).map((m) => `${m.ticker} ${fpct(m.chg_pct, 1)}`);
+      const text = [`OneView morning briefing · ${b.date || ""}`, "", b.summary || "", "", "Key levels:", ...lv, mv.length ? "" : null, mv.length ? "Notable movers: " + mv.join(", ") : null, "", "Full briefing: " + (APP_URL || location.origin + location.pathname) + "#view=home&brief=1", "", "Information only, not financial advice."].filter((x) => x !== null).join("\n");
+      share = `<a class="lnk bc-share" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener" title="Share this briefing on WhatsApp">Share on WhatsApp</a>`;
+    }
     return `<article class="bcard ${open ? "open" : ""}" data-brief-slot="${slot}">
       <div class="bcard-h"><b>${label}</b><span class="muted">${esc((b.generated_at || "").slice(11, 16))} ET${today ? "" : " · " + esc(b.date || "")}</span></div>
       <p class="bc-summary">${esc(b.summary || "")}</p>
@@ -647,7 +670,7 @@
         ${ev ? `<h5>${slot === "close" ? "Tomorrow" : "Today"}</h5><ul class="bf-list">${ev}</ul>` : ""}
         <div class="meta2">${esc(b.note || "")}</div>
       </div>
-      <button type="button" class="lnk bc-toggle" data-brief-toggle="${slot}">${open ? "less" : "more"}</button>
+      <div class="bc-actions"><button type="button" class="lnk bc-toggle" data-brief-toggle="${slot}">${open ? "less" : "more"}</button>${share}</div>
     </article>`;
   }
   function secBrief(r) {
@@ -1007,7 +1030,7 @@
       <div class="tile hero"><div class="tile-label">Mood</div><div class="tile-value ${toneCls}">${pretty(g.tone.choice).toUpperCase()}</div>${explain(EX.tone[g.tone.choice])}<div class="tile-sub">${convTag(g.tone.confidence)}</div></div>
       <div class="tile"><div class="tile-label">Expected swings</div><div class="tile-value small">${volL[vi]}</div>${explain(EX.vol[vi])}<div class="tile-sub">${bar(g.volatility.score, 3)} ${volL[vi].toLowerCase()} ${convTag(g.volatility.confidence)}</div></div>
       ${tile("What's driving it", pretty(g.driver.choice), convTag(g.driver.confidence), EX.driver[g.driver.choice] || "")}
-      ${tile("Who should lead", pretty(g.leadership.choice), convTag(g.leadership.confidence), EX.lead[g.leadership.choice] || "")}
+      ${tile("Who should lead", esc(leaderLabel(r, pretty(g.leadership.choice))), leadingSector(r) ? "top of today's industry table" : convTag(g.leadership.confidence), (leadingSector(r) ? "The strongest industry group in today's table leads the tape. " : "") + (EX.lead[g.leadership.choice] ? "Model view: " + EX.lead[g.leadership.choice] : ""))}
       ${tile("Interest rates", `<span class="${{ tailwind: "up", headwind: "down", growth_scare: "warn" }[g.rates_read.choice] || "flat"}">${pretty(g.rates_read.choice)}</span>`, convTag(g.rates_read.confidence), EX.rates[g.rates_read.choice] || "")}
       ${tile("Where money is going", pretty(g.flow_read.choice), convTag(g.flow_read.confidence), EX.flow[g.flow_read.choice] || "")}
     </div></section>`;
@@ -1637,12 +1660,23 @@
       if (!left) { clearInterval(sentTimer); el.textContent = "expired"; } }, 1000);
   }
   function startLoginFx() { /* OneView: no decorative motion on the sign-in page */ }
+  // FIX 1: a visible gate covers the working area only. The navigation element (#side) is a top bar in this layout, so the gate
+  // starts below it; if the shell ever uses a vertical sidebar again (236px, 64px collapsed) the gate starts to its right instead.
+  function positionGate() {
+    const g = $("#gate"), side = $("#side"); if (!g) return;
+    const mobile = innerWidth <= 900;
+    let left = 0, top = 0;
+    if (side && !mobile) { const b = side.getBoundingClientRect(); if (b.height > b.width) left = Math.round(b.width); else top = Math.round(b.bottom); }
+    else if (side && mobile) { const b = side.getBoundingClientRect(); if (b.width >= innerWidth - 2) top = Math.round(b.bottom); }
+    g.style.setProperty("--gate-left", left + "px"); g.style.setProperty("--gate-top", top + "px");
+  }
+  addEventListener("resize", positionGate);
   function renderGate() {
     const g = $("#gate"); if (!g) return;
     const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) setLabel(lb, `Sign out · ${(user.name || user.email.split("@")[0]).slice(0, 14)}`); }
-    if (!gateNeeded()) { g.hidden = true; g.innerHTML = ""; renderNav(); return; }
+    if (!gateNeeded()) { g.hidden = true; g.setAttribute("aria-hidden", "true"); g.innerHTML = ""; renderNav(); return; }
     const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
-    g.hidden = false; g.innerHTML = html;
+    g.hidden = false; g.removeAttribute("aria-hidden"); g.innerHTML = html; positionGate();
     wireGate(); startLoginFx();
     document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; if (gateNeeded()) renderGate(); else leaveGate(() => renderGate()); }));
     const decline = () => { try { sessionStorage.removeItem("mu-disc-s"); } catch (e) {} signOut(); };
@@ -1811,6 +1845,32 @@
       ${sec("What sets it apart", li([["Plain words with reasons.", "Two to four reasons per read and a conviction word instead of a fake-precision percentage."], ["The right kind of call.", "Funds get a trend read, big companies a momentum read, everything else the model's stance."], ["Three feeds in one place.", "The numbers, the model, and the crowd."], ["A public scorecard.", "The desk logs every call with its price and grades itself after the close."], ["One price everywhere.", "Every panel reads from the same quote store, 15-minute delayed, time stamped."]]))}
       <div class="meta2">Information, not advice. Data is delayed and can be wrong. Reads are probabilities, not predictions. You decide what to trade and you carry the risk.</div>
     </section>`;
+  }
+  // FIX 5: alerts settings, saved on this device only. Push delivery is a later step; nothing is sent from here yet.
+  const ALERTS_KEY = "mu-alerts";
+  function loadAlerts() { try { const j = JSON.parse(localStorage.getItem(ALERTS_KEY) || "null"); if (j && j.lists) return j; } catch (e) {} return { lists: {}, updated: null }; }
+  function saveAlerts(a) { a.updated = new Date().toISOString(); try { localStorage.setItem(ALERTS_KEY, JSON.stringify(a)); } catch (e) {} }
+  function alertLists() { const names = lists && lists.lists ? Object.keys(lists.lists) : []; return names.length ? names : ["Tech", "Banks"]; }
+  function openAlerts() {
+    let m = $("#alerts-modal");
+    if (!m) { m = document.createElement("div"); m.id = "alerts-modal"; m.className = "modal"; m.setAttribute("role", "dialog"); m.setAttribute("aria-modal", "true"); m.setAttribute("aria-labelledby", "alerts-title"); document.body.appendChild(m); }
+    const a = loadAlerts();
+    const rows = alertLists().map((name) => { const c = a.lists[name] || { enabled: false, threshold: 3 }; return `<li class="al-row"><label class="al-name"><input type="checkbox" data-al-on="${esc(name)}" ${c.enabled ? "checked" : ""}> <b>${esc(name)}</b></label><label class="al-th">alert when a name trades <input type="number" min="1.5" max="20" step="0.5" value="${isNum(c.threshold) ? c.threshold : 3}" data-al-th="${esc(name)}" aria-label="Volume threshold for ${esc(name)}"> × its average volume</label></li>`; }).join("");
+    m.innerHTML = `<div class="modal-card"><div class="modal-h"><h3 id="alerts-title">Volume alerts <span class="pro-badge">Pro</span></h3><button type="button" class="gate-x" data-alerts-close aria-label="Close">×</button></div>
+      <p class="muted">Pick the watchlists to watch and the volume spike that should trigger an alert, as a multiple of each name's average volume. Settings are saved on this device. <b>Push delivery is coming later</b>: this is the settings screen only, nothing is sent yet.</p>
+      <ul class="al-list">${rows}</ul>
+      <div class="modal-actions"><button type="button" class="btn" data-alerts-save>Save settings</button><span class="meta2" id="alerts-status">${a.updated ? "Saved " + new Date(a.updated).toLocaleString() : "Not saved yet"}</span></div></div>`;
+    m.hidden = false;
+    const close = () => { m.hidden = true; const b = $("#alerts-btn"); if (b) b.focus(); };
+    m.querySelector("[data-alerts-close]").addEventListener("click", close);
+    m.addEventListener("click", (e) => { if (e.target === m) close(); });
+    m.querySelector("[data-alerts-save]").addEventListener("click", () => {
+      const out = { lists: {} };
+      m.querySelectorAll("[data-al-on]").forEach((cb) => { const name = cb.getAttribute("data-al-on"); const th = parseFloat((m.querySelector(`[data-al-th="${CSS.escape(name)}"]`) || {}).value); out.lists[name] = { enabled: cb.checked, threshold: isNum(th) ? Math.min(20, Math.max(1.5, th)) : 3 }; });
+      saveAlerts(out); const st = $("#alerts-status"); if (st) st.textContent = "Saved " + new Date(out.updated).toLocaleString() + " · delivery coming later";
+    });
+    const onKey = (e) => { if (e.key === "Escape") { close(); removeEventListener("keydown", onKey); } }; addEventListener("keydown", onKey);
+    const first = m.querySelector("input"); if (first) first.focus();
   }
   let recordData = null;
   async function loadRecord() { try { const res = await api("/api/track-record", { cache: "no-store" }); if (res.ok) { recordData = await res.json(); if (currentView === "record") renderAll(); } } catch (e) {} }
@@ -2018,6 +2078,7 @@
     lastMarketState = marketStateNow(); setInterval(marketWatch, 5000); setInterval(liveCountdown, 1000);
     if (lastMarketState === "open") { const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" }).formatToParts(new Date()); const m = parseInt((p.find((x) => x.type === "hour") || {}).value, 10) * 60 + parseInt((p.find((x) => x.type === "minute") || {}).value, 10); if (m - 570 < 3) setTimeout(() => flash("MARKET OPEN", "9:30 ET · regular session under way"), 800); }
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
+    const ab = $("#alerts-btn"); if (ab) ab.addEventListener("click", openAlerts);
     if (/[?&]signin=1/.test(location.search)) { gateOpen = true; }
     if (/signed_in=1/.test(location.search)) { try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {} }
     try { if (/brief=1/.test(location.hash)) sessionStorage.setItem("mu-open-brief", "1"); } catch (e) {}

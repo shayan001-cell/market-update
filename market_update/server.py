@@ -132,12 +132,18 @@ def _live_scan_sync() -> dict[str, Any]:
     sc = scanner.scan(fetch.fetch_intraday(universe), {}, universe, mstate)
     # One quote map for every view: last 15-minute bar for the scan universe, fast quotes for the tape symbols.
     now_ts = time.time()
+    # bar-based prices are only as fresh as the last bar: before the open they are yesterday's closes and must not
+    # outrank the report's pre-market snapshot, so each quote carries the bar's own timestamp
+    try:
+        bar_ts = datetime.fromisoformat(str(sc["last_bar"])).timestamp() if sc.get("last_bar") else now_ts
+    except Exception:  # noqa: BLE001
+        bar_ts = now_ts
     quotes: dict[str, Any] = {}
     for t, rec in sc["by_ticker"].items():
         ses = rec.get("session") or {}
         if rec.get("price") is not None:
             vol = ses.get("session_volume")
-            quotes[t] = {"last": rec["price"], "chg_pct": rec.get("chg_pct"), "ts": now_ts, "src": "bars", "rvol": ses.get("rvol_time_of_day"),
+            quotes[t] = {"last": rec["price"], "chg_pct": rec.get("chg_pct"), "ts": bar_ts, "src": "bars", "rvol": ses.get("rvol_time_of_day"),
                          "above_vwap": ses.get("above_vwap"), "dollar_vol": round(vol * rec["price"]) if vol else None, "vol": vol,
                          "score": rec.get("score"), "direction": rec.get("direction"), "range_pos": ses.get("range_pos")}
     tape_syms = [m["symbol"] for m in r.get("macro", [])] + [w["symbol"] for w in r.get("world", [])]
@@ -244,8 +250,8 @@ async def make_brief(day: str, slot: str = "morning") -> None:
             for sym in ("SPY", "QQQ"):
                 x = (b.get("indexes") or {}).get(sym) or {}
                 a = (x.get("ai") or {}).get("next_move") or {}
-                if a.get("choice"):
-                    db.log_analysis(day, "morning_index", sym, x.get("last"), a["choice"], a.get("confidence"), {k: v for k, v in x.items() if k not in ("bars", "ai")})
+                if a.get("choice") and not any(m["symbol"] == sym for m in db.day_detail(day).get("morning", [])):
+                    db.log_analysis(day, "morning_index", sym, x.get("now_price") or x.get("last"), a["choice"], a.get("confidence"), {k: v for k, v in x.items() if k not in ("bars", "ai")})
         if slot == "close":
             try:
                 b["scorecard"] = await asyncio.to_thread(_score_day, day, b)
@@ -311,7 +317,10 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
             sent += 1
         except Exception as e:  # noqa: BLE001
             log.warning("briefing email to %s failed: %s", u["email"], e)
-    marker.write_text(str(sent))
+    if sent:
+        marker.write_text(str(sent))
+    else:
+        log.error("briefing emailed to nobody; will retry")
     log.info("briefing emailed to %d users", sent)
 
 
@@ -389,6 +398,11 @@ async def brief_scheduler() -> None:
                 if not state["briefs"]:                                   # nothing yet today: keep yesterday's cards visible until the morning one lands
                     y = (now.date() - timedelta(days=1)).isoformat()
                     state["briefs_prev"] = _load_briefs(y); state["briefs_prev_day"] = y
+            # the morning email retries every 30 minutes until at least one message goes out (mail provider hiccups)
+            morning = (state.get("briefs") or {}).get("morning")
+            if morning and mins >= 7 * 60 and mins < 12 * 60 and not (_brief_dir() / f"{today}.mailed").exists() and time.time() - state.get("brief_mail_try", 0) >= 1800:
+                state["brief_mail_try"] = time.time()
+                await asyncio.to_thread(_mail_brief, morning, today)
             weekday = now.weekday() < 5
             for i, (slot, start) in enumerate(BRIEF_SLOTS):
                 end = BRIEF_SLOTS[i + 1][1] if i + 1 < len(BRIEF_SLOTS) else 24 * 60 + 7 * 60
