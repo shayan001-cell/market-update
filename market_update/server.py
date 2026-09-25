@@ -685,7 +685,8 @@ async def brief_scheduler() -> None:
             # the after-close email retries every 30 minutes until 21:00
             closing = (state.get("briefs") or {}).get("close")
             cm = _brief_dir() / f"{today}-close.mailed"
-            close_pending = (not cm.exists()) or (cm.read_text().strip().startswith("{") and json.loads(cm.read_text()).get("remaining", 0) > 0)
+            cm_data = json.loads(cm.read_text()) if cm.exists() and cm.read_text().strip().startswith("{") else None
+            close_pending = (not cm.exists()) or (cm_data is not None and cm_data.get("remaining", 0) > 0 and not cm_data.get("manual"))
             if closing and mins >= 16 * 60 + 30 and mins < 23 * 60 and close_pending and time.time() - state.get("close_mail_try", 0) >= 1800:
                 state["close_mail_try"] = time.time()
                 await asyncio.to_thread(_mail_close, closing, today)
