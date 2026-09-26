@@ -2109,3 +2109,28 @@ header.topbar .topnav .side-group{display:none}
   header.topbar .topnav.icons .side-item:not(.active) .side-label{position:static;width:auto;height:auto;clip:auto}   /* phones scroll sideways instead of hiding labels */
   header.topbar .topnav.icons .side-item:not(.active){padding:8px 12px}
 }
+/* ==================== priority menu: the "More" tray ==================== */
+header.topbar .topnav .side-item.more{color:#DCE4F5}
+header.topbar .topnav .side-item.more .nav-ico svg circle{fill:currentColor;stroke:none}
+header.topbar .topnav .side-item.more.open{background:rgba(255,255,255,.12);color:#fff}
+header.topbar .topnav.icons .side-item.more .side-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+header.topbar .nav-tray{position:absolute;top:calc(100% + 6px);z-index:40;min-width:220px;padding:6px;border-radius:20px;background:rgba(14,22,42,.92);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid rgba(255,255,255,.12);box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 30px 60px -20px rgba(0,0,0,.8),0 0 0 1px rgba(36,91,255,.10);display:grid;gap:2px;transform-origin:top right;animation:tray-in .45s var(--ease-spring) both}
+header.topbar .nav-tray[hidden]{display:none}
+@keyframes tray-in{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
+header.topbar .nav-tray .side-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:14px;border:0;background:transparent;color:#DCE4F5;font-size:13px;font-weight:600;text-align:left;cursor:pointer;transition:background .45s var(--ease-spring),color .3s var(--ease-spring),transform .3s var(--ease-spring);animation:nav-in .5s var(--ease-spring) both;animation-delay:calc(var(--i,0) * 35ms)}
+header.topbar .nav-tray .side-item:hover,header.topbar .nav-tray .side-item:focus-visible{background:rgba(255,255,255,.09);color:#fff;outline:none;transform:translateX(2px)}
+header.topbar .nav-tray .side-item:active{transform:scale(.98)}
+header.topbar .nav-tray .side-item .nav-ico{display:inline-grid;place-items:center;width:18px;height:18px;background:transparent;box-shadow:none;border-radius:0}
+header.topbar .nav-tray .side-item .nav-ico svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.5;fill:none;opacity:.9}
+header.topbar .nav-tray .side-item kbd{margin-left:auto;font:600 10.5px/1 var(--mono,ui-monospace,monospace);color:#8FA0C4;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:6px;padding:3px 6px}
+header.topbar .nav-tray .side-item .cnt{color:#8FA0C4;font-weight:500;margin-left:4px}
+@media (prefers-reduced-motion: reduce){ header.topbar .nav-tray,header.topbar .nav-tray .side-item{animation:none} }
+header.topbar .nav-tray .side-item:nth-child(1){--i:1}header.topbar .nav-tray .side-item:nth-child(2){--i:2}header.topbar .nav-tray .side-item:nth-child(3){--i:3}header.topbar .nav-tray .side-item:nth-child(4){--i:4}header.topbar .nav-tray .side-item:nth-child(5){--i:5}header.topbar .nav-tray .side-item:nth-child(6){--i:6}header.topbar .nav-tray .side-item:nth-child(7){--i:7}header.topbar .nav-tray .side-item:nth-child(8){--i:8}
+/* tablets: labels stay, the More tray absorbs the overflow (replaces the old icons-only band below 1100px) */
+@media (max-width: 1100px) and (min-width: 701px){
+  header.topbar .topnav .side-item{width:auto;height:auto;padding:8px 12px;justify-content:flex-start}
+  header.topbar .topnav .side-item .side-label{position:static;width:auto;height:auto;clip:auto}
+  header.topbar .topnav .side-item .nav-ico{margin:0 7px 0 0}
+  header.topbar .topnav.dense .side-item{padding:7px 10px}
+  header.topbar .topnav.dense .side-item .nav-ico{margin-right:5px}
+}

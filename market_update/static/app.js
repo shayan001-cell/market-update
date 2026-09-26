@@ -1515,23 +1515,51 @@
   // ---------------------------------------------------------------- left menu
   // The rail must fit on one line for a reader (9 items) and the admin (12 items) at any width:
   // try full labels, then compact labels, then icons with the active label only, then allow a sideways scroll.
+  // Priority menu: full labels -> compact labels -> the items that do not fit move into a "More" tray
+  // (the active item always stays on the rail) -> icons only as the last resort. Phones scroll sideways instead.
+  const MORE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>';
+  function navTray() {
+    let t = $("#nav-tray");
+    if (!t) { t = document.createElement("div"); t.id = "nav-tray"; t.className = "nav-tray"; t.hidden = true; t.setAttribute("role", "menu"); const h = $("#side"); if (h) h.appendChild(t); }
+    return t;
+  }
+  function closeTray() { const t = $("#nav-tray"), m = $("#nav [data-more]"); if (t) t.hidden = true; if (m) { m.setAttribute("aria-expanded", "false"); m.classList.remove("open"); } }
+  function toggleTray() {
+    const t = navTray(), m = $("#nav [data-more]"), h = $("#side"); if (!m || !h) return;
+    if (!t.hidden) { closeTray(); return; }
+    const hr = h.getBoundingClientRect(), mr = m.getBoundingClientRect();
+    t.style.right = Math.max(8, Math.round(hr.right - mr.right)) + "px";
+    t.hidden = false; m.setAttribute("aria-expanded", "true"); m.classList.add("open");
+    const first = t.querySelector(".side-item"); if (first) first.focus({ preventScroll: true });
+  }
+  addEventListener("click", (e) => { const t = $("#nav-tray"); if (!t || t.hidden) return; if (e.target.closest("#nav-tray") || e.target.closest("[data-more]")) return; closeTray(); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape") closeTray(); });
   function fitNav() {
     const nav = $("#nav"); if (!nav) return;
-    nav.classList.remove("dense", "icons");
+    const tray = navTray(); const more = nav.querySelector("[data-more]");
+    tray.querySelectorAll(".side-item").forEach((b) => nav.insertBefore(b, more));   // reset: everything back on the rail
+    tray.hidden = true; nav.classList.remove("dense", "icons", "has-more");
+    if (more) { more.hidden = true; more.classList.remove("open"); more.setAttribute("aria-expanded", "false"); }
     const fits = () => nav.scrollWidth <= nav.clientWidth + 1;
     if (fits()) return;
     nav.classList.add("dense"); if (fits()) return;
-    nav.classList.add("icons");
+    if (!more || matchMedia("(max-width: 700px)").matches) return;                   // phones: the rail scrolls sideways
+    more.hidden = false; nav.classList.add("has-more");
+    const spare = [...nav.querySelectorAll(".side-item:not([data-more]):not(.active)")];
+    while (!fits() && spare.length) tray.insertBefore(spare.pop(), tray.firstChild);  // popped from the end, so the tray keeps the menu order
+    if (!fits()) nav.classList.add("icons");
+    more.title = tray.children.length + " more";
   }
   let fitTimer = null;
   addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitNav, 120); });
   function renderNav() {
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
+    navTray().innerHTML = "";                  // the rail is rebuilt from scratch, so the tray must not keep the old buttons
     $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.filter((k) => isAdmin || !ADMIN_VIEWS.includes(k)).map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
       return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
-;
+      + `<button class="side-item more" data-more hidden aria-haspopup="menu" aria-expanded="false" aria-label="More views"><span class="nav-ico">${MORE_ICON}</span><span class="side-label">More</span></button>`;
     fitNav();
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
     const foot = $("#side-foot");
@@ -1557,7 +1585,8 @@
   }
   function wireNav() {                       // the menu re-renders on its own, so it binds its own handlers (assignment, never duplicates)
     const root = $("#side"); if (!root) return;
-    root.querySelectorAll(".side-item").forEach((b) => { b.onclick = () => switchView(b.getAttribute("data-view")); });
+    root.querySelectorAll(".side-item[data-view]").forEach((b) => { b.onclick = () => { closeTray(); switchView(b.getAttribute("data-view")); }; });
+    const more = root.querySelector("[data-more]"); if (more) more.onclick = (e) => { e.stopPropagation(); toggleTray(); };
     root.querySelectorAll("[data-sub]").forEach((b) => { b.onclick = () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }; });
     root.querySelectorAll("[data-ticker-page]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }; });
     root.querySelectorAll("[data-remove]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); removeTicker(b.getAttribute("data-remove")); }; });
