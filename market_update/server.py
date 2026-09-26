@@ -456,7 +456,7 @@ def _mail_close(b: dict[str, Any], day: str) -> None:
 def _post_whatsapp(b: dict[str, Any], day: str) -> None:
     """Post the short after-the-close summary to the WhatsApp group through the linked account (tools/whatsapp)."""
     group = os.environ.get("MU_WA_GROUP", "").strip()
-    session = Path(os.environ.get("MU_WA_SESSION") or (DATA_DIR / "wa-session"))
+    session = Path(os.environ.get("MU_WA_AUTH") or (DATA_DIR / "wa-baileys"))
     marker = _brief_dir() / f"{day}-close.whatsapp"
     if not group or not session.exists() or marker.exists():
         return
@@ -467,7 +467,7 @@ def _post_whatsapp(b: dict[str, Any], day: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write(text); path = f.name
     try:
-        r = subprocess.run(["node", str(Path(__file__).resolve().parents[1] / "tools" / "whatsapp" / "wa.js"), "send", group, path], capture_output=True, text=True, timeout=240)
+        r = subprocess.run(["node", str(Path(__file__).resolve().parents[1] / "tools" / "whatsapp" / "wab.js"), "send", group, path], capture_output=True, text=True, timeout=300)
         if r.returncode == 0:
             marker.write_text(r.stdout.strip()); log.info("whatsapp: %s", r.stdout.strip())
         else:
