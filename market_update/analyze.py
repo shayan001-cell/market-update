@@ -1372,7 +1372,7 @@ def close_whatsapp_text(brief: dict[str, Any], keep_url: str = "", site_url: str
     pct = lambda x: ("+" if x >= 0 else "−") + f"{abs(x):.1f}%" if isinstance(x, (int, float)) else "–"
     names = {"SPY": "S&P 500", "QQQ": "Nasdaq 100", "IWM": "Small caps", "DIA": "Dow"}
     date_label = datetime.strptime(brief["date"], "%Y-%m-%d").strftime("%A %b %d")
-    L = [f"*OneView · After the close · {date_label}*", ""]
+    L = ([site_url, ""] if site_url else []) + [f"*OneView · After the close · {date_label}*", ""]   # link first so WhatsApp shows the preview card
     L.append(" · ".join(f"{names.get(k, k)} {pct((idx.get(k) or {}).get('chg_pct'))}" for k in ("SPY", "QQQ", "IWM", "DIA") if idx.get(k)))
     leaders = ", ".join(f"{x.get('label')} {pct(x.get('chg_pct'))}" for x in (ses.get("leaders") or [])[:2])
     laggards = ", ".join(f"{x.get('label')} {pct(x.get('chg_pct'))}" for x in (ses.get("laggards") or [])[:2])
@@ -1407,7 +1407,7 @@ def close_whatsapp_text(brief: dict[str, Any], keep_url: str = "", site_url: str
             L += [f"• {l}" for l in levels]
     L += [""]
     if site_url:
-        L.append(f"Sign in to OneView for the full read and your own watchlist: {site_url}")
+        L.append("Sign in at the link above for the full read and your own watchlist.")
     if keep_url:
         L.append(f"Emails landing in junk? Tap once: {keep_url}")
     L.append("_Information, not advice._")
