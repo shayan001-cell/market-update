@@ -2043,3 +2043,18 @@ header.topbar{grid-template-rows:auto;grid-auto-rows:auto;row-gap:0;column-gap:1
 @media (max-width: 1700px){ header.topbar .pro-badge{display:none} }
 header.topbar .btn.ghost.icon-btn .lbl,header.topbar .pro-badge{display:none !important}
 header.topbar .btn.ghost.icon-btn{width:32px;padding:0;justify-content:center}
+/* ---------- menu rail: unmistakable, not blended ---------- */
+header.topbar{background:linear-gradient(180deg,#0F1A33 0%,#0A1326 100%)}
+header.topbar .topnav{position:relative;overflow:hidden;background:linear-gradient(180deg,#1C2E58,#142447);border:1px solid #4A66A8;border-radius:13px;padding:4px;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 4px 16px rgba(0,0,0,.45),0 0 0 1px rgba(36,91,255,.15)}
+header.topbar .topnav::after{content:"";position:absolute;top:0;bottom:0;left:-40%;width:35%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.14),transparent);transform:skewX(-12deg);animation:rail-sweep 1.6s ease-out .4s 1;pointer-events:none}
+@keyframes rail-sweep{from{left:-40%}to{left:120%}}
+header.topbar .topnav .side-item{color:#F2F5FF;font-weight:600;letter-spacing:.01em;text-shadow:0 1px 0 rgba(0,0,0,.35)}
+header.topbar .topnav .side-item .nav-ico svg{stroke:#DCE6FF}
+header.topbar .topnav .side-item:hover{background:#2B4380;color:#fff;transform:translateY(-1px)}
+header.topbar .topnav .side-item.active{background:linear-gradient(180deg,#3B78FF,#245BFF);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 3px 10px rgba(36,91,255,.45)}
+header.topbar .topnav .side-item.active::after{content:"";position:absolute;left:50%;bottom:3px;width:14px;height:2px;margin-left:-7px;border-radius:2px;background:#fff;opacity:.9}
+header.topbar .topnav .side-item{position:relative}
+header.topbar .top-actions{background:linear-gradient(180deg,#1C2E58,#142447);border:1px solid #4A66A8;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 4px 16px rgba(0,0,0,.45)}
+header.topbar .top-actions .badge{color:#F2F5FF}
+header.topbar .btn.ghost.icon-btn svg{stroke:#DCE6FF}
+@media (prefers-reduced-motion: reduce){ header.topbar .topnav::after{animation:none} }
