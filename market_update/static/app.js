@@ -67,7 +67,7 @@
     desk: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4M7 13l3-3 2.5 2L17 8"/></svg>',
   };
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
-  const ADMIN_VIEWS = ["admin", "check"];   // menu items and views only the admin sees
+  const ADMIN_VIEWS = ["admin", "check", "desk"];   // menu items and views only the admin sees
   const NAV_GROUPS = [["Workspace", ["home", "watch", "desk", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
   let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
   let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
@@ -1831,7 +1831,7 @@
       case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
-      case "desk": return `<div class="view one">${secDesk()}</div>`;
+      case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
       case "guide": return `<div class="view one">${secGuide()}</div>`;
       case "watch": return `<div class="view one">${secWatchPage(r)}</div>`;
       case "ticker": return `<div class="view one ticker-view">${secTickerPage(r)}</div>`;

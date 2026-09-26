@@ -1631,8 +1631,7 @@ async def api_desk_scan(request: Request) -> JSONResponse:
 
 @app.get("/api/desk")
 async def api_desk(request: Request) -> JSONResponse:
-    if not _session_email(request):
-        raise HTTPException(status_code=401, detail="sign in first")
+    _require_admin(request)
     d = state.get("desk")
     if not d and (DATA_DIR / "desk.json").exists():
         try:
