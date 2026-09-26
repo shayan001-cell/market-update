@@ -2064,3 +2064,48 @@ header.topbar .btn.ghost.icon-btn svg{stroke:#DCE6FF}
   header.topbar .top-actions{grid-column:2;grid-row:1;justify-self:end}
   header.topbar .topnav{grid-column:1 / -1;grid-row:2}
 }
+/* ==================== the floating island menu ==================== */
+:root{--ease-spring:cubic-bezier(.32,.72,0,1)}
+header.topbar{position:sticky;top:0;z-index:30;background:linear-gradient(180deg,rgba(10,18,36,.92),rgba(8,14,29,.86));backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);border-bottom:1px solid rgba(255,255,255,.06);box-shadow:none;min-height:60px;padding:6px 18px;column-gap:16px}
+header.topbar::after{height:1px;background:linear-gradient(90deg,transparent,rgba(133,167,255,.45) 20%,rgba(102,217,166,.35) 60%,transparent)}
+/* outer shell: a machined tray; inner core: the glass plate */
+header.topbar .topnav{overflow-x:auto;overflow-y:hidden;position:relative;padding:5px;border-radius:999px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 18px 40px -18px rgba(0,0,0,.7),0 0 0 1px rgba(36,91,255,.08);scroll-snap-type:x proximity;scrollbar-width:none;mask-image:linear-gradient(90deg,transparent,#000 10px,#000 calc(100% - 10px),transparent)}
+header.topbar .topnav::after{content:none}
+header.topbar .topnav .side-item{position:relative;flex:none;scroll-snap-align:start;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;letter-spacing:.005em;color:#DCE4F5;text-shadow:none;background:transparent;transition:background .55s var(--ease-spring),color .35s var(--ease-spring),transform .35s var(--ease-spring),box-shadow .55s var(--ease-spring)}
+header.topbar .topnav .side-item .nav-ico{display:inline-grid !important;width:16px;height:16px;margin-right:7px}
+header.topbar .topnav .side-item .nav-ico svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.5;opacity:.9}
+header.topbar .topnav .side-item:hover{background:rgba(255,255,255,.08);color:#fff;transform:translateY(-1px)}
+header.topbar .topnav .side-item:active{transform:scale(.97)}
+header.topbar .topnav .side-item.active{background:linear-gradient(180deg,#3A78FF,#2358E6);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.25),0 8px 22px -8px rgba(36,91,255,.7)}
+header.topbar .topnav .side-item.active::after{content:none}
+header.topbar .topnav .side-item.active .nav-ico svg{stroke:#fff;opacity:1}
+/* density steps applied by fitNav(): compact labels, then icons only with the active label kept */
+header.topbar .topnav.dense .side-item{padding:7px 10px;font-size:12.5px;letter-spacing:0}
+header.topbar .topnav.dense .side-item .nav-ico{margin-right:5px}
+header.topbar .topnav.icons .side-item:not(.active) .side-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+header.topbar .topnav.icons .side-item:not(.active){padding:8px 11px}
+header.topbar .topnav.icons .side-item:not(.active) .nav-ico{margin-right:0}
+header.topbar .topnav .side-item .side-label{white-space:nowrap}
+/* actions: the same tray */
+header.topbar .top-actions{padding:5px;border-radius:999px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 18px 40px -18px rgba(0,0,0,.7)}
+header.topbar .top-actions .badge{border-radius:999px;height:32px;padding:0 12px 0 10px;background:transparent;color:#DCE4F5}
+header.topbar .btn.ghost.icon-btn{width:34px;height:32px;border-radius:999px;transition:background .45s var(--ease-spring),transform .3s var(--ease-spring)}
+header.topbar .btn.ghost.icon-btn:hover{background:rgba(255,255,255,.10);transform:translateY(-1px)}
+header.topbar .btn.ghost.icon-btn:active{transform:scale(.95)}
+header.topbar .btn.ghost.icon-btn svg{stroke:#DCE4F5;stroke-width:1.5}
+/* first paint: the items settle in with a short stagger */
+@media (prefers-reduced-motion: no-preference){
+  header.topbar .topnav .side-item{animation:nav-in .7s var(--ease-spring) both;animation-delay:calc(var(--i,0) * 45ms)}
+  @keyframes nav-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+}
+header.topbar .topnav .side-item:nth-child(1){--i:1}header.topbar .topnav .side-item:nth-child(2){--i:2}header.topbar .topnav .side-item:nth-child(3){--i:3}header.topbar .topnav .side-item:nth-child(4){--i:4}header.topbar .topnav .side-item:nth-child(5){--i:5}header.topbar .topnav .side-item:nth-child(6){--i:6}header.topbar .topnav .side-item:nth-child(7){--i:7}header.topbar .topnav .side-item:nth-child(8){--i:8}header.topbar .topnav .side-item:nth-child(9){--i:9}header.topbar .topnav .side-item:nth-child(10){--i:10}header.topbar .topnav .side-item:nth-child(11){--i:11}header.topbar .topnav .side-item:nth-child(12){--i:12}header.topbar .topnav .side-item:nth-child(13){--i:13}header.topbar .topnav .side-item:nth-child(14){--i:14}
+/* the group headings never render inside the rail */
+header.topbar .topnav .side-group{display:none}
+@media (max-width: 1600px){ header.topbar .topnav .side-item{padding:8px 12px} }
+@media (max-width: 700px){
+  header.topbar{padding:6px 10px;min-height:0;column-gap:8px}
+  header.topbar .topnav{border-radius:999px;padding:4px;mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+  header.topbar .topnav .side-item{padding:8px 12px;font-size:13px}
+  header.topbar .topnav.icons .side-item:not(.active) .side-label{position:static;width:auto;height:auto;clip:auto}   /* phones scroll sideways instead of hiding labels */
+  header.topbar .topnav.icons .side-item:not(.active){padding:8px 12px}
+}

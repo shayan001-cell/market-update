@@ -1513,6 +1513,18 @@
 
 
   // ---------------------------------------------------------------- left menu
+  // The rail must fit on one line for a reader (9 items) and the admin (12 items) at any width:
+  // try full labels, then compact labels, then icons with the active label only, then allow a sideways scroll.
+  function fitNav() {
+    const nav = $("#nav"); if (!nav) return;
+    nav.classList.remove("dense", "icons");
+    const fits = () => nav.scrollWidth <= nav.clientWidth + 1;
+    if (fits()) return;
+    nav.classList.add("dense"); if (fits()) return;
+    nav.classList.add("icons");
+  }
+  let fitTimer = null;
+  addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitNav, 120); });
   function renderNav() {
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
@@ -1520,6 +1532,7 @@
       return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
         (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
 ;
+    fitNav();
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
     const foot = $("#side-foot");
     if (foot) foot.innerHTML = user ? `<div class="side-user"><span class="st-dot up"></span><b>${esc(user.name || user.email.split("@")[0])}</b>${user.role === "admin" ? ' <span class="tag acc">admin</span>' : ""}</div><div class="side-mail" title="${esc(user.email)}">${esc(user.email)}</div><div class="side-links">watchlist saved to your account · <button class="lnk" data-signout>Sign out</button></div>`
