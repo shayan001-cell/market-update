@@ -708,7 +708,7 @@ async def brief_scheduler() -> None:
                     state["briefs_prev"] = _load_briefs(y); state["briefs_prev_day"] = y
             # the morning email retries every 30 minutes until at least one message goes out (mail provider hiccups)
             morning = (state.get("briefs") or {}).get("morning")
-            if morning and mins >= 7 * 60 and mins < 12 * 60 and not (_brief_dir() / f"{today}.mailed").exists() and time.time() - state.get("brief_mail_try", 0) >= 1800:
+            if morning and mins >= 7 * 60 and mins < 15 * 60 and not (_brief_dir() / f"{today}.mailed").exists() and time.time() - state.get("brief_mail_try", 0) >= 1800:
                 state["brief_mail_try"] = time.time()
                 await asyncio.to_thread(_mail_brief, morning, today)
             # the after-close email retries every 30 minutes until 21:00
