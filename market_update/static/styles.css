@@ -2058,3 +2058,9 @@ header.topbar .top-actions{background:linear-gradient(180deg,#1C2E58,#142447);bo
 header.topbar .top-actions .badge{color:#F2F5FF}
 header.topbar .btn.ghost.icon-btn svg{stroke:#DCE6FF}
 @media (prefers-reduced-motion: reduce){ header.topbar .topnav::after{animation:none} }
+@media (max-width: 700px){
+  header.topbar{grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto}
+  header.topbar .side-brand{grid-column:1;grid-row:1}
+  header.topbar .top-actions{grid-column:2;grid-row:1;justify-self:end}
+  header.topbar .topnav{grid-column:1 / -1;grid-row:2}
+}
