@@ -1407,7 +1407,7 @@ def close_whatsapp_text(brief: dict[str, Any], keep_url: str = "", site_url: str
             L += [f"• {l}" for l in levels]
     L += [""]
     if site_url:
-        L.append(f"Full read with your watchlist: {site_url}")
+        L.append(f"Sign in to OneView for the full read and your own watchlist: {site_url}")
     if keep_url:
         L.append(f"Emails landing in junk? Tap once: {keep_url}")
     L.append("_Information, not advice._")
