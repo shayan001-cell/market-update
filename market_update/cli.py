@@ -64,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "report.json").write_text(json.dumps(report, indent=1, default=str))
     (out_dir / "symbols.json").write_text(json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")))
+    # the page re-reads this when the app server stops answering, so a new tunnel address needs no reload
+    import time as _t
+    (out_dir / "api.json").write_text(json.dumps({"api": config.API_URL, "app": config.APP_URL, "at": int(_t.time())}))
     import shutil
     (out_dir / "static").mkdir(exist_ok=True)
     brand_src = config.STATIC_DIR / "brand"

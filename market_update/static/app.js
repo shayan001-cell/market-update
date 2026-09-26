@@ -5,12 +5,29 @@
 
   // ---------------------------------------------------------------- state
   const EMBEDDED = document.getElementById("report-data");
-  const API = ((document.querySelector('meta[name="mu-api-url"]') || {}).content || "").replace(/__API_URL__/, "").replace(/\/$/, "");
+  let API = ((document.querySelector('meta[name="mu-api-url"]') || {}).content || "").replace(/__API_URL__/, "").replace(/\/$/, "");
   const STATIC_MODE = !!EMBEDDED && !API;          // a static copy with an API behind it behaves like the app
   let authToken = null; try { authToken = localStorage.getItem("mu-token"); } catch (e) {}
   const mst = (location.hash.match(/[#&]st=([A-Za-z0-9_\-.]+)/) || [])[1];
   if (mst) { authToken = mst; try { localStorage.setItem("mu-token", mst); } catch (e) {} try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
-  const api = (path, opts) => { const o = Object.assign({}, opts || {}); o.headers = Object.assign({}, o.headers || {}); if (API) o.credentials = "include"; if (authToken) o.headers["Authorization"] = "Bearer " + authToken; return fetch(API + path, o); };
+  // When the server stops answering (the tunnel address changed), re-read the address the site was built with.
+  let apiRediscoveredAt = 0;
+  async function rediscoverApi() {
+    if (!EMBEDDED || Date.now() - apiRediscoveredAt < 30000) return false;
+    apiRediscoveredAt = Date.now();
+    try {
+      const r = await fetch("api.json?cb=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) return false;
+      const j = await r.json(); const next = String(j.api || "").replace(/\/$/, "");
+      if (next && next !== API) { API = next; return true; }
+    } catch (e) {}
+    return false;
+  }
+  const api = async (path, opts) => {
+    const o = Object.assign({}, opts || {}); o.headers = Object.assign({}, o.headers || {}); if (API) o.credentials = "include"; if (authToken) o.headers["Authorization"] = "Bearer " + authToken;
+    try { return await fetch(API + path, o); }
+    catch (e) { if (await rediscoverApi()) return fetch(API + path, o); throw e; }
+  };
   let report = null;
   let selectedTicker = null;
   let stockTab = "all";
