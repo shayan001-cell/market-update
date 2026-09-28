@@ -3083,11 +3083,30 @@
     const day = r.market_state === "open" ? "today" : "last session";
     return `The S&P 500 ${mv} ${day}. ${tone && EX.tone[tone] ? esc(EX.tone[tone]) : ""}`;
   }
+  // Market NOW: a ring counting down to the next data refresh (the server's own schedule; the page picks up the new
+  // build within 15 seconds of it finishing).
+  let mkNextAt = 0, mkBuilding = false;
+  const MK_R = 17, MK_C = 2 * Math.PI * MK_R;
+  function mkState() {
+    if (mkBuilding) return { txt: "now", sub: "refreshing", frac: 1 };
+    const at = mkNextAt || nextRefreshAt; if (!at) return { txt: "--:--", sub: "next refresh", frac: 0 };
+    const left = Math.max(0, at - Date.now()); const total = (marketStateNow() === "open" || marketStateNow() === "pre") ? 600000 : 14400000;
+    const s = Math.round(left / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return { txt: left <= 0 ? "now" : h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`, sub: left <= 0 ? "refreshing" : "next refresh", frac: Math.min(1, Math.max(0, 1 - left / total)) };
+  }
+  function mkTimer() {
+    const t = mkState();
+    return `<div class="mk-timer${t.sub === "refreshing" ? " busy" : ""}" data-mk-timer role="timer" aria-label="Next data refresh in ${t.txt}"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="mk-trk" cx="20" cy="20" r="${MK_R}"/><circle class="mk-arc" cx="20" cy="20" r="${MK_R}" stroke-dasharray="${MK_C.toFixed(2)}" stroke-dashoffset="${(MK_C * (1 - t.frac)).toFixed(2)}"/></svg><span class="mk-t"><b>${t.txt}</b><i>${t.sub}</i></span></div>`;
+  }
+  setInterval(() => { const el = document.querySelector("[data-mk-timer]"); if (!el) return; const t = mkState();
+    el.classList.toggle("busy", t.sub === "refreshing"); el.setAttribute("aria-label", `Next data refresh in ${t.txt}`);
+    el.querySelector(".mk-t b").textContent = t.txt; el.querySelector(".mk-t i").textContent = t.sub;
+    el.querySelector(".mk-arc").setAttribute("stroke-dashoffset", (MK_C * (1 - t.frac)).toFixed(2)); }, 1000);
   function secPulse(r) {
     const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";
     return `<section class="pulse">
       <div class="pulse-head"><span class="pz-live ${r.market_state === "open" ? "on" : ""}"><i></i>${st} · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
-        <h2>The market in 10 seconds</h2><p>${pulseLine(r)}</p></div>
+        <div class="mk-title">${mkTimer()}<h2 class="mk-h">Market <span>NOW</span></h2></div><p>${pulseLine(r)}</p></div>
       <div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
       <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
     </section>`;
@@ -3627,6 +3646,7 @@
   async function poll() {
     try {
       const st = await (await api("/api/status", { cache: "no-store" })).json();
+      mkBuilding = !!st.building; if (isNum(st.next_scheduled_in_s)) mkNextAt = Date.now() + st.next_scheduled_in_s * 1000;
       const btn = $("#refresh-btn");
       if (st.building) { btn.disabled = true; setLabel(btn, "Building…"); }
       else if (st.refresh_available_in_s > 0) { btn.disabled = true; setLabel(btn, `Refresh (${st.refresh_available_in_s}s)`); }

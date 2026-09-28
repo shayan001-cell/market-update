@@ -2975,3 +2975,22 @@ body:has(#gate.gate-full:not([hidden])){overflow:hidden}
 @keyframes pzspin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.pz-refresh.spin svg{animation:none}}
 .hc-upd{font-size:12px;color:var(--muted);margin:-4px 0 8px}
+
+/* ---------- Market NOW: title + countdown ring to the next refresh ---------- */
+.mk-title{display:flex;align-items:center;gap:14px;margin:10px 0 8px;flex-wrap:wrap}
+.pulse-head h2.mk-h{font-family:"Unbounded",Sora,var(--font);font-weight:800;font-size:clamp(26px,3.2vw,40px);letter-spacing:-.035em;line-height:1;margin:0;display:flex;align-items:baseline;gap:.28em;text-transform:none}
+.pulse-head h2.mk-h span{color:#FF7A2F;position:relative}
+.pulse-head h2.mk-h span::after{content:"";position:absolute;right:-.34em;top:.08em;width:.2em;height:.2em;border-radius:50%;background:#FF7A2F;box-shadow:0 0 0 0 rgba(255,122,47,.55);animation:mkpulse 2s cubic-bezier(.16,1,.3,1) infinite}
+@keyframes mkpulse{0%{box-shadow:0 0 0 0 rgba(255,122,47,.55)}70%{box-shadow:0 0 0 .32em rgba(255,122,47,0)}100%{box-shadow:0 0 0 0 rgba(255,122,47,0)}}
+.mk-timer{flex:none;display:inline-flex;align-items:center;gap:9px;padding:5px 14px 5px 5px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.mk-timer svg{width:40px;height:40px;transform:rotate(-90deg)}
+.mk-timer circle{fill:none;stroke-width:3.2}
+.mk-trk{stroke:rgba(255,255,255,.10)}
+.mk-arc{stroke:#FF7A2F;stroke-linecap:round;transition:stroke-dashoffset 1s linear}
+.mk-t{display:grid;line-height:1.1}
+.mk-t b{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:17px;font-weight:700;color:var(--text);letter-spacing:.01em}
+.mk-t i{font-style:normal;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.mk-timer.busy .mk-arc{stroke:#FFB27A;animation:mkbusy 1.2s ease-in-out infinite}
+@keyframes mkbusy{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse-head h2.mk-h span::after,.mk-timer.busy .mk-arc{animation:none}}
+@media (max-width:520px){.mk-title{gap:10px}.mk-timer svg{width:34px;height:34px}.mk-t b{font-size:15px}}
