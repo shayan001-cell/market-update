@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1999,6 +2000,41 @@ def _st_user_messages(user: str, sid: str | None, want: int = 150) -> list[dict[
 
 from zoneinfo import ZoneInfo as _ZI
 ET_ZONE = _ZI("America/New_York")
+PROS_AI_MAX = 600          # posts sent to TypeSafe per run; answers are kept, so a post is never asked twice
+
+
+def _pros_read_posts(users: dict[str, Any], reads: dict[str, Any]) -> dict[str, Any]:
+    """Ask TypeSafe what each not-yet-read post calls and over what time frame. Untagged posts first (they only
+    count with a read), newest first. Without credits the Judge backs off and nothing is cached, so the posts are
+    tried again on a later run."""
+    from .analyze import Judge
+    todo = [(p, rec["username"]) for rec in users.values() for k, p in rec.get("posts", {}).items() if k not in reads]
+    todo = sorted(todo, key=lambda x: (x[0].get("tag") is not None, -(datetime.fromisoformat(x[0]["at"]).timestamp() if x[0].get("at") else 0)))[:PROS_AI_MAX]
+    status = {"asked": len(todo), "read": 0, "status": "idle" if not todo else "ok", "pending": 0}
+    if not todo:
+        return status
+    judge = Judge(rules_fallback=False)
+    states = [{"ticker": p["sym"], "post": p.get("body") or "", "author_tag": (p.get("tag") or "none").capitalize() if p.get("tag") else "none"} for p, _ in todo]
+    try:
+        answers = asyncio.run(judge.run_many(states, J.POST_QUESTIONS))
+    except Exception as e:  # noqa: BLE001
+        log.warning("top traders: TypeSafe reads failed: %s", e)
+        answers = [None] * len(todo)
+    for (p, _), a in zip(todo, answers):
+        if not a or "call" not in a:
+            continue
+        c, h = a["call"], a.get("horizon") or {}
+        reads[str(p["id"])] = {"call": c.get("choice"), "call_conf": round(float(c.get("confidence") or 0), 3),
+                               "horizon": h.get("choice"), "horizon_conf": round(float(h.get("confidence") or 0), 3)}
+        status["read"] += 1
+    status["pending"] = sum(1 for rec in users.values() for k in rec.get("posts", {}) if k not in reads)
+    if status["read"] == 0:
+        status["status"] = "no_credits" if (judge.last_error and ("402" in judge.last_error or "credit" in judge.last_error.lower())) else "failed"
+        status["error"] = (judge.last_error or "")[:160]
+    log.info("top traders: TypeSafe read %d of %d posts (%s)", status["read"], status["asked"], status["status"])
+    return status
+
+
 _PROS_LEDGER = lambda: config.OUTPUT_DIR / "pros_ledger.json"   # noqa: E731
 
 
@@ -2020,21 +2056,29 @@ def _pros_sync() -> dict[str, Any]:
     prev_q = [n for n, u in users.items() if u.get("qualified") and now - (u.get("read_at") or 0) > 6 * 3600][:pros.TOP_N]
     to_read = [(u["username"], u) for u in fresh[:pros.CANDIDATES]] + [(n, None) for n in prev_q if n not in {u["username"] for u in fresh[:pros.CANDIDATES]}]
     cutoff = (datetime.now(ET_ZONE) - timedelta(days=pros.MAX_AGE_DAYS)).isoformat()
+    reads: dict[str, Any] = led.setdefault("reads", {})
+    for rec in users.values():                      # ledgers written before posts were kept: turn stored calls back into tagged posts
+        if "calls" in rec and "posts" not in rec:
+            rec["posts"] = {k: {kk: c.get(kk) for kk in ("id", "sym", "yf", "at", "body", "likes")} | {"tag": c.get("side")} for k, c in rec["calls"].items()}
+        rec.pop("calls", None)
     for name, meta in to_read:
-        rec = users.setdefault(name, {"username": name, "calls": {}, "likes": 0, "symbols": []})
+        rec = users.setdefault(name, {"username": name, "posts": {}, "likes": 0, "symbols": []})
+        rec.setdefault("posts", {})
         if meta:
             rec.update(id=meta.get("id"), name=meta.get("name"), likes=max(rec.get("likes") or 0, meta.get("likes") or 0),
                        symbols=sorted(set(rec.get("symbols") or []) | set(meta.get("symbols") or [])))
-        for c in pros.calls_from(_st_user_messages(name, sid, pros.USER_POSTS)):
-            if c["at"] < cutoff:
-                continue
-            c["body"] = c["body"][:280]
-            rec["calls"][str(c["id"])] = {**rec["calls"].get(str(c["id"]), {}), **c}
+        for p in pros.posts_from(_st_user_messages(name, sid, pros.USER_POSTS)):
+            if p["at"] >= cutoff:
+                rec["posts"][str(p["id"])] = p
         rec["read_at"] = time.time()
-    # drop calls that aged out, then score everything in the ledger
-    for rec in users.values():
-        rec["calls"] = {k: c for k, c in rec.get("calls", {}).items() if c.get("at", "") >= cutoff}
-    syms = sorted({c["yf"] for rec in users.values() for c in rec["calls"].values()})
+    for rec in users.values():                      # drop posts that aged out
+        rec["posts"] = {k: p for k, p in rec.get("posts", {}).items() if p.get("at", "") >= cutoff}
+    live_ids = {k for rec in users.values() for k in rec["posts"]}
+    for k in [k for k in reads if k not in live_ids]:
+        reads.pop(k, None)
+    ai = _pros_read_posts(users, reads)             # TypeSafe: side for untagged posts, time frame for all (no-op without credits)
+    calls_by_user_raw = {name: pros.calls_from(list(rec["posts"].values()), reads) for name, rec in users.items()}
+    syms = sorted({c["yf"] for cs in calls_by_user_raw.values() for c in cs})
     closes: dict[str, list[tuple[str, float]]] = {}
     for i in range(0, len(syms), 150):
         chunk = syms[i:i + 150]
@@ -2054,7 +2098,7 @@ def _pros_sync() -> dict[str, Any]:
     summaries = []
     calls_by_user: dict[str, list[dict[str, Any]]] = {}
     for name, rec in users.items():
-        cs = pros.score_calls(sorted([dict(c) for c in rec["calls"].values()], key=lambda c: c["at"]), closes)
+        cs = pros.score_calls([dict(c) for c in calls_by_user_raw.get(name, [])], closes)
         calls_by_user[name] = cs
         meta = {k: rec.get(k) for k in ("username", "id", "name", "likes")}
         meta["symbols"] = rec.get("symbols") or []
@@ -2071,6 +2115,7 @@ def _pros_sync() -> dict[str, Any]:
         row["text"] = _st_clean_quote(row.pop("body", ""), row["sym"], [row["sym"]])
     rated = [x for x in summaries if x["scored"] >= pros.MIN_SCORED]
     out = {"as_of": time.time(), "took_s": round(time.time() - t0), "discovered": len(found), "candidates": len(users), "read_this_run": len(to_read),
+           "ai": ai, "ai_calls": sum(x.get("ai_calls") or 0 for x in summaries),
            "rated": len(rated), "median_hit": round(sorted(x["hit_rate"] for x in rated)[len(rated) // 2], 3) if rated else None,
            "calls": sum(len(v) for v in calls_by_user.values()), "scored": sum(x["scored"] for x in summaries),
            "qualified": qualified, "near": near, "consensus": cons,
@@ -2136,6 +2181,28 @@ async def odds_loop() -> None:
         except Exception:  # noqa: BLE001
             log.exception("odds loop error")
         await asyncio.sleep(60)
+
+
+@app.get("/api/company/{sym}")
+async def api_company(sym: str, request: Request) -> JSONResponse:
+    """The Company map for one ticker: statements, money flow, 10-K customers, connections, weak points."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    from . import company as CO
+    sym = re.sub(r"[^A-Za-z0-9.\-]", "", sym).upper()[:12]
+    if not sym:
+        raise HTTPException(status_code=400, detail="ticker needed")
+    rep = state.get("report") or {}
+    me = next((x for x in rep.get("stocks") or [] if x.get("ticker") == sym), None)
+    peers = [{"sym": x["ticker"], "name": x.get("name")} for x in rep.get("stocks") or [] if me and x.get("ticker") != sym and x.get("industry") and x.get("industry") == me.get("industry")][:8]
+    try:
+        data = await asyncio.to_thread(CO.company, sym, peers)
+    except ValueError as e:
+        return JSONResponse({"status": "not_found", "detail": str(e)}, status_code=404)
+    except Exception as e:  # noqa: BLE001
+        log.exception("company %s", sym)
+        return JSONResponse({"status": "error", "detail": str(e)[:160]}, status_code=502)
+    return JSONResponse({"status": "ok", **data}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/odds")

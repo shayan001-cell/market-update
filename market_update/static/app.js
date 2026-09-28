@@ -35,8 +35,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -56,6 +56,7 @@
     home: '<svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M10 20v-5h4v5"/></svg>',
     scan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 3v9l6.5 4"/></svg>',
     stock: '<svg viewBox="0 0 24 24"><path d="M7 4v16M7 8h-2.5v7H7M12 3v18M12 6h-2.5v9H12M17 5v14M17 9h-2.5v6H17"/><path d="M7 8h2.5v7H7M12 6h2.5v9H12M17 9h2.5v6H17"/></svg>',
+    map: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.6 7.2 9.6 10M17.4 7.2 14.4 10M6.6 16.8 9.6 14M17.4 16.8 14.4 14"/></svg>',
     theme: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
     smart: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.1c0 2.9 6 1.6 6 4.6 0 1.4-1.4 2.3-3 2.3s-3-.9-3-2.3"/></svg>',
     guide: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>',
@@ -68,7 +69,7 @@
   };
   const SUBTABS = { scan: [["scanner", "Volume scanner"], ["lowfloat", "Low float"]], stock: [["all", "All names"], ["day", "Day trade"], ["swing", "Swing trade"], ["large", "Large cap"], ["small", "Small cap"], ["gappers", "Gapping"], ["watchlist", "Watchlist"]], smart: [["money", "Insiders, institutions, Congress"], ["options", "Options flow"]], macro: [["picture", "Big picture"], ["indexes", "Indexes, weekly"], ["rates", "Rates"], ["flows", "Money flows"]] };
   const ADMIN_VIEWS = ["admin", "check", "desk"];   // menu items and views only the admin sees
-  const NAV_GROUPS = [["Workspace", ["home", "watch", "desk", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
+  const NAV_GROUPS = [["Workspace", ["home", "watch", "map", "desk", "scan", "stock", "theme"]], ["Money", ["smart"]], ["Macro", ["macro", "check", "record"]], ["Help", ["guide"]], ["Admin", ["admin"]]];
   let subTab = { scan: "scanner", stock: "all", smart: "money", macro: "picture" };
   let liveScan = null, liveTimer = null, adminData = null, lastMarketState = null;
   let gateOpen = true;                   // the sign-in card shows first; the dashboard follows a successful login
@@ -531,6 +532,288 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= COMPANY MAP: type a name, see how the money and the dependencies connect =======================
+  let mapSym = null, mapData = null, mapBusy = false, mapErr = null, mapSim = null;
+  try { mapSym = sessionStorage.getItem("mu-map") || null; } catch (e) {}
+  const MAP_COL = { center: "#FF7A2F", customer: "#3DDC97", supplier: "#FFB27A", partner: "#6FA8FF", rival: "#FF6B85", risk: "#F7C85A", owner: "#8B8B97", peer: "#A6A6B2", second: "#C98A5E" };
+  const MAP_WORD = { customer: "buys from it", supplier: "supplies it", partner: "partner", rival: "rival", risk: "risk", owner: "owns shares", peer: "same industry", second: "supplier's supplier" };
+  const bn = (v) => (!isNum(v) ? "–" : Math.abs(v) >= 1e12 ? "$" + (v / 1e12).toFixed(2) + "T" : Math.abs(v) >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(0) + "M" : "$" + Math.round(v));
+  function resolveMapQuery(q) {
+    q = (q || "").trim(); if (!q) return null;
+    if (/^[A-Za-z.\-]{1,6}$/.test(q) && q === q.toUpperCase()) return q.toUpperCase();
+    const low = q.toLowerCase();
+    const known = { nvidia: "NVDA", apple: "AAPL", microsoft: "MSFT", amazon: "AMZN", google: "GOOGL", alphabet: "GOOGL", meta: "META", facebook: "META", tesla: "TSLA", broadcom: "AVGO", tsmc: "TSM", amd: "AMD", intel: "INTC", micron: "MU", oracle: "ORCL", coreweave: "CRWV", supermicro: "SMCI", dell: "DELL", palantir: "PLTR", netflix: "NFLX", arista: "ANET", marvell: "MRVL", asml: "ASML", vertiv: "VRT" };
+    if (known[low]) return known[low];
+    if (symbolIndex) { const hit = symbolIndex.find((r) => String(r[1] || "").toLowerCase().startsWith(low)) || symbolIndex.find((r) => String(r[1] || "").toLowerCase().includes(low)); if (hit) return hit[0]; }
+    return q.toUpperCase().replace(/[^A-Z.\-]/g, "").slice(0, 6) || null;
+  }
+  async function loadMap(sym) {
+    if (!sym) return; mapSym = sym; mapBusy = true; mapErr = null; mapData = null; try { sessionStorage.setItem("mu-map", sym); } catch (e) {}
+    rerenderMap();
+    try { const res = await api(`/api/company/${encodeURIComponent(sym)}`, { cache: "no-store" }); const j = await res.json().catch(() => ({}));
+      if (j.status === "ok") mapData = j; else mapErr = j.status === "not_found" ? `No company found for "${sym}". Try the ticker, such as NVDA.` : (j.detail || "The data could not be loaded right now.");
+    } catch (e) { mapErr = "The server is not reachable right now."; }
+    mapBusy = false; rerenderMap();
+  }
+  function rerenderMap() { if (currentView !== "map") return; const el = $("#app .cm"); if (!el) return; const tmp = document.createElement("div"); tmp.innerHTML = secMap(); el.replaceWith(tmp.firstElementChild); mountMap(); }
+  function sankey(flow) {
+    if (!flow || !flow.links.length) return "";
+    const colOf = { rev: 0, cost: 1, gross: 1, rnd: 2, sga: 2, oth: 2, op: 2, tax: 3, ni: 3, capex: 4, bb: 4, dv: 4, acq: 4, kept: 4 };
+    const colour = { rev: "#FF7A2F", cost: "#FF6B85", gross: "#3DDC97", rnd: "#6FA8FF", sga: "#9C9CA8", oth: "#9C9CA8", op: "#3DDC97", tax: "#F7C85A", ni: "#3DDC97", capex: "#FFB27A", bb: "#6FA8FF", dv: "#6FA8FF", acq: "#C98A5E", kept: "#3DDC97" };
+    const val = {}; flow.links.forEach((l) => { val[l.s] = Math.max(val[l.s] || 0, 0); val[l.t] = (val[l.t] || 0) + l.v; }); val.rev = flow.revenue;
+    const outSum = {}; flow.links.forEach((l) => { outSum[l.s] = (outSum[l.s] || 0) + l.v; });
+    Object.keys(outSum).forEach((k) => { val[k] = Math.max(val[k] || 0, outSum[k]); });
+    const W = 900, H = 360, cols = 5, nodeW = 14, gap = 12, colX = (c) => 10 + c * ((W - 150 - nodeW) / (cols - 1));
+    const maxCol = Math.max(...[0, 1, 2, 3, 4].map((c) => flow.nodes.filter((n) => colOf[n.id] === c).reduce((a, n) => a + (val[n.id] || 0), 0)));
+    const k = (H - 40 - gap * 4) / (maxCol || 1);
+    const pos = {};
+    [0, 1, 2, 3, 4].forEach((c) => { let y = 20; flow.nodes.filter((n) => colOf[n.id] === c).forEach((n) => { const h = Math.max(3, (val[n.id] || 0) * k); pos[n.id] = { x: colX(c), y, h, out: 0, in: 0 }; y += h + gap; }); });
+    const bands = flow.links.map((l) => { const a = pos[l.s], b = pos[l.t]; if (!a || !b) return ""; const h = Math.max(1.5, l.v * k); const y1 = a.y + a.out + h / 2, y2 = b.y + b.in + h / 2; a.out += h; b.in += h;
+      const x1 = a.x + nodeW, x2 = b.x, mx = (x1 + x2) / 2;
+      return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" stroke="${colour[l.t]}" stroke-width="${h.toFixed(1)}" class="sk-band"><title>${esc(flow.nodes.find((n) => n.id === l.t).label)}: ${bn(l.v)}</title></path>`; }).join("");
+    const nodes = flow.nodes.map((n) => { const p = pos[n.id]; if (!p) return ""; const right = colOf[n.id] === 4; return `<g><rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${colour[n.id]}"/><text x="${right ? p.x + nodeW + 6 : p.x + nodeW + 6}" y="${p.y + Math.min(p.h / 2 + 4, p.h + 12)}" class="sk-l">${esc(n.label)} <tspan>${bn(val[n.id])}</tspan></text></g>`; }).join("");
+    return `<svg class="sankey" viewBox="0 0 ${W} ${H}" role="img" aria-label="Where the money went in fiscal ${esc(flow.year || "")}">${bands}${nodes}</svg>`;
+  }
+  function barsYears(st, keys) {
+    const years = (st.years || []).slice().reverse(); if (!years.length) return "";
+    const series = keys.map(([k, label, col]) => ({ label, col, v: (st[k] || []).slice(0, years.length).reverse() }));
+    const all = series.flatMap((s) => s.v).filter(isNum); if (!all.length) return "";
+    const mx = Math.max(...all.map(Math.abs)), W = 420, H = 170, P = 22, gw = (W - P) / years.length, bw = Math.min(24, (gw - 14) / series.length);
+    const Y = (v) => H - P - (Math.max(0, v) / mx) * (H - P - 14);
+    const bars = years.map((y, i) => series.map((s, j) => { const v = s.v[i]; if (!isNum(v)) return ""; const x = P / 2 + i * gw + (gw - bw * series.length) / 2 + j * bw; return `<rect x="${x.toFixed(1)}" y="${Y(v).toFixed(1)}" width="${(bw - 3).toFixed(1)}" height="${(H - P - Y(v)).toFixed(1)}" rx="3" fill="${s.col}"><title>${esc(s.label)} ${esc(y.slice(0, 4))}: ${bn(v)}</title></rect>`; }).join("") + `<text x="${(P / 2 + i * gw + gw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="yb-l">FY${esc(y.slice(2, 4))}</text>`).join("");
+    return `<svg class="ybars" viewBox="0 0 ${W} ${H}">${bars}</svg><div class="yb-key">${series.map((s) => `<span><i style="background:${s.col}"></i>${esc(s.label)} <b>${bn(s.v[s.v.length - 1])}</b></span>`).join("")}</div>`;
+  }
+  function capexBars(cap) {
+    const ok = (cap || []).filter((c) => (c.capex || []).some(isNum)); if (!ok.length) return "";
+    const years = ok[0].years.slice().reverse();
+    const totals = years.map((y, i) => ok.reduce((a, c) => a + ((c.capex || []).slice().reverse()[i] || 0), 0));
+    const mx = Math.max(...totals), W = 420, H = 180, P = 22, gw = (W - P) / years.length, bw = Math.min(46, gw - 20);
+    const pal = ["#FF7A2F", "#FFB27A", "#6FA8FF", "#3DDC97", "#F7C85A", "#C98A5E"];
+    const bars = years.map((y, i) => { let top = H - P; return ok.map((c, j) => { const v = (c.capex || []).slice().reverse()[i] || 0; const h = (v / mx) * (H - P - 16); top -= h; return `<rect x="${(P / 2 + i * gw + (gw - bw) / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, h - 1).toFixed(1)}" fill="${pal[j % pal.length]}"><title>${esc(c.sym)} ${esc(y)}: ${bn(v)}</title></rect>`; }).join("") + `<text x="${(P / 2 + i * gw + gw / 2).toFixed(1)}" y="${(top - 4).toFixed(1)}" text-anchor="middle" class="yb-t">${bn(totals[i]).replace(".0B", "B")}</text><text x="${(P / 2 + i * gw + gw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="yb-l">${esc(y)}</text>`; }).join("");
+    return `<svg class="ybars" viewBox="0 0 ${W} ${H}">${bars}</svg><div class="yb-key">${ok.map((c, j) => `<span><i style="background:${pal[j % pal.length]}"></i>${esc(c.sym)}</span>`).join("")}</div>`;
+  }
+  function secMap() {
+    const d = mapData;
+    const chips = ["NVDA", "AMD", "TSM", "AVGO", "MSFT", "META", "AMZN", "AAPL", "TSLA", "SMCI"].map((s) => `<button type="button" class="${s === mapSym ? "on" : ""}" data-map-go="${s}">${s}</button>`).join("");
+    const head = `<div class="cm-head"><span class="pz-live"><i></i>Company map</span><h2>How a company really works</h2><p>Type a company. OneView maps who it depends on and who depends on it, follows the money through its statements, and shows where it is critical and where it could break.</p>
+      <form class="cm-search" data-map-form><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="map-q" type="search" placeholder="Type a company, such as NVIDIA or TSLA" autocomplete="off" value="${esc(mapSym || "")}" aria-label="Company name or ticker"><button type="submit" class="lg-btn"><span>Map it</span><i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></button></form>
+      <div class="cm-chips">${chips}</div></div>`;
+    if (mapBusy) return `<section class="cm">${head}<div class="cm-loading"><div class="cm-bubble"><i></i><i></i><i></i><b>${esc(mapSym || "")}</b></div><p>Reading the statements, the latest annual report and the supply chain…</p></div></section>`;
+    if (mapErr) return `<section class="cm">${head}<div class="cr-none cm-err">${esc(mapErr)}</div></section>`;
+    if (!d) return `<section class="cm">${head}<div class="cm-empty">Pick a company above to draw its map.</div></section>`;
+    const P = d.profile || {}, V = d.valuation || {}, st = d.statements || {}, sec = d.sec, vd = d.verdicts || {};
+    const g = d.graph || {};
+    const legend = ["customer", "supplier", "partner", "rival", "risk", g.curated ? "second" : "peer", "owner"].map((k) => `<span><i style="background:${MAP_COL[k]}"></i>${MAP_WORD[k]}</span>`).join("");
+    const cust = sec && (sec.top || []).length ? (() => { const tops = sec.top.map((t) => t.pct); const rest = Math.max(0, 100 - tops.reduce((a, b) => a + b, 0));
+      return `<div class="cm-cust"><div class="cr-split cm-cbar">${tops.map((p, i) => `<i style="width:${p}%;background:${["#FF7A2F", "#FFB27A", "#F7C85A", "#C98A5E", "#6FA8FF"][i]}" title="Customer ${String.fromCharCode(65 + i)} ${p}%"></i>`).join("")}<i style="width:${rest}%;background:rgba(255,255,255,.14)"></i></div>
+        <div class="yb-key">${tops.map((p, i) => `<span><i style="background:${["#FF7A2F", "#FFB27A", "#F7C85A", "#C98A5E", "#6FA8FF"][i]}"></i>Customer ${String.fromCharCode(65 + i)} <b>${p}%</b></span>`).join("")}<span><i style="background:rgba(255,255,255,.3)"></i>everyone else <b>${rest.toFixed(0)}%</b></span></div>
+        <blockquote class="cm-quote">"${esc(sec.quotes[0] || "").slice(0, 280)}"<span>${esc(sec.form)} filed ${esc(sec.filed)} · <a href="${esc(sec.url)}" target="_blank" rel="noopener">read the filing</a></span></blockquote></div>`; })()
+      : `<p class="od-p">${sec ? "The latest annual report names no single customer above 10% of revenue." : "No SEC annual report found for this ticker."}</p>`;
+    const named = (g.links || []).filter((l) => l.rel === "customer" && !l.second).sort((a, b) => b.w - a.w).slice(0, 8).map((l) => { const n = g.nodes.find((x) => x.id === l.s); return `<li><b>${esc(n ? n.label : l.s)}</b><span>${esc(l.why)}</span></li>`; }).join("");
+    const ytt = V.years_to_20;
+    return `<section class="cm">${head}
+      <div class="cm-title"><div><b>${esc(P.name || d.symbol)}</b><span>${esc(d.symbol)} · ${esc(P.industry || "")}${P.country ? " · " + esc(P.country) : ""}</span></div>
+        <div class="cm-kpis"><div><span>Market value</span><b>${bn(V.market_cap)}</b></div><div><span>Revenue, FY${esc((st.years || [""])[0].slice(2, 4))}</span><b>${bn((st.revenue || [])[0])}</b></div><div><span>Net income</span><b>${bn((st.net_income || [])[0])}</b></div><div><span>P/E</span><b>${fnum(V.pe, 1)}</b></div></div></div>
+      <div class="pulse-grid cm-grid">
+        <article class="pz cm-graph-card"><div class="pz-h"><span class="pz-eye">The map · drag the circles, scroll to zoom, click a company to map it</span><span class="pz-hint">${g.curated ? "supply chain from public filings and reporting" : "who owns it and its industry peers"}</span></div>
+          <div class="cm-stage" id="cm-graph" aria-label="Network map of ${esc(P.name || d.symbol)}"></div><div class="cm-legend">${legend}<span><i class="crit"></i>single point of failure</span></div><div class="cm-tip" id="cm-tip" hidden></div></article>
+        <article class="pz cm-crit"><div class="pz-h"><span class="pz-eye up">Why it is critical</span></div><ul class="cm-v up">${(vd.critical || []).map((x) => `<li><b>${esc(x.t)}</b><span>${esc(x.d)}</span></li>`).join("") || "<li><span>Nothing stands out.</span></li>"}</ul></article>
+        <article class="pz cm-vul"><div class="pz-h"><span class="pz-eye down">Where it could break</span></div><ul class="cm-v down">${(vd.vulnerable || []).map((x) => `<li><b>${esc(x.t)}</b><span>${esc(x.d)}</span></li>`).join("") || "<li><span>Nothing stands out.</span></li>"}</ul></article>
+        <article class="pz cm-flow"><div class="pz-h"><span class="pz-eye">Where the money went · fiscal ${esc(((d.flow || {}).year || "").slice(0, 4))}</span><span class="pz-hint">from the income and cash-flow statements</span></div>${sankey(d.flow) || '<div class="cr-none">No statement data.</div>'}
+          <p class="od-p">Of every dollar of sales, <b>${isNum(V.gross_margin) ? Math.round(V.gross_margin * 100) : "–"}¢</b> is left after making the product and <b>${isNum(V.net_margin) ? Math.round(V.net_margin * 100) : "–"}¢</b> after everything. The cash it earned went to ${["capex", "buybacks", "dividends"].map((k) => [k, Math.abs(((st[k] || [])[0]) || 0)]).sort((a, b) => b[1] - a[1]).filter((x) => x[1] > 0).map(([k, v]) => `${{ capex: "building capacity", buybacks: "buying back shares", dividends: "dividends" }[k]} (${bn(v)})`).join(", ") || "none of the usual uses"}.</p></article>
+        <article class="pz cm-hist"><div class="pz-h"><span class="pz-eye">Four years of growth</span></div>${barsYears(st, [["revenue", "Revenue", "#FF7A2F"], ["net_income", "Net income", "#3DDC97"], ["fcf", "Free cash flow", "#6FA8FF"]])}</article>
+        <article class="pz cm-bal"><div class="pz-h"><span class="pz-eye">Balance sheet</span></div>${barsYears(st, [["cash", "Cash and investments", "#3DDC97"], ["debt", "Debt", "#FF6B85"], ["inventory", "Inventory", "#F7C85A"]])}</article>
+        <article class="pz cm-cus"><div class="pz-h"><span class="pz-eye">Who pays them</span><span class="pz-hint">annual report, customers above 10%</span></div>${cust}${named ? `<h5 class="cm-h5">Named on the map</h5><ul class="cm-named">${named}</ul>` : ""}</article>
+        ${(d.capex || []).length ? `<article class="pz cm-cap"><div class="pz-h"><span class="pz-eye">The spending wave flowing in</span><span class="pz-hint">capital spending of its biggest customers</span></div>${capexBars(d.capex)}<p class="od-p">What its customers spend building data centers is, in large part, its next revenue.</p></article>` : ""}
+        <article class="pz cm-val"><div class="pz-h"><span class="pz-eye">What the price assumes</span></div>
+          <div class="wd-odds"><div><span>Price / earnings</span><b>${fnum(V.pe, 1)}</b><em>forward ${fnum(V.forward_pe, 1)}</em></div><div><span>Price / sales</span><b>${fnum(V.ps, 1)}</b><em>market value ÷ revenue</em></div><div><span>Growth, latest</span><b class="${cls(V.growth)}">${isNum(V.growth) ? fpct(V.growth * 100, 0) : "–"}</b><em>earnings, year on year</em></div><div><span>Operating margin</span><b>${isNum(V.op_margin) ? Math.round(V.op_margin * 100) + "%" : "–"}</b><em>profit from operations</em></div></div>
+          <p class="od-p">${isNum(ytt) ? `At today's growth, profits catch up with the price, to a market-like 20 times earnings, in about <b>${ytt < 1 ? "under a year" : ytt.toFixed(1) + " years"}</b>. The longer that takes, the more the price depends on growth continuing.` : isNum(V.pe) && V.pe <= 20 ? "Priced at or below a market-like 20 times earnings." : "Not enough data to say what the price assumes."}</p></article>
+        ${(d.holders || []).length ? `<article class="pz cm-own"><div class="pz-h"><span class="pz-eye">Who owns it</span></div><ul class="cm-named">${d.holders.map((h) => `<li><b>${esc(h.name)}</b><span>${isNum(h.pct) ? h.pct.toFixed(2) + "% of the shares" : ""}</span></li>`).join("")}</ul></article>` : ""}
+      </div>
+      <div class="pz-foot">${d.currency && d.currency.reported && d.currency.reported !== "USD" ? `Statements are reported in ${esc(d.currency.reported)} and shown in US dollars${d.currency.usd_rate ? ` at today's rate (1 ${esc(d.currency.reported)} = $${d.currency.usd_rate.toFixed(4)})` : " (no rate available, so figures are in " + esc(d.currency.reported) + ")"}. ` : ""}Statements and holders: Yahoo Finance. Customers: the company's latest ${sec ? esc(sec.form) : "annual report"} on SEC EDGAR. Connections: OneView's map of the AI supply chain from public filings and reporting. Information, not advice.</div>
+    </section>`;
+  }
+  function loadD3() { return window.d3 ? Promise.resolve(window.d3) : new Promise((res, rej) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"; s.onload = () => res(window.d3); s.onerror = rej; document.head.appendChild(s); }); }
+  async function mountMap() {
+    const el = $("#cm-graph"); if (!el || !mapData) return;
+    let d3; try { d3 = await loadD3(); } catch (e) { el.innerHTML = '<div class="cr-none">The map library could not load.</div>'; return; }
+    if (mapSim) { mapSim.stop(); mapSim = null; }
+    const g0 = mapData.graph; const W = el.clientWidth || 900, H = el.clientHeight || 560;
+    const nodes = g0.nodes.map((n) => ({ ...n, x: W / 2, y: H / 2 }));
+    const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+    const links = g0.links.filter((l) => byId[l.s] && byId[l.t]).map((l) => ({ ...l, source: l.s, target: l.t }));
+    const deg = {}; links.forEach((l) => { deg[l.s] = Math.max(deg[l.s] || 0, l.w); });
+    const critIds = new Set(links.filter((l) => l.critical).map((l) => l.s));
+    const R = (n) => (n.group === "center" ? 46 : n.group === "owner" || n.group === "peer" ? 13 : 11 + (deg[n.id] || 1) * 3.2);
+    el.innerHTML = "";
+    const svg = d3.select(el).append("svg").attr("viewBox", `0 0 ${W} ${H}`).attr("class", "cm-svg");
+    const defs = svg.append("defs");
+    const gr = defs.append("radialGradient").attr("id", "cmc"); gr.append("stop").attr("offset", "0").attr("stop-color", "#FFB27A"); gr.append("stop").attr("offset", "1").attr("stop-color", "#FF7A2F");
+    const root = svg.append("g");
+    svg.call(d3.zoom().scaleExtent([0.4, 3]).on("zoom", (ev) => root.attr("transform", ev.transform)));
+    const link = root.append("g").selectAll("line").data(links).join("line").attr("class", (l) => `cm-link ${l.rel}${l.critical ? " crit" : ""}${l.second ? " second" : ""}`).attr("stroke", (l) => (l.critical ? "#FF6B85" : MAP_COL[l.rel] || "#888")).attr("stroke-width", (l) => 0.8 + l.w * 0.7);
+    const tip = $("#cm-tip");
+    const node = root.append("g").selectAll("g").data(nodes).join("g").attr("class", (n) => `cm-node g-${n.group}`).style("cursor", (n) => (/^[A-Z0-9.\-]{1,10}$/.test(n.id) && n.group !== "center" && n.group !== "risk" ? "pointer" : "grab"));
+    node.append("circle").attr("class", "cm-halo").attr("r", (n) => R(n) + 6).attr("fill", "none").attr("stroke", (n) => (critIds.has(n.id) ? "#FF6B85" : "transparent")).attr("stroke-width", 2).attr("stroke-dasharray", "3 3");
+    node.append("circle").attr("class", "cm-dot").attr("r", 0).attr("fill", (n) => (n.group === "center" ? "url(#cmc)" : MAP_COL[n.group] || "#888")).attr("fill-opacity", (n) => (n.group === "center" ? 1 : 0.9))
+      .transition().duration(900).delay((n, i) => (n.group === "center" ? 0 : 250 + i * 25)).ease(d3.easeBackOut.overshoot(1.4)).attr("r", R);
+    const short = (n) => n.label.replace(" (private)", "").replace(/,? (Inc\.?|LLC|L\.?P\.?|Corporation|Corp\.?|Company|Co\.?)$/i, "").replace(/\s*&\s*$/, "").replace(/ (Capital|Asset|Investment) Management.*$/i, "").replace(/ Group$/i, "");
+    node.append("text").attr("class", "cm-lbl").attr("text-anchor", "middle").attr("dy", (n) => (n.group === "center" ? 5 : R(n) + 14)).text((n) => (n.group === "center" ? n.id : short(n)));
+    node.filter((n) => n.group === "center").append("text").attr("class", "cm-sub").attr("text-anchor", "middle").attr("dy", 66).text((n) => n.label);
+    node.on("mouseenter", (ev, n) => { const ls = links.filter((l) => l.s === n.id || l.t === n.id); tip.hidden = n.group === "center"; if (n.group === "center") return;
+        tip.innerHTML = `<b>${esc(n.label)}</b><i style="color:${MAP_COL[n.group]}">${esc(MAP_WORD[n.group] || n.group)}${n.also ? " · also " + esc(MAP_WORD[n.also] || n.also) : ""}${critIds.has(n.id) ? " · single point of failure" : ""}</i>${ls.slice(0, 2).map((l) => `<span>${esc(l.why)}</span>`).join("")}`;
+        const r = el.getBoundingClientRect(); tip.style.left = Math.min(r.width - 280, Math.max(8, ev.clientX - r.left + 14)) + "px"; tip.style.top = Math.max(8, ev.clientY - r.top + 14) + "px";
+        link.classed("dim", (l) => l.s !== n.id && l.t !== n.id); node.classed("dim", (m) => m.id !== n.id && !ls.some((l) => l.s === m.id || l.t === m.id)); })
+      .on("mouseleave", () => { tip.hidden = true; link.classed("dim", false); node.classed("dim", false); })
+      .on("click", (ev, n) => { if (ev.defaultPrevented) return; if (n.group !== "center" && n.group !== "risk" && /^[A-Z0-9.\-]{1,10}$/.test(n.id) && !["OPENAI", "XAI", "HUAWEI", "EXPORT", "TAIWAN"].includes(n.id)) { const q = $("#map-q"); if (q) q.value = n.id; loadMap(n.id); } });
+    const ring = { customer: 0.30, supplier: 0.30, partner: 0.36, rival: 0.34, risk: 0.24, owner: 0.44, peer: 0.34, second: 0.46 };
+    const ang = { customer: 0, supplier: Math.PI, partner: Math.PI * 1.5, rival: Math.PI * 0.5, risk: Math.PI * 0.75, owner: Math.PI * 1.25, peer: Math.PI * 0.25, second: Math.PI };
+    const side = Math.min(W, H);
+    mapSim = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id((n) => n.id).distance((l) => (l.second ? 70 : side * (ring[l.rel] || 0.32))).strength((l) => (l.second ? 0.6 : 0.25)))
+      .force("charge", d3.forceManyBody().strength((n) => (n.group === "center" ? -900 : -260)))
+      .force("collide", d3.forceCollide().radius((n) => Math.max(R(n) + 16, (n.group === "center" ? 0 : Math.min(60, short(n).length * 3.4)))).iterations(2))
+      .force("x", d3.forceX((n) => (n.group === "center" ? W / 2 : W / 2 + Math.cos(ang[n.group] || 0) * side * 0.34)).strength((n) => (n.group === "center" ? 0.9 : 0.12)))
+      .force("y", d3.forceY((n) => (n.group === "center" ? H / 2 : H / 2 + Math.sin(ang[n.group] || 0) * side * 0.30)).strength((n) => (n.group === "center" ? 0.9 : 0.14)))
+      .on("tick", () => {
+        nodes.forEach((n) => { const r = R(n) + 4, lx = n.group === "center" ? r : Math.max(r, short(n).length * 3.3 + 4); n.x = Math.max(lx, Math.min(W - lx, n.x)); n.y = Math.max(r, Math.min(H - r - 16, n.y)); });
+        link.attr("x1", (l) => l.source.x).attr("y1", (l) => l.source.y).attr("x2", (l) => l.target.x).attr("y2", (l) => l.target.y);
+        node.attr("transform", (n) => `translate(${n.x},${n.y})`);
+      });
+    node.call(d3.drag().on("start", (ev, n) => { if (!ev.active) mapSim.alphaTarget(0.25).restart(); n.fx = n.x; n.fy = n.y; }).on("drag", (ev, n) => { n.fx = ev.x; n.fy = ev.y; }).on("end", (ev, n) => { if (!ev.active) mapSim.alphaTarget(0); n.fx = null; n.fy = null; }));
+  }
+  document.addEventListener("submit", (e) => { const f = e.target.closest && e.target.closest("[data-map-form]"); if (!f) return; e.preventDefault(); const s2 = resolveMapQuery(($("#map-q") || {}).value); if (s2) loadMap(s2); });
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-map-go]"); if (!b) return; const q = $("#map-q"); if (q) q.value = b.getAttribute("data-map-go"); loadMap(b.getAttribute("data-map-go")); });
+
+  // ======================= MARKET CONTEXT: the bigger picture, drawn =======================
+  let ctxWin = "3m";
+  const CTX_WINS = [["1m", "1 month"], ["3m", "3 months"], ["6m", "6 months"], ["12m", "12 months"]];
+  const REGIME_WORD = { strong_uptrend: ["Strong uptrend", "up"], uptrend_pulling_back: ["Uptrend, pulling back", "up"], range: ["Going sideways", "flat"], topping: ["Topping out", "warn"], downtrend: ["Downtrend", "down"], bottoming: ["Bottoming", "warn"] };
+  const MACRO_WORD = { growth_boom: "a growth boom", disinflation_rally: "a disinflation rally", inflation_scare: "an inflation scare", growth_scare: "a growth scare", liquidity_melt_up: "a liquidity melt-up", risk_off: "risk-off", mixed: "mixed signals" };
+  function ctxRegime(r) {
+    const H = r.horizons || {}; const a = (H.assets || []).find((x) => x.symbol === "ES=F") || (H.assets || [])[0]; if (!a) return "";
+    const ai = a.ai || {}, cx = H.ai || {};
+    const rg = ai.regime ? REGIME_WORD[ai.regime.choice] || [pretty(ai.regime.choice), "flat"] : null;
+    const closes = a.closes_12m || [];
+    const lean = cx.equity_lean_3m ? cx.equity_lean_3m.choice : null, risk = cx.biggest_risk ? pretty(cx.biggest_risk.choice) : null, macro = cx.macro_read ? cx.macro_read.choice : null;
+    return `<article class="pz ctx-reg" data-ctx="regime">
+      <div class="pz-h"><span class="pz-eye">The primary trend · S&amp;P 500</span><span class="pz-hint">12 months</span></div>
+      <div class="cx-word ${rg ? rg[1] : "flat"}">${rg ? rg[0] : "No read"}</div>
+      <p class="pl-lede">${ai.alignment ? esc(HZ.alignment[ai.alignment.choice] || "") : ""} ${a.above_sma200 ? "It trades above its 200-day average." : "It trades below its 200-day average."}</p>
+      ${areaSpark(closes, cls(closes[closes.length - 1] - closes[0]), "cxsp")}
+      <div class="cx-facts">
+        <div><span>Macro backdrop</span><b>${macro ? esc(MACRO_WORD[macro] || pretty(macro)) : "–"}</b></div>
+        <div><span>Next 3 months</span><b class="${{ higher: "up", lower: "down" }[lean] || "flat"}">${lean ? esc(lean) : "–"}</b></div>
+        <div><span>Biggest risk</span><b class="warn">${risk ? esc(risk) : "–"}</b></div>
+      </div>
+      <div class="pz-foot">Reads from OneView's model or its backup rules; not a forecast.</div>
+    </article>`;
+  }
+  function ctxRace(r) {
+    const H = r.horizons || {};
+    const rows = (H.assets || []).map((a) => { const h = (a.horizons || {})[ctxWin] || {}; return { label: a.label.replace(" futures", ""), sym: a.symbol, v: h.return_pct, pos: h.range_pos, dd: h.max_drawdown_pct, yield: a.kind === "yield" }; })
+      .concat((r.indices || []).filter((i) => ["IWM", "DIA"].includes(i.symbol)).map((i) => { const t = i.technicals || {}; const v = { "1m": t.ret_1m, "3m": t.ret_3m, "6m": t.ret_6m, "12m": t.ret_12m }[ctxWin]; return { label: IDX_NAMES[i.symbol], sym: i.symbol, v, pos: null }; }))
+      .filter((x) => isNum(x.v)).sort((a, b) => b.v - a.v);
+    if (!rows.length) return "";
+    const mx = Math.max(1, ...rows.map((x) => Math.abs(x.v)));
+    const seg = CTX_WINS.map(([k, l]) => `<button type="button" class="${k === ctxWin ? "on" : ""}" data-ctx-win="${k}">${l.replace(" months", "M").replace(" month", "M")}</button>`).join("");
+    const bars = rows.map((x) => `<li><span class="rc-l">${esc(x.label)}${x.yield ? "<i>yield change</i>" : ""}</span><span class="ps-bar"><i class="${cls(x.v)}" style="${x.v >= 0 ? "left:50%" : "right:50%"};width:${((Math.abs(x.v) / mx) * 50).toFixed(1)}%"></i></span><span class="ps-v ${cls(x.v)}">${fpct(x.v, 1)}</span>${isNum(x.pos) ? `<span class="rc-pos" title="Where it sits between the low and the high of the period"><i style="left:${(x.pos * 100).toFixed(0)}%"></i></span>` : `<span class="rc-pos none"></span>`}</li>`).join("");
+    const lead = rows[0], lag = rows[rows.length - 1];
+    return `<article class="pz ctx-race" data-ctx="race">
+      <div class="pz-h"><span class="pz-eye">The asset race</span><div class="pz-seg">${seg}</div></div>
+      <p class="pl-lede"><b class="${cls(lead.v)}">${esc(lead.label)}</b> leads over ${CTX_WINS.find((w) => w[0] === ctxWin)[1]}, <b class="${cls(lag.v)}">${esc(lag.label)}</b> trails.</p>
+      <ul class="ps-list rc-list">${bars}</ul>
+      <div class="rc-legend"><span>return</span><span>where it sits in the period's range, low to high</span></div>
+    </article>`;
+  }
+  function ctxRates(r) {
+    const R = r.rates || {}; if (!R.curve || !R.curve.length) return "";
+    const pts = (key) => R.curve.filter((c) => isNum(c[key])).map((c) => ({ x: Math.log(c.tenor_years * 12 + 1), y: c[key], title: `${c.label} ${c[key].toFixed(2)}%` }));
+    const xl = R.curve.map((c) => ({ x: Math.log(c.tenor_years * 12 + 1), text: c.label })).filter((_, i) => i % 2 === 0 || i === R.curve.length - 1);
+    const curve = lineChart([{ cls: "l3", points: pts("year_ago") }, { cls: "l2", points: pts("month_ago") }, { cls: "l1", points: pts("today"), dots: true }], { w: 560, h: 190, xlabels: xl, yfmt: (v) => v.toFixed(1) + "%" });
+    const s2 = ((R.spreads || {})["2s10s"] || {}).latest;
+    const ten = (R.live || []).find((y) => /10/.test(y.label)) || {};
+    const ang = isNum(s2) ? Math.max(-90, Math.min(90, (s2 / 150) * 90)) : 0;
+    const shape = !isNum(s2) ? "–" : s2 < 0 ? ["Inverted", "down", "Short rates above long rates: the classic recession warning."] : s2 < 50 ? ["Flat to normal", "warn", "Barely positive: the curve is only just back to its normal shape."] : ["Normal, upward", "up", "Long rates comfortably above short rates: the healthy shape."];
+    const up = isNum(R.chg_10y_1m_bp) && R.chg_10y_1m_bp > 0;
+    return `<article class="pz ctx-rates" data-ctx="rates">
+      <div class="pz-h"><span class="pz-eye">Interest rates</span><span class="pz-hint">Treasury curve · FRED ${esc(R.as_of || "")}</span></div>
+      <div class="cr-grid2">
+        <div>${curve}<div class="legend"><span><i class="k1"></i>today</span><span><i class="k2"></i>1 month ago</span><span><i class="k3"></i>1 year ago</span></div></div>
+        <div class="rt-side">
+          <div class="rt-dial"><svg viewBox="0 0 120 70" aria-label="2s10s spread ${isNum(s2) ? Math.round(s2) : "–"} basis points"><path d="M10 62 A50 50 0 0 1 110 62" class="rt-track"/><path d="M10 62 A50 50 0 0 1 60 12" class="rt-inv"/><g style="transform:rotate(${ang}deg);transform-origin:60px 62px"><line x1="60" y1="62" x2="60" y2="20" class="rt-needle"/></g><circle cx="60" cy="62" r="4" class="rt-hub"/></svg>
+            <div class="rt-read"><b class="${shape[1]}">${shape[0]}</b><span>2s10s ${isNum(s2) ? (s2 > 0 ? "+" : "") + Math.round(s2) + " bp" : "–"}</span></div></div>
+          <p class="od-p">${shape[2] || ""}</p>
+          <div class="rt-10"><span>10-year</span><b>${isNum(ten.last) ? fnum(ten.last, 2) + "%" : "–"}</b><em class="${up ? "down" : "up"}">${fbp(R.chg_10y_1m_bp)} in a month</em></div>
+          <p class="od-p">${up ? "Rising long yields make bonds more attractive and weigh most on growth stocks." : "Easing long yields help stocks, growth names most."}</p>
+        </div>
+      </div>
+    </article>`;
+  }
+  function ring(pct, label, sub) {
+    const C = 2 * Math.PI * 30, p = Math.max(0, Math.min(1, pct / 100));
+    return `<div class="br-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="30" class="br-bg"/><circle cx="40" cy="40" r="30" class="br-fg ${pct >= 60 ? "up" : pct <= 40 ? "down" : "warn"}" style="stroke-dasharray:${(C * p).toFixed(1)} ${C.toFixed(1)}"/></svg><b>${Math.round(pct)}%</b><span>${label}</span><i>${sub}</i></div>`;
+  }
+  function ctxBreadth(r) {
+    const B = (r.flows || {}).breadth || {}; if (!B.n) return "";
+    const pc2 = (v) => (v / B.n) * 100;
+    const ad = B.adv + B.dec ? (B.adv / (B.adv + B.dec)) * 100 : 50;
+    return `<article class="pz ctx-br" data-ctx="breadth">
+      <div class="pz-h"><span class="pz-eye">How many stocks are joining in</span><span class="pz-hint">${B.n} large US stocks</span></div>
+      <div class="br-rings">${ring(pc2(B.above20), "above 20-day", "short term")}${ring(pc2(B.above50), "above 50-day", "medium term")}${ring(pc2(B.above200), "above 200-day", "long term")}</div>
+      <div class="br-ad"><span>Up today <b class="up">${B.adv}</b></span><div class="cr-split"><i class="up" style="width:${ad.toFixed(0)}%"></i><i class="down" style="width:${(100 - ad).toFixed(0)}%"></i></div><span>Down <b class="down">${B.dec}</b></span></div>
+      <p class="od-p">${pc2(B.above200) >= 60 && pc2(B.above20) < 50 ? "Most stocks are in long uptrends but the short-term push is fading: a pullback inside a healthy market." : pc2(B.above20) >= 60 ? "A broad move: most stocks are above their short-term averages." : pc2(B.above200) < 40 ? "Most stocks are below their long-term averages: a weak market under the surface." : "A mixed picture: participation is middling."}</p>
+    </article>`;
+  }
+  function ctxRotation(r) {
+    const S = ((r.flows || {}).sectors || []).filter((s) => isNum(s.rel_1m) && isNum(s.chg_5d)); if (S.length < 4) return "";
+    const W = 640, H = 340, P = 36;
+    const xs = S.map((s) => s.rel_1m), ys = S.map((s) => s.chg_5d);
+    const mx = Math.max(2, ...xs.map(Math.abs)) * 1.15, my = Math.max(1, ...ys.map(Math.abs)) * 1.2;
+    const X = (v) => P + ((v + mx) / (2 * mx)) * (W - 2 * P), Y = (v) => H - P - ((v + my) / (2 * my)) * (H - 2 * P);
+    const quad = (s) => (s.rel_1m >= 0 ? (s.chg_5d >= 0 ? ["Leading", "up"] : ["Weakening", "warn"]) : (s.chg_5d >= 0 ? ["Improving", "acc"] : ["Lagging", "down"]));
+    // labels: try a few positions around each dot and keep the first that does not touch a placed label
+    const placed = [];
+    const hit = (b) => placed.some((o) => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y);
+    const pts2 = S.map((s) => ({ s, x: X(s.rel_1m), y: Y(s.chg_5d) }));
+    pts2.forEach((p) => placed.push({ x: p.x - 8, y: p.y - 8, w: 16, h: 16 }));      // dots are obstacles too
+    const labelled = pts2.map((p) => {
+      const w = p.s.label.length * 6.4 + 4, h = 13;
+      const tries = [[10, -6], [10, -18], [10, 6], [-10 - w, -6], [-10 - w, -18], [-10 - w, 6], [-w / 2, -24], [-w / 2, 12], [10, -30], [10, 18]];
+      let best = null;
+      for (const [dx, dy] of tries) { const b = { x: p.x + dx, y: p.y + dy, w, h }; if (b.x < 2 || b.x + w > W - 2) continue; if (!hit(b)) { best = [dx, dy]; placed.push(b); break; } }
+      if (!best) { best = [10, -6]; }
+      return { ...p, lx: best[0], ly: best[1] + 10, lead: Math.abs(best[1] + 6) > 8 || best[0] < 0 };
+    });
+    const dots = labelled.map(({ s, x, y, lx, ly }) => { const q = quad(s); return `<g class="rt-pt ${q[1]}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><title>${esc(s.label)}: ${fpct(s.rel_1m, 1)} vs the S&P over a month, ${fpct(s.chg_5d, 1)} this week (${q[0].toLowerCase()})</title><circle r="7"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}">${esc(s.label)}</text></g>`; }).join("");
+    const groups = { Leading: [], Weakening: [], Improving: [], Lagging: [] }; S.forEach((s) => groups[quad(s)[0]].push(s.label));
+    return `<article class="pz ctx-rot" data-ctx="rotation">
+      <div class="pz-h"><span class="pz-eye">Where the money is rotating</span><span class="pz-hint">sectors and themes · right = beating the S&amp;P over a month · up = rising this week</span></div>
+      <div class="rot-wrap"><svg class="rot" viewBox="0 0 ${W} ${H}" role="img" aria-label="Sector rotation map">
+        <rect x="${X(0)}" y="${P}" width="${W - P - X(0)}" height="${Y(0) - P}" class="q q-lead"/><rect x="${X(0)}" y="${Y(0)}" width="${W - P - X(0)}" height="${H - P - Y(0)}" class="q q-weak"/>
+        <rect x="${P}" y="${P}" width="${X(0) - P}" height="${Y(0) - P}" class="q q-imp"/><rect x="${P}" y="${Y(0)}" width="${X(0) - P}" height="${H - P - Y(0)}" class="q q-lag"/>
+        <line x1="${X(0)}" x2="${X(0)}" y1="${P}" y2="${H - P}" class="axis"/><line x1="${P}" x2="${W - P}" y1="${Y(0)}" y2="${Y(0)}" class="axis"/>
+        <text x="${W - P - 6}" y="${P + 16}" text-anchor="end" class="ql up">LEADING</text><text x="${W - P - 6}" y="${H - P - 8}" text-anchor="end" class="ql warn">WEAKENING</text>
+        <text x="${P + 6}" y="${P + 16}" class="ql acc">IMPROVING</text><text x="${P + 6}" y="${H - P - 8}" class="ql down">LAGGING</text>
+        ${dots}</svg>
+        <div class="rot-key">${[["Leading", "up", "beating the market and still rising"], ["Improving", "acc", "behind the market but turning up"], ["Weakening", "warn", "ahead of the market but slipping"], ["Lagging", "down", "behind and still falling"]].map(([k, c, d]) => `<div><b class="${c}">${k}</b><span>${d}</span><em>${groups[k].map(esc).join(", ") || "none"}</em></div>`).join("")}</div>
+      </div>
+    </article>`;
+  }
+  function secContext(r) {
+    const cx = (r.horizons || {}).ai || {};
+    const macro = cx.macro_read ? MACRO_WORD[cx.macro_read.choice] || pretty(cx.macro_read.choice) : null;
+    return `<section class="pulse ctx">
+      <div class="pulse-head"><span class="pz-live"><i></i>Market context · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
+        <h2>The bigger picture</h2><p>${macro ? `The backdrop reads as <b>${esc(macro)}</b>. ` : ""}The trend, the rates, how many stocks are joining in and where the money is rotating, in one screen.</p>
+        <nav class="ctx-nav">${[["regime", "Trend"], ["race", "Asset race"], ["rates", "Rates"], ["breadth", "Breadth"], ["rotation", "Rotation"], ["weekly", "Weekly charts"]].map(([k, l]) => `<button type="button" data-jump='[data-ctx="${k}"]'>${l}</button>`).join("")}</nav></div>
+      <div class="pulse-grid">${ctxRegime(r)}${ctxRace(r)}${ctxRates(r)}${ctxBreadth(r)}${ctxRotation(r)}${pulseRadar(r).replace('data-pz="radar"', 'data-pz="radar" data-ctx="radar"')}</div>
+      <div data-ctx="weekly" class="ctx-weekly">${secIndexesWeekly(r)}</div>
+      <details class="ctx-more"><summary>Full tables: every asset and horizon, every sector</summary>${secHorizons(r)}${secFlows(r)}</details>
+    </section>`;
+  }
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-ctx-win]"); if (!b || !report) return; ctxWin = b.getAttribute("data-ctx-win"); const el = $('[data-ctx="race"]'); if (!el) return; const tmp = document.createElement("div"); tmp.innerHTML = ctxRace(report); tmp.firstElementChild.classList.add("no-anim"); el.replaceWith(tmp.firstElementChild); });
+
   // ======================= HERO: the crowd right now, the top traders, the big bets =======================
   let prosSnap = null;
   async function pollPros() {
@@ -620,9 +903,11 @@
       <td class="tp-rc">${(t.receipts || []).slice(-4).map((c) => `<span class="${c.hit ? "up" : "down"}" title="${esc(c.side)} $${esc(c.sym)} on ${esc(c.entry_day)}: ${fpct(c.ret, 1)} in ${m.horizon_sessions} sessions">${c.hit ? "✓" : "✗"} $${esc(c.sym)}</span>`).join("")}</td></tr>`).join("");
     return `<section class="pros" id="pros">
       <div class="cr-head"><h3>Top traders, measured <span class="muted">StockTwits · updated ${esc(etTime(p.as_of))} ET · ${(p.rated || 0).toLocaleString()} traders rated · ${p.scored.toLocaleString()} calls scored${isNum(p.median_hit) ? ` · typical trader ${Math.round(p.median_hit * 100)}% right` : ""}</span></h3></div>
-      <p class="cr-how">No one publishes verified hit rates for social-media traders, so OneView measures them. We read about ${m.posts_per_symbol || 200} recent posts on each of ${m.symbols ? m.symbols.length : 20} of the most-watched tickers, rank the authors by the likes their posts earn (StockTwits does not share follower counts), and read each leading account's last ${m.posts_per_trader || 90} posts, about ${m.per_run || 30} new accounts per run, building a ledger that keeps every call from the last year. Every post tagged bullish or bearish is a call: entry at that session's close, result at the close ${m.horizon_sessions || 5} sessions later, one call per ticker per day. A trader makes this list with <b>${m.min_scored || 12}+ scored calls and ${Math.round((m.min_hit || 0.7) * 100)}%+ right</b>. In a rising market, bullish calls win more often, so check the bullish share too.</p>
+      <p class="cr-how">No one publishes verified hit rates for social-media traders, so OneView measures them. We read about ${m.posts_per_symbol || 200} recent posts on each of ${m.symbols ? m.symbols.length : 20} of the most-watched tickers, rank the authors by the likes their posts earn (StockTwits does not share follower counts), and read each leading account's last ${m.posts_per_trader || 90} posts, about ${m.per_run || 30} new accounts per run, building a ledger that keeps every call from the last year. Every post the author tagged bullish or bearish is a call, and so is an untagged post TypeSafe reads as a clear call. Entry is that session's close; the result is the close 1, 5 or 20 sessions later depending on the call's time frame (5 when none is given), one call per ticker per day. A trader makes this list with <b>${m.min_scored || 12}+ scored calls and ${Math.round((m.min_hit || 0.7) * 100)}%+ right</b>. In a rising market, bullish calls win more often, so check the bullish share too.</p>
       ${rows ? `<div class="od-tablew"><table class="od-table tp-table"><thead><tr><th>#</th><th>Trader</th><th>Hit rate</th><th>Calls</th><th>Following</th><th>Latest results</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="cr-none">No trader cleared ${Math.round((m.min_hit || 0.7) * 100)}% on ${m.min_scored || 12}+ calls in this run.</div>`}
       ${(p.near || []).length ? `<div class="od-none">Closest below the bar: ${p.near.slice(0, 6).map((t) => `@${esc(t.username)} ${Math.round((t.hit_rate || 0) * 100)}% of ${t.scored}`).join(" · ")}.</div>` : ""}
+      ${(() => { const a = p.ai || {}; if (a.status === "no_credits") return `<div class="od-none">TypeSafe post reading is paused: the TypeSafe account has no credits. ${(a.pending || 0).toLocaleString()} untagged posts are waiting; until then only posts the authors tagged themselves count, judged five sessions later.</div>`;
+        if (a.read || p.ai_calls) return `<div class="od-none">TypeSafe read ${(a.read || 0).toLocaleString()} posts this run: it turns clear untagged calls into calls (${(p.ai_calls || 0).toLocaleString()} so far, only when 75%+ sure) and sets each call's time frame, so a day trade is judged the next session and a long-term call after 20.</div>`; return ""; })()}
       <div class="pz-foot">Past calls do not guarantee future ones. Opinions from public accounts, not advice.</div>
     </section>`;
   }
@@ -2536,6 +2821,7 @@
   function viewHtml(r) {
     switch (currentView) {
       case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secPros(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "map": setTimeout(() => { mountMap(); if (!mapData && !mapBusy && mapSym) loadMap(mapSym); }, 0); return `<div class="view one cm-view">${secMap()}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
@@ -2547,7 +2833,7 @@
       case "stock": return `<div class="view stock">${secStocks(r)}</div>`;
       case "theme": return `<div class="view one">${secTheme(r)}</div>`;
       case "smart": return `<div class="view sub">${subTabs("smart")}<div class="subview">${subTab.smart === "options" ? secOptions(r) : secSmart(r)}</div></div>`;
-      case "macro": return `<div class="view sub">${subTabs("macro")}<div class="subview ${subTab.macro}">${{ picture: () => secRegime(r) + secHorizons(r), indexes: () => secMacro(r) + secIndexesWeekly(r), rates: () => secRates(r), flows: () => secFlows(r) }[subTab.macro]()}</div></div>`;
+      case "macro": return `<div class="view one ctx-view">${secContext(r)}</div>`;
       default: currentView = "home"; return viewHtml(r);
     }
   }
@@ -2576,7 +2862,7 @@
       ${explain("OneView reads the market three ways: the numbers (price, volume, levels), the model's read in plain words with its reasons, and the crowd (Reddit, StockTwits, the President's posts). Everything is information, not advice.")}
       ${sec("Start here", li([["Sign in.", "Enter your email, open the one-time link on the device you use. No password."], ["Watchlist.", "Add the names you follow (ticker or company name). The desk personalises around that list."], ["Every morning at 07:00 ET", "the briefing lands at the top of the Overview: the numbers and the reads on your names."]]))}
       ${sec("The Overview, top to bottom", li([["Briefings.", "Morning at 07:00: futures, oil, gold, bitcoin, 10- and 5-year yields, mega caps, the President's market-relevant posts, today's events, and for SPY and QQQ what we see on the 1-hour chart, the likeliest next 1 to 4 hours and the levels that decide it. Middle card: a direction read every 15 minutes of the session (Higher, Lower, Sideways into the close, with the reason). After the close at 16:30: what the session did and a scorecard of the day's reads."], ["Where the big money is moving.", "SPY, QQQ, DIA and IWM against their normal activity for the time of day, the largest companies trading unusually heavily, and the groups leading or lagging."], ["Voices moving the tape.", "The President's posts read once each, and where the Reddit crowd is piling in."], ["StockTwits crowd.", "The crowd's mood on SPY, QQQ and the largest names (0 to 100), how loud the chatter is, and what is trending."], ["Market mood and assessments.", "The overall tape, then one line per name on your list: swing read, today's read, the first reason, and LOW, MED or HIGH conviction. Never a percentage."], ["Small-cap runners.", "Smaller names trading far above normal or changing hands fast, with a sensible play."], ["Today's numbers in plain words.", "Futures, VIX, yields, the dollar, breadth, overseas markets, one sentence each."], ["News that can move the market.", "Every headline read once; only the ones that can move prices stay."]]))}
-      ${sec("The other sections", li([["Watchlist.", "One row per name with its price, a 30-day chart, the read and a setup score. Click a row for its full story on the right: the chart, the day, swing and long-term reads, the trade plan and the key numbers. Filter by bullish, neutral or bearish, sort by movers or best setup, and use the arrow keys to move through the list. The Day / Swing / Long term switch changes every read at once."], ["Scanner.", "Names trading far above normal on the 15-minute to 2-hour charts, plus thin low-float names that move violently."], ["Stocks.", "Every analysed name in one table, full breakdown on click."], ["Themes.", "The data-centre build-out by part of the stack, who leads and who could run next."], ["Filings & flow.", "Insiders, big holders and Congress, each source's delay stated, plus options flow."], ["Market context.", "1, 3, 6 and 12 months, the indexes weekly, rates and money flows."], ["Track record.", "Every verdict and every direction read scored against what the market did, day by day."], ["The crowd and the betting markets.", "On the Overview: about 200 StockTwits posts per name read into a bull/bear split, the shift and the hot topics, plus Polymarket and Kalshi odds on the Fed, the next S&P 500 and Nasdaq close, and your names. Every bet shows the money behind it; under $1,000 is marked thin."]]))}
+      ${sec("The other sections", li([["Watchlist.", "One row per name with its price, a 30-day chart, the read and a setup score. Click a row for its full story on the right: the chart, the day, swing and long-term reads, the trade plan and the key numbers. Filter by bullish, neutral or bearish, sort by movers or best setup, and use the arrow keys to move through the list. The Day / Swing / Long term switch changes every read at once."], ["Scanner.", "Names trading far above normal on the 15-minute to 2-hour charts, plus thin low-float names that move violently."], ["Stocks.", "Every analysed name in one table, full breakdown on click."], ["Themes.", "The data-centre build-out by part of the stack, who leads and who could run next."], ["Filings & flow.", "Insiders, big holders and Congress, each source's delay stated, plus options flow."], ["Market context.", "The bigger picture in one screen: the primary trend, the asset race over 1 to 12 months, the yield curve, how many stocks are joining in, where money is rotating between sectors, and the weekly index charts."], ["Company map.", "Type a company such as NVIDIA: a draggable map of its customers, suppliers, partners and rivals with single points of failure marked, where its money went, four years of growth, the balance sheet, its biggest customers from the annual report, the spending wave flowing in, and what the price assumes. Click any company on the map to map it next."], ["Track record.", "Every verdict and every direction read scored against what the market did, day by day."], ["The crowd and the betting markets.", "On the Overview: about 200 StockTwits posts per name read into a bull/bear split, the shift and the hot topics, plus Polymarket and Kalshi odds on the Fed, the next S&P 500 and Nasdaq close, and your names. Every bet shows the money behind it; under $1,000 is marked thin."]]))}
       ${sec("What to focus on", li([["Day and intraday traders:", "the morning levels for SPY and QQQ, the Intraday direction card, the Scanner, Small-cap runners and Where the big money is moving. Trade the levels, not the words."], ["Swing traders:", "Assessments and the swing column on your cards (BUY, BUY THE DIP, WAIT FOR BREAKOUT, HOLD, AVOID with reasons), Filings & flow, and the after-close briefing."], ["Longer horizons:", "the long-term column, Themes, Market context, and the crowd mood as a contrarian check when it is extreme."]]))}
       ${sec("What sets it apart", li([["Plain words with reasons.", "Two to four reasons per read and a conviction word instead of a fake-precision percentage."], ["The right kind of call.", "Funds get a trend read, big companies a momentum read, everything else the model's stance."], ["Three feeds in one place.", "The numbers, the model, and the crowd."], ["A public scorecard.", "The desk logs every call with its price and grades itself after the close."], ["One price everywhere.", "Every panel reads from the same quote store, 15-minute delayed, time stamped."]]))}
       <div class="meta2">Information, not advice. Data is delayed and can be wrong. Reads are probabilities, not predictions. You decide what to trade and you carry the risk.</div>

@@ -87,29 +87,53 @@ def discover(read_symbol: Callable[[str], list[dict[str, Any]]], blocked: Callab
     return out
 
 
-def calls_from(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Tagged posts -> one call per ticker per ET day (the first one that day)."""
-    seen: set[tuple[str, str]] = set()
+HORIZON_SESSIONS = {"intraday": 1, "days_to_weeks": 5, "months_plus": 20, "unclear": HORIZON}
+AI_MIN_CALL = 0.75       # an untagged post becomes a call only when the model is this sure of the side
+AI_MIN_HORIZON = 0.5     # below this the default five-session window is used
+
+
+def posts_from(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every post that names a scoreable ticker, tagged or not, in a compact form the ledger keeps."""
     out = []
-    for m in sorted(msgs, key=lambda x: x.get("created_at") or ""):
-        side = (m.get("sentiment") or "").lower()
-        if side not in ("bullish", "bearish"):
-            continue
+    for m in msgs:
         syms = m.get("symbols") or []
         first = re.search(r"\$([A-Za-z][A-Za-z.]*)", m.get("body") or "")
         sym = (first.group(1).upper() if first else (syms[0] if syms else "")).upper()
         y = yf_symbol(sym)
-        if not y:
+        if not y or not m.get("id"):
             continue
         try:
             at = datetime.fromisoformat(str(m["created_at"]).replace("Z", "+00:00")).astimezone(ET)
         except Exception:  # noqa: BLE001
             continue
-        key = (sym, at.date().isoformat())
+        tag = (m.get("sentiment") or "").lower()
+        out.append({"id": m["id"], "sym": sym, "yf": y, "at": at.isoformat(), "tag": tag if tag in ("bullish", "bearish") else None,
+                    "body": (m.get("body") or "")[:280], "likes": int(m.get("likes") or 0)})
+    return out
+
+
+def calls_from(posts: list[dict[str, Any]], reads: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Posts -> calls, one per ticker per ET day (the first that day). The author's tag is the side of record;
+    an untagged post counts only when the model read it as a call with AI_MIN_CALL confidence. The model's
+    time frame, when it is sure enough, sets how many sessions later the call is judged."""
+    reads = reads or {}
+    seen: set[tuple[str, str]] = set()
+    out = []
+    for p in sorted(posts, key=lambda x: x.get("at") or ""):
+        rd = reads.get(str(p["id"])) or {}
+        side = p.get("tag")
+        src = "tag"
+        if not side:
+            if rd.get("call") in ("bullish", "bearish") and (rd.get("call_conf") or 0) >= AI_MIN_CALL:
+                side, src = rd["call"], "ai"
+            else:
+                continue
+        hz = rd.get("horizon") if (rd.get("horizon_conf") or 0) >= AI_MIN_HORIZON else "unclear"
+        key = (p["sym"], p["at"][:10])
         if key in seen:
             continue
         seen.add(key)
-        out.append({"sym": sym, "yf": y, "side": side, "at": at.isoformat(), "id": m.get("id"), "body": m.get("body") or "", "likes": int(m.get("likes") or 0)})
+        out.append({**p, "side": side, "src": src, "horizon": hz or "unclear", "h": HORIZON_SESSIONS.get(hz or "unclear", HORIZON)})
     return out
 
 
@@ -125,11 +149,12 @@ def score_calls(calls: list[dict[str, Any]], closes: dict[str, list[tuple[str, f
             c["status"] = "no_price"; continue
         after_close = at.hour >= 16 or at.weekday() >= 5
         idx = next((i for i, (day, _) in enumerate(series) if (day > d) or (day == d and not after_close)), None)
-        if idx is None or idx + HORIZON >= len(series):
+        h = int(c.get("h") or HORIZON)
+        if idx is None or idx + h >= len(series):
             c["status"] = "open"; continue
-        e, x = series[idx][1], series[idx + HORIZON][1]
+        e, x = series[idx][1], series[idx + h][1]
         ret = (x / e - 1) * 100 if e else 0.0
-        c.update(entry=round(e, 4), exit=round(x, 4), ret=round(ret, 2), entry_day=series[idx][0], exit_day=series[idx + HORIZON][0])
+        c.update(entry=round(e, 4), exit=round(x, 4), ret=round(ret, 2), entry_day=series[idx][0], exit_day=series[idx + h][0])
         if abs(ret) < WASH:
             c["status"] = "wash"; continue
         c["status"] = "scored"
@@ -145,7 +170,8 @@ def summarize(user: dict[str, Any], calls: list[dict[str, Any]]) -> dict[str, An
     return {**user, "calls": len(calls), "scored": n, "hits": hits, "hit_rate": round(hits / n, 3) if n else None,
             "hit_low": round(wilson_low(hits, n), 3), "bull_share": round(bulls / len(calls), 3) if calls else None,
             "avg_ret_hit": round(sum(abs(c["ret"]) for c in sc if c["hit"]) / hits, 2) if hits else None,
-            "first_call": calls[0]["at"] if calls else None, "last_call": calls[-1]["at"] if calls else None}
+            "first_call": calls[0]["at"] if calls else None, "last_call": calls[-1]["at"] if calls else None,
+            "ai_calls": sum(1 for c in calls if c.get("src") == "ai")}
 
 
 def consensus(traders: list[dict[str, Any]], calls_by_user: dict[str, list[dict[str, Any]]], now: datetime | None = None) -> dict[str, Any]:

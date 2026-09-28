@@ -41,6 +41,15 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 **Day and intraday traders.** The morning briefing's levels for SPY and QQQ, the Intraday direction card every 15 minutes, the Scanner, Small-cap runners, and the "Where the big money is moving" panel. Trade the levels, not the words.
 
 
+
+## Company map (menu: Company map)
+
+Type a company (NVIDIA, TSLA, Apple) and press Map it. A bubble opens into a map you can drag and zoom: customers on the right, suppliers on the left, partners on top, rivals below, risks and big shareholders around them. A dashed red ring marks a single point of failure, such as TSMC for NVIDIA. Click any company on the map to map it next. Below the map: why it is critical and where it could break (each with the fact behind it), where the money went last year (revenue to costs, profit, taxes, buybacks and capacity), four years of growth, the balance sheet, its biggest customers quoted from its latest annual report on SEC EDGAR, the capital spending of its biggest customers, what the price assumes, and who owns it. Foreign companies' statements are converted to US dollars at today's rate. The supply-chain connections come from OneView's map built from public filings and reporting; companies outside it show their industry peers and holders instead.
+
+## Market context
+
+One screen: the primary trend of the S&P 500 with the macro backdrop, an asset race over 1, 3, 6 or 12 months, the yield curve and its shape, breadth rings (how many stocks are above their 20, 50 and 200-day averages), a rotation map that sorts sectors into leading, improving, weakening and lagging, the risk radar, and the weekly index charts. The full tables are one click away at the bottom.
+
 ## The crowd and the betting markets (Overview, and inside each Watchlist name)
 
 - **The crowd (StockTwits).** Each score compares today's mood with that stock's normal: 50 is a normal day. OneView reads about **200 recent posts** per name for SPY, QQQ, IWM, DIA and the most-discussed names, shows the bull/bear split, how it moved between the older and newer half of the sample, the hot topics and a few clean posts from each side. Pick any watchlist name from the "Your watchlist" menu, or open it on the Watchlist page; the first look at a name takes about half a minute.

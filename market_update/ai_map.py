@@ -1,0 +1,77 @@
+"""A curated map of the AI build-out: who supplies, buys from, partners with and competes with whom.
+
+Built from public filings and widely reported relationships (reviewed September 2026). It carries no numbers,
+only who is connected and why, plus flags for single points of failure. Numbers on the Company map come from
+the statements and filings at request time. Edges are directed "a -> b" meaning "a does this for b".
+Types: supplies, customer (a buys from b), partner, rival, risk.
+"""
+from __future__ import annotations
+
+NODES = {
+    "NVDA": ("NVIDIA", "chips"), "AMD": ("AMD", "chips"), "INTC": ("Intel", "chips"), "AVGO": ("Broadcom", "chips"),
+    "MRVL": ("Marvell", "chips"), "QCOM": ("Qualcomm", "chips"), "AAPL": ("Apple", "devices"),
+    "TSM": ("TSMC", "foundry"), "ASML": ("ASML", "equipment"), "AMAT": ("Applied Materials", "equipment"), "LRCX": ("Lam Research", "equipment"),
+    "000660.KS": ("SK hynix", "memory"), "MU": ("Micron", "memory"), "005930.KS": ("Samsung", "memory"),
+    "AMKR": ("Amkor", "packaging"), "2317.TW": ("Foxconn", "servers"), "2382.TW": ("Quanta", "servers"),
+    "DELL": ("Dell", "servers"), "SMCI": ("Supermicro", "servers"), "HPE": ("HPE", "servers"),
+    "VRT": ("Vertiv", "power & cooling"), "ETN": ("Eaton", "power & cooling"), "CEG": ("Constellation Energy", "power"),
+    "ANET": ("Arista", "networking"), "CSCO": ("Cisco", "networking"),
+    "MSFT": ("Microsoft", "cloud"), "META": ("Meta", "cloud"), "GOOGL": ("Alphabet", "cloud"), "AMZN": ("Amazon", "cloud"),
+    "ORCL": ("Oracle", "cloud"), "CRWV": ("CoreWeave", "cloud"), "TSLA": ("Tesla", "autos & AI"),
+    "OPENAI": ("OpenAI (private)", "AI labs"), "XAI": ("xAI (private)", "AI labs"), "HUAWEI": ("Huawei (private)", "chips"),
+    "EXPORT": ("US export controls", "policy"), "TAIWAN": ("Taiwan concentration", "geography"),
+}
+
+# (from, to, type, weight 1-5, why, critical) — critical marks a single point of failure for the "to" side
+EDGES = [
+    ("TSM", "NVDA", "supplies", 5, "Makes every leading NVIDIA GPU and packages them with its CoWoS technology. There is no second source at this level.", True),
+    ("000660.KS", "NVDA", "supplies", 4, "The main supplier of the high-bandwidth memory stacked next to each GPU.", True),
+    ("MU", "NVDA", "supplies", 3, "Second supplier of high-bandwidth memory.", False),
+    ("005930.KS", "NVDA", "supplies", 2, "Memory supplier, qualifying more high-bandwidth memory.", False),
+    ("2317.TW", "NVDA", "partner", 3, "Assembles NVIDIA's rack-scale systems for the big clouds.", False),
+    ("2382.TW", "NVDA", "partner", 3, "Builds NVIDIA-based servers and racks for cloud customers.", False),
+    ("VRT", "NVDA", "partner", 2, "Power and liquid cooling for NVIDIA's densest racks.", False),
+    ("MSFT", "NVDA", "customer", 5, "One of the largest buyers of NVIDIA systems for Azure and OpenAI.", False),
+    ("META", "NVDA", "customer", 5, "Buys NVIDIA GPUs by the hundreds of thousands for its AI models.", False),
+    ("GOOGL", "NVDA", "customer", 4, "Buys NVIDIA GPUs for Google Cloud while building its own TPU chips.", False),
+    ("AMZN", "NVDA", "customer", 4, "Buys NVIDIA GPUs for AWS while building its own Trainium chips.", False),
+    ("ORCL", "NVDA", "customer", 4, "Building giant NVIDIA clusters, including for OpenAI.", False),
+    ("CRWV", "NVDA", "customer", 3, "A cloud built almost entirely on NVIDIA GPUs; NVIDIA is also an investor.", False),
+    ("OPENAI", "NVDA", "customer", 4, "Trains on NVIDIA systems through Microsoft, Oracle and others, with a direct supply deal.", False),
+    ("XAI", "NVDA", "customer", 2, "Runs one of the largest single NVIDIA clusters.", False),
+    ("TSLA", "NVDA", "customer", 2, "Buys NVIDIA GPUs for self-driving training.", False),
+    ("DELL", "NVDA", "customer", 3, "Server maker reselling NVIDIA systems to companies.", False),
+    ("SMCI", "NVDA", "customer", 3, "Server maker building NVIDIA-based racks.", False),
+    ("HPE", "NVDA", "customer", 2, "Server maker selling NVIDIA systems.", False),
+    ("AMD", "NVDA", "rival", 4, "The main GPU rival, winning share with its MI-series chips.", False),
+    ("AVGO", "NVDA", "rival", 4, "Designs custom AI chips for Google, Meta and OpenAI that replace some GPUs.", False),
+    ("MRVL", "NVDA", "rival", 2, "Designs custom AI chips for Amazon and Microsoft.", False),
+    ("GOOGL", "NVDA", "rival", 3, "Its TPU chips run much of Google's own AI.", False),
+    ("AMZN", "NVDA", "rival", 2, "Trainium chips aim to cut its NVIDIA bill.", False),
+    ("HUAWEI", "NVDA", "rival", 3, "The main alternative inside China.", False),
+    ("INTC", "NVDA", "partner", 1, "Partner on PC and data-center chips after NVIDIA's investment; a small rival in AI accelerators.", False),
+    ("ANET", "NVDA", "rival", 2, "Competes with NVIDIA's own networking in AI data centers.", False),
+    ("EXPORT", "NVDA", "risk", 4, "US rules limit which chips can be sold to China.", False),
+    ("TAIWAN", "NVDA", "risk", 4, "Almost all of its leading chips are made and packaged in Taiwan.", True),
+    ("ASML", "TSM", "supplies", 5, "The only maker of the EUV machines needed for leading-edge chips.", True),
+    ("AMAT", "TSM", "supplies", 3, "Chip-making equipment.", False), ("LRCX", "TSM", "supplies", 3, "Etch and deposition equipment.", False),
+    ("TSM", "AMD", "supplies", 5, "Makes AMD's leading CPUs and GPUs.", True), ("TSM", "AAPL", "supplies", 5, "Makes every Apple-designed chip.", True),
+    ("TSM", "AVGO", "supplies", 4, "Makes Broadcom's custom AI chips.", True), ("TSM", "QCOM", "supplies", 4, "Makes Qualcomm's leading chips.", False),
+    ("TSM", "MRVL", "supplies", 4, "Makes Marvell's custom chips.", True),
+    ("000660.KS", "AMD", "supplies", 3, "High-bandwidth memory for AMD GPUs.", False), ("MU", "AMD", "supplies", 3, "High-bandwidth memory for AMD GPUs.", False),
+    ("MSFT", "AMD", "customer", 3, "Buys AMD MI-series GPUs for Azure.", False), ("META", "AMD", "customer", 4, "A large buyer of AMD MI-series GPUs.", False),
+    ("ORCL", "AMD", "customer", 3, "Building AMD GPU clusters.", False), ("OPENAI", "AMD", "customer", 4, "Multi-year GPU supply deal with AMD.", False),
+    ("GOOGL", "AVGO", "customer", 5, "Broadcom co-designs Google's TPU chips.", False), ("META", "AVGO", "customer", 4, "Custom AI chips co-designed with Broadcom.", False),
+    ("OPENAI", "AVGO", "customer", 3, "Custom accelerator program with Broadcom.", False),
+    ("AMZN", "MRVL", "customer", 4, "Custom AI and networking chips.", False), ("MSFT", "MRVL", "customer", 3, "Custom AI chip work.", False),
+    ("OPENAI", "MSFT", "partner", 5, "Microsoft's biggest AI partner and investment.", False), ("OPENAI", "ORCL", "customer", 5, "A huge multi-year cloud contract (Stargate).", False),
+    ("MSFT", "CRWV", "customer", 4, "CoreWeave's largest customer.", True), ("OPENAI", "CRWV", "customer", 4, "Multi-year compute contract.", False),
+    ("VRT", "MSFT", "partner", 2, "Power and cooling for Microsoft data centers.", False), ("VRT", "META", "partner", 2, "Power and cooling for Meta data centers.", False),
+    ("ETN", "MSFT", "partner", 2, "Electrical gear for data centers.", False), ("CEG", "MSFT", "supplies", 3, "Nuclear power deal for Microsoft data centers.", False),
+    ("ANET", "META", "partner", 3, "Networking for Meta's AI clusters.", False), ("ANET", "MSFT", "partner", 3, "Networking for Azure AI clusters.", False),
+    ("2317.TW", "AAPL", "partner", 5, "Assembles most iPhones.", True), ("QCOM", "AAPL", "supplies", 2, "Modems, being replaced by Apple's own.", False),
+    ("NVDA", "TSLA", "supplies", 2, "GPUs for training.", False), ("NVDA", "DELL", "supplies", 5, "The GPUs inside Dell's AI servers.", True), ("NVDA", "SMCI", "supplies", 5, "The GPUs inside Supermicro's AI servers.", True),
+    ("NVDA", "HPE", "supplies", 4, "The GPUs inside HPE's AI servers.", True), ("NVDA", "CRWV", "supplies", 5, "Almost all of CoreWeave's compute.", True),
+    ("TAIWAN", "TSM", "risk", 5, "Most of its capacity is in Taiwan.", True), ("EXPORT", "AMD", "risk", 3, "China export limits apply to AI chips.", False),
+    ("TSM", "INTC", "supplies", 3, "Makes some of Intel's chips while Intel rebuilds its own factories.", False),
+]

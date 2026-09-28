@@ -951,3 +951,45 @@ INTRADAY_DIRECTION_QUESTIONS = {
         },
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Top traders: what a single StockTwits post actually calls, and over what time frame.
+# State: {"ticker": the ticker the post is scored on, "post": the text, "author_tag": "Bullish" | "Bearish" | "none"}
+# The author's own tag, when present, stays the side of record; the model supplies the side for untagged
+# posts (only when confident) and the time frame for every post, so a day trade is not judged a week later.
+# ---------------------------------------------------------------------------
+POST_QUESTIONS = {
+    "call": Choice(
+        instructions=(
+            "A trader wrote `post` on StockTwits. Does the author take a directional stance on the price of `ticker`? "
+            "Judge the author's own view of `ticker`, not the news they quote and not other tickers they mention. "
+            "`author_tag` is the tag the author attached, or none."
+        ),
+        criteria={
+            "bullish": {
+                "what": "The author expects `ticker` to rise, or says they bought shares or calls, added, or are holding long.",
+                "examples": ["$X loading 230 calls for Friday, this breaks out", "bought more $X on the dip", "$X to 300 by year end"],
+            },
+            "bearish": {
+                "what": "The author expects `ticker` to fall, or says they bought puts, are short, or sold to avoid a drop.",
+                "examples": ["$X puts printing, this is going to 200", "shorted $X at the open", "$X topping, get out"],
+            },
+            "no_call": {
+                "what": "No stance on `ticker`'s price.",
+                "not_for": "A clear stance written in slang still counts as bullish or bearish.",
+                "examples": ["a question such as 'why is $X down?'", "a headline or news with no opinion", "a joke, meme or insult",
+                             "a view on a different ticker", "sarcasm whose meaning is unclear", "a general comment about trading"],
+            },
+        },
+    ),
+    "horizon": Choice(
+        instructions="If the author takes a stance, over what time frame do they expect the move in `ticker`?",
+        criteria={
+            "intraday": "Today or the next session: a day trade, same-day or next-day options, 'into the close', 'at the open tomorrow'.",
+            "days_to_weeks": "The next several days to a few weeks: a swing trade, this week's or next week's options, 'by Friday', 'next week', 'into earnings'.",
+            "months_plus": "Months or longer: a long-term hold, 'by the end of the year', a year such as 2027, investing for the long run.",
+            "unclear": "No time frame is stated or implied, or the post takes no stance.",
+        },
+    ),
+}
