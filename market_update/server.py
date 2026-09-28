@@ -816,6 +816,7 @@ async def _startup() -> None:
     asyncio.create_task(direction_loop())
     asyncio.create_task(stocktwits_loop())
     asyncio.create_task(odds_loop())
+    asyncio.create_task(pros_loop())
     asyncio.create_task(desk_loop())
     asyncio.create_task(live_scanner())
 
@@ -1691,7 +1692,17 @@ def _st_talk(sym: str, sid: str | None, want: int = ST_SAMPLE, urgent: bool = Fa
         return {"bull": b, "bear": r2, "bull_share": round(b / (b + r2) * 100) if b + r2 else None, "from": part[-1].get("created_at") if part else None, "to": part[0].get("created_at") if part else None}
     half = len(msgs) // 2
     newer, older = share(msgs[:half]), share(msgs[half:])
+    # the mood through the sample, oldest slice first, so the right end of the chart is now
+    chron = list(reversed(msgs)); step = max(10, len(chron) // 10)
+    timeline = []
+    for i in range(0, len(chron), step):
+        part = chron[i:i + step]
+        b = sum(1 for m in part if (m.get("sentiment") or "").lower() == "bullish"); r3 = sum(1 for m in part if (m.get("sentiment") or "").lower() == "bearish")
+        timeline.append({"to": part[-1].get("created_at"), "bull": b, "bear": r3, "share": round(b / (b + r3) * 100) if b + r3 else None})
+    latest = chron[-50:]
+    lb = sum(1 for m in latest if (m.get("sentiment") or "").lower() == "bullish"); lr = sum(1 for m in latest if (m.get("sentiment") or "").lower() == "bearish")
     return {"symbol": sym, "posts": len(msgs), "bull": bull, "bear": bear, "untagged": len(msgs) - tagged, "newer": newer, "older": older,
+            "timeline": timeline, "last50": {"bull": lb, "bear": lr, "share": round(lb / (lb + lr) * 100) if lb + lr else None},
             "bull_share": round(bull / tagged * 100) if tagged else None,
             "topics": [{"key": k, "label": labels[k], "n": n} for k, n in sorted(topics.items(), key=lambda x: -x[1]) if n >= 2][:5],
             "also": [{"symbol": k, "n": n} for k, n in sorted(co.items(), key=lambda x: -x[1]) if n >= 2][:6],
@@ -1957,6 +1968,114 @@ def _odds_sync() -> dict[str, Any]:
     out = {"as_of": time.time(), "market": market, "tickers": tickers, "index": {k: (v or {}).get("last") for k, v in idx.items()}}
     fetch._cache_put("odds_snapshot", out)
     return out
+
+
+# ---- top traders: the most-engaged StockTwits accounts, scored on their own calls --------------------------
+def _st_user_messages(user: str, sid: str | None, want: int = 150) -> list[dict[str, Any]]:
+    msgs: list[dict[str, Any]] = []
+    cursor = None
+    seen: set[Any] = set()
+    for _ in range(8):
+        args: dict[str, Any] = {"user": user, "limit": 50}
+        if cursor:
+            args["max"] = cursor
+        try:
+            res = _st_text(st_call("get_user_messages", args, sid)) or {}
+        except Exception as e:  # noqa: BLE001
+            log.info("stocktwits user %s: %s", user, e); break
+        batch = [m for m in (res.get("messages") or []) if m.get("id") not in seen] if isinstance(res, dict) else []
+        if not batch:
+            break
+        for m in batch:
+            seen.add(m.get("id"))
+        msgs += batch
+        c = res.get("cursor") or {}
+        nxt = c.get("max") if isinstance(c, dict) else None
+        cursor = nxt if nxt and nxt != cursor else batch[-1].get("id")
+        if len(msgs) >= want or res.get("more") is False:
+            break
+    return msgs[:want]
+
+
+def _pros_sync() -> dict[str, Any]:
+    from . import pros
+    t0 = time.time()
+    sid = st_open()
+    found = pros.discover(lambda sym: _st_messages(sym, sid, 200), lambda name: bool(_ST_BLOCK.search(name or "")))
+    cands = found[:pros.CANDIDATES]
+    calls_by_user: dict[str, list[dict[str, Any]]] = {}
+    for u in cands:
+        calls_by_user[u["username"]] = pros.calls_from(_st_user_messages(u["username"], sid, pros.USER_POSTS))
+    syms = sorted({c["yf"] for cs in calls_by_user.values() for c in cs})
+    closes: dict[str, list[tuple[str, float]]] = {}
+    if syms:
+        df = fetch.fetch_history(syms, period="1y")
+        for y in syms:
+            try:
+                col = df[(y, "Close")] if (y, "Close") in df.columns else (df["Close"] if len(syms) == 1 else None)
+                if col is None:
+                    continue
+                col = col.dropna()
+                closes[y] = [(d.strftime("%Y-%m-%d"), float(v)) for d, v in col.items()]
+            except Exception:  # noqa: BLE001
+                continue
+    summaries = []
+    for u in cands:
+        cs = pros.score_calls(calls_by_user[u["username"]], closes)
+        sm = pros.summarize(u, cs)
+        sm["receipts"] = [{k: c.get(k) for k in ("sym", "side", "at", "ret", "hit", "entry_day", "exit_day", "id")} for c in cs if c.get("status") == "scored"][-6:]
+        summaries.append(sm)
+    qualified = sorted([x for x in summaries if x["scored"] >= pros.MIN_SCORED and (x["hit_rate"] or 0) >= pros.MIN_HIT], key=lambda x: (-x["hit_low"], -x["scored"]))[:pros.TOP_N]
+    near = sorted([x for x in summaries if x not in qualified and x["scored"] >= 6], key=lambda x: -x["hit_low"])[:10]
+    cons = pros.consensus(qualified, calls_by_user)
+    for row in cons["latest"]:
+        q = _st_clean_quote(row.pop("body", ""), row["sym"], [row["sym"]])
+        row["text"] = q
+    out = {"as_of": time.time(), "took_s": round(time.time() - t0), "discovered": len(found), "candidates": len(cands),
+           "calls": sum(len(v) for v in calls_by_user.values()), "scored": sum(x["scored"] for x in summaries),
+           "qualified": qualified, "near": near, "consensus": cons,
+           "method": {"horizon_sessions": pros.HORIZON, "min_scored": pros.MIN_SCORED, "min_hit": pros.MIN_HIT, "wash_pct": pros.WASH,
+                      "symbols": pros.DISCOVERY_SYMBOLS, "posts_per_symbol": 200, "posts_per_trader": pros.USER_POSTS}}
+    fetch._cache_put("pros_snapshot", out)
+    try:
+        (config.OUTPUT_DIR / "pros.json").write_text(json.dumps(out, default=str))
+    except Exception:  # noqa: BLE001
+        pass
+    log.info("top traders: %d found, %d scored, %d qualify (%.0f s)", len(found), len(cands), len(qualified), time.time() - t0)
+    return out
+
+
+async def pros_loop() -> None:
+    """Twice a day (06:00 and 17:30 ET) and at start-up when the last run is older than 20 hours."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            if not _st_load().get("access_token"):
+                await asyncio.sleep(600); continue
+            snap = state.get("pros") or fetch._cache_get("pros_snapshot", 20 * 3600)
+            now = fetch.now_et(); slot = now.strftime("%Y-%m-%d") + ("am" if now.hour < 12 else "pm")
+            due = not snap or (now.hour in (6, 17) and (now.hour == 6 or now.minute >= 30) and state.get("pros_slot") != slot)
+            if snap and not state.get("pros"):
+                state["pros"] = snap
+            if due and not state.get("pros_running"):
+                state["pros_running"] = True
+                try:
+                    state["pros"] = await asyncio.to_thread(_pros_sync); state["pros_slot"] = slot
+                finally:
+                    state["pros_running"] = False
+        except Exception:  # noqa: BLE001
+            log.exception("top traders loop error"); state["pros_running"] = False
+        await asyncio.sleep(300)
+
+
+@app.get("/api/pros")
+async def api_pros(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    snap = state.get("pros") or fetch._cache_get("pros_snapshot", 48 * 3600)
+    if not snap:
+        return JSONResponse({"status": "warming", "running": bool(state.get("pros_running"))}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", "running": bool(state.get("pros_running")), **snap}, headers={"Cache-Control": "no-store"})
 
 
 async def odds_loop() -> None:

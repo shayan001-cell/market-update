@@ -531,6 +531,103 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= HERO: the crowd right now, the top traders, the big bets =======================
+  let prosSnap = null;
+  async function pollPros() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/pros", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") { prosSnap = prosSnap || j; return; } prosSnap = j;
+      if (currentView === "home" && report) { refreshPulse("pros"); refreshPulse("gauge"); const el = $(".pros"); const tmp = document.createElement("div"); tmp.innerHTML = secPros(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const a = $(".crowd") || $(".home-hero"); if (a) a.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
+    } catch (e) { /* server restarting */ }
+  }
+  const leanWord = (share) => (!isNum(share) ? ["No read", "flat"] : share >= 65 ? ["Bullish", "up"] : share >= 55 ? ["Leaning bullish", "up"] : share <= 35 ? ["Bearish", "down"] : share <= 45 ? ["Leaning bearish", "down"] : ["Split", "flat"]);
+  function timelineBars(tl, id) {
+    const pts = (tl || []).filter((x) => isNum(x.share)); if (pts.length < 2) return "";
+    const W = 300, H = 64, bw = W / pts.length;
+    const bars = pts.map((x, i) => { const h = Math.max(3, (x.share / 100) * (H - 14)); const c = x.share >= 55 ? "up" : x.share <= 45 ? "down" : "flat";
+      return `<rect class="${c}" x="${(i * bw + 2).toFixed(1)}" y="${(H - 12 - h).toFixed(1)}" width="${(bw - 4).toFixed(1)}" height="${h.toFixed(1)}" rx="3"><title>${x.bull} bullish, ${x.bear} bearish · to ${esc(agoShort(x.to))}</title></rect>`; }).join("");
+    const y50 = H - 12 - (H - 14) / 2;
+    return `<svg class="tl-bars" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Bullish share of posts through the sample, oldest on the left, now on the right">${bars}<line x1="0" x2="${W}" y1="${y50.toFixed(1)}" y2="${y50.toFixed(1)}" class="tl-50"/><text x="2" y="${H - 1}">older</text><text x="${W - 2}" y="${H - 1}" text-anchor="end">now</text></svg>`;
+  }
+  function heroCrowdCol(sym, name) {
+    const t = crowd && crowd.talk && crowd.talk[sym]; const mood = crowd && crowd.moods && crowd.moods[sym];
+    if (!t) return `<div class="hc-col"><div class="hc-h"><b>${sym}</b><i>${name}</i></div><div class="cr-loading">Reading the latest posts…</div></div>`;
+    const last = t.last50 && isNum(t.last50.share) ? t.last50 : { share: t.newer && t.newer.bull_share, bull: t.newer && t.newer.bull, bear: t.newer && t.newer.bear };
+    const w = leanWord(last.share); const wk = mood ? crowdWordFor(mood) : null;
+    const q = (t.quotes.bull[0] && t.quotes.bear[0]) ? [t.quotes.bull[0], t.quotes.bear[0]] : [t.quotes.bull[0] || t.quotes.bear[0]].filter(Boolean);
+    return `<div class="hc-col">
+      <div class="hc-h"><b>${sym}</b><i>${name}</i><span class="hc-n">${t.posts} posts · ${esc(spanWords(t))}</span></div>
+      <div class="hc-word ${w[1]}">${w[0]}<small>right now</small></div>
+      <div class="hc-now">Latest ${last.bull + last.bear} tagged posts: <b class="up">${last.bull} bullish</b> · <b class="down">${last.bear} bearish</b></div>
+      ${timelineBars(t.timeline)}
+      ${wk && isNum(mood.score) ? `<div class="hc-week">Week mood vs normal: <b class="${wk[1]}">${wk[0].toLowerCase()}</b> (${mood.score}/100)${wk[1] !== w[1] && w[1] !== "flat" ? ' · <em>the latest chatter is going against it</em>' : ""}</div>` : ""}
+      ${q.map((m) => `<blockquote class="hc-q ${t.quotes.bull.includes(m) ? "up" : "down"}">${esc(m.text.length > 120 ? m.text.slice(0, 117).replace(/\s+\S*$/, "") + "…" : m.text)}<span>${agoShort(m.at)}</span></blockquote>`).join("")}
+    </div>`;
+  }
+  function heroCrowd(r) {
+    if (!crowd || crowd.status !== "ok") return `<article class="pz pz-crowd" data-pz="crowd"><div class="pz-h"><span class="pz-eye">What people are saying</span></div><div class="cr-loading">Reading StockTwits…</div></article>`;
+    return `<article class="pz pz-crowd" data-pz="crowd">
+      <div class="pz-h"><span class="pz-eye">What people are saying</span><a class="pz-hint pz-jump" href="#crowd" data-jump=".crowd">StockTwits · all names ↓</a></div>
+      <div class="hc-grid">${heroCrowdCol("SPY", "S&P 500")}${heroCrowdCol("QQQ", "Nasdaq 100")}</div>
+    </article>`;
+  }
+  const handleLink = (u) => `<a class="tr-h" href="https://stocktwits.com/${encodeURIComponent(u)}" target="_blank" rel="noopener">@${esc(u)}</a>`;
+  function heroPros(r) {
+    const p = prosSnap;
+    if (!p || p.status !== "ok") return `<article class="pz pz-pros" data-pz="pros"><div class="pz-h"><span class="pz-eye">Top traders · measured</span></div>
+      <p class="pl-lede">OneView is scoring the most-followed StockTwits traders on every call they made: did the price go their way over the next five sessions? The first run takes about 15 minutes.</p><div class="cr-loading">Scoring the calls…</div></article>`;
+    const q = p.qualified || [], c = p.consensus || {};
+    const lean = (sym) => (c.tickers || []).find((x) => x.sym === sym);
+    const row = (sym, name) => { const x = lean(sym); if (!x) return `<div class="tp-lean"><b>${sym}</b><span class="muted">no calls in ${c.window_h || 72} h</span></div>`;
+      const sh = isNum(x.lean) ? Math.round(x.lean * 100) : 50; const w = leanWord(sh);
+      return `<div class="tp-lean"><b>${sym}</b><div class="cr-split"><i class="up" style="width:${sh}%"></i><i class="down" style="width:${100 - sh}%"></i></div><span class="${w[1]}">${w[0]}</span><em>${x.bull} bull · ${x.bear} bear · ${x.traders} ${x.traders === 1 ? "trader" : "traders"}</em></div>`; };
+    const others = (c.tickers || []).filter((x) => !["SPY", "QQQ"].includes(x.sym)).slice(0, 6).map((x) => { const sh = isNum(x.lean) ? Math.round(x.lean * 100) : 50; return `<span class="tp-chip ${sh >= 55 ? "up" : sh <= 45 ? "down" : "flat"}" data-ticker-page="${esc(x.sym)}">$${esc(x.sym)}<i>${x.bull}↑ ${x.bear}↓</i></span>`; }).join("");
+    const latest = (c.latest || []).filter((x) => x.text).slice(0, 3).map((x) => `<li><div>${handleLink(x.username)}<span class="tr-rate">${Math.round(x.hit_rate * 100)}% of ${x.scored}</span><span class="tr-call ${x.side === "bullish" ? "up" : "down"}">${x.side} $${esc(x.sym)}</span><span class="tr-at">${agoShort(x.at)}</span></div><p>${esc(x.text.length > 130 ? x.text.slice(0, 127).replace(/\s+\S*$/, "") + "…" : x.text)}</p></li>`).join("");
+    return `<article class="pz pz-pros" data-pz="pros">
+      <div class="pz-h"><span class="pz-eye">Top traders · measured</span><a class="pz-hint pz-jump" href="#pros" data-jump=".pros">the leaderboard ↓</a></div>
+      <p class="pl-lede"><b>${q.length}</b> of the ${p.candidates} most-followed StockTwits traders have a <b>measured hit rate of ${Math.round((p.method || {}).min_hit * 100 || 70)}%+</b> on ${(p.method || {}).min_scored || 12}+ scored calls. ${c.active || 0} of them posted a call in the last ${c.window_h || 72} hours.</p>
+      ${q.length ? `${row("SPY", "S&P 500")}${row("QQQ", "Nasdaq 100")}${others ? `<div class="tp-others"><span class="cr-lbl">Also on their screens</span><div class="cr-topics">${others}</div></div>` : ""}${latest ? `<ul class="tp-latest">${latest}</ul>` : ""}` : `<div class="cr-none">No trader cleared the bar on this run. The leaderboard below shows who came closest.</div>`}
+    </article>`;
+  }
+  function heroBets(r) {
+    const m = oddsSnap && oddsSnap.market;
+    if (!m) return `<article class="pz pz-bets" data-pz="bets"><div class="pz-h"><span class="pz-eye">The big bets</span></div><div class="cr-loading">Reading Polymarket and Kalshi…</div></article>`;
+    const color = (l) => (/increase|hike/i.test(l) ? "down" : /decrease|cut/i.test(l) ? "up" : "flat");
+    const fed = m.fed; const top = fed && fed.options[0];
+    const line = (lbl, p, sub, c) => `<div class="hb-line"><span>${lbl}</span><b class="${c}">${pc(p)}</b><em>${sub}</em></div>`;
+    return `<article class="pz pz-bets" data-pz="bets">
+      <div class="pz-h"><span class="pz-eye">The big bets · real money</span><a class="pz-hint pz-jump" href="#odds" data-jump=".odds">all markets ↓</a></div>
+      ${fed ? `<div class="hb-fed"><span class="hb-t">${esc(fed.title.replace("?", ""))}</span><div class="hb-big ${color(top.label)}">${pc(top.p)}<small>${esc(top.label.toLowerCase())}</small></div>
+        <div class="od-stack">${fed.options.filter((x) => x.p >= 0.005).map((x) => `<i class="${color(x.label)}" style="width:${(x.p * 100).toFixed(1)}%" title="${esc(x.label)} ${pc(x.p)}"></i>`).join("")}</div>
+        <div class="hb-opts">${fed.options.filter((x) => x.p >= 0.02).slice(0, 3).map((x) => `<span><i class="od-dot ${color(x.label)}"></i>${esc(x.label)} <b>${pc(x.p)}</b></span>`).join("")}</div>
+        <div class="od-foot">${usd(fed.volume)} traded · Polymarket</div></div>` : ""}
+      ${m.spx_close ? line("S&amp;P 500 closes above today's " + fnum(m.spx_close.spot, 0), m.spx_close.p_above_spot, esc((m.spx_close.when || "").replace(/^On /, "")) + " · " + usd(m.spx_close.volume), m.spx_close.p_above_spot >= 0.55 ? "up" : m.spx_close.p_above_spot <= 0.45 ? "down" : "flat") : ""}
+      ${m.recession ? line("US recession by the end of 2026", m.recession.p, usd(m.recession.volume) + " traded", m.recession.p >= 0.3 ? "down" : "up") : ""}
+      ${m.spx_year && m.spx_year.up && m.spx_year.up[0] ? line("S&amp;P 500 hits " + fnum(m.spx_year.up[0].k, 0) + " by December", m.spx_year.up[0].p, usd(m.spx_year.volume) + " traded", "flat") : ""}
+    </article>`;
+  }
+  function heroMini(r) {
+    return ["SPY", "QQQ", "IWM", "DIA"].map((sym) => { const x = idxOf(r, sym); if (!x) return ""; const closes = (x.ohlc || []).slice(-20).map((c) => c.c);
+      return `<button type="button" class="hm-chip" data-ticker-page="${sym}" title="${IDX_NAMES[sym]}"><b>${sym}</b>${priceHtml(sym, x)}${spark(closes, closes.length > 1 ? cls(closes[closes.length - 1] - closes[0]) : "flat")}</button>`; }).join("");
+  }
+  // the traders' leaderboard, the method and the receipts, further down the page
+  function secPros(r) {
+    const p = prosSnap; if (!p || p.status !== "ok") return "";
+    const q = p.qualified || [], m = p.method || {};
+    const rows = q.map((t, i) => `<tr><td class="tp-rank">${i + 1}</td><td>${handleLink(t.username)}${t.name && t.name !== t.username ? `<i>${esc(t.name)}</i>` : ""}</td>
+      <td><div class="tp-rate"><span class="tp-bar"><b style="width:${Math.round(t.hit_rate * 100)}%"></b></span><strong>${Math.round(t.hit_rate * 100)}%</strong></div><i>${t.hits} of ${t.scored} calls right</i></td>
+      <td>${Math.round((t.bull_share || 0) * 100)}% bullish<i>${t.calls} calls read</i></td>
+      <td>${t.likes.toLocaleString()} likes<i>on ${t.symbols.length} of the ${m.symbols ? m.symbols.length : 20} big names</i></td>
+      <td class="tp-rc">${(t.receipts || []).slice(-4).map((c) => `<span class="${c.hit ? "up" : "down"}" title="${esc(c.side)} $${esc(c.sym)} on ${esc(c.entry_day)}: ${fpct(c.ret, 1)} in ${m.horizon_sessions} sessions">${c.hit ? "✓" : "✗"} $${esc(c.sym)}</span>`).join("")}</td></tr>`).join("");
+    return `<section class="pros" id="pros">
+      <div class="cr-head"><h3>Top traders, measured <span class="muted">StockTwits · scored ${esc(etTime(p.as_of))} ET · ${p.scored.toLocaleString()} calls scored</span></h3></div>
+      <p class="cr-how">No one publishes verified hit rates for social-media traders, so OneView measures them. We read about ${m.posts_per_symbol || 200} recent posts on each of ${m.symbols ? m.symbols.length : 20} of the most-watched tickers, rank the authors by the likes their posts earn (StockTwits does not share follower counts), and read each leading account's last ${m.posts_per_trader || 150} posts. Every post tagged bullish or bearish is a call: entry at that session's close, result at the close ${m.horizon_sessions || 5} sessions later, one call per ticker per day. A trader makes this list with <b>${m.min_scored || 12}+ scored calls and ${Math.round((m.min_hit || 0.7) * 100)}%+ right</b>. In a rising market, bullish calls win more often, so check the bullish share too.</p>
+      ${rows ? `<div class="od-tablew"><table class="od-table tp-table"><thead><tr><th>#</th><th>Trader</th><th>Hit rate</th><th>Calls</th><th>Following</th><th>Latest results</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="cr-none">No trader cleared ${Math.round((m.min_hit || 0.7) * 100)}% on ${m.min_scored || 12}+ calls in this run.</div>`}
+      ${(p.near || []).length ? `<div class="od-none">Closest below the bar: ${p.near.slice(0, 6).map((t) => `@${esc(t.username)} ${Math.round((t.hit_rate || 0) * 100)}% of ${t.scored}`).join(" · ")}.</div>` : ""}
+      <div class="pz-foot">Past calls do not guarantee future ones. Opinions from public accounts, not advice.</div>
+    </section>`;
+  }
+  document.addEventListener("click", (e) => { const j = e.target.closest("[data-jump]"); if (!j) return; e.preventDefault(); const el = $(j.getAttribute("data-jump")); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); });
+
   // ======================= THE BETTING MARKETS: what people with money on the line expect =======================
   let oddsSnap = null; const oddsExtra = {}; const oddsBusy = new Set();
   const usd = (x) => (!isNum(x) ? "–" : x >= 1e6 ? "$" + (x / 1e6).toFixed(1) + "M" : x >= 1e3 ? "$" + (x / 1e3).toFixed(x >= 1e5 ? 0 : 1) + "K" : "$" + Math.round(x));
@@ -541,6 +638,7 @@
     if (STATIC_MODE) return;
     try { const res = await api("/api/odds", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") return; oddsSnap = j;
       if (currentView === "home" && report) { const el = $(".odds"); const tmp = document.createElement("div"); tmp.innerHTML = secOdds(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const anchor = $(".crowd") || $(".home-hero"); if (anchor) anchor.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
+      if (currentView === "home" && report) refreshPulse("bets");
       if (currentView === "watch") rerenderWatch();
     } catch (e) { /* server restarting */ }
   }
@@ -966,7 +1064,7 @@
   async function pollCrowd() {
     if (STATIC_MODE) return;
     try { const res = await api("/api/stocktwits", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); crowd = j;
-      if (currentView === "home" && report) { refreshPulse("gauge"); const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
+      if (currentView === "home" && report) { refreshPulse("gauge"); refreshPulse("crowd"); const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
   }
   const ST_LABEL = { BULLISH: ["Bullish", "up"], EXTREMELY_BULLISH: ["Extremely bullish", "up"], BEARISH: ["Bearish", "down"], EXTREMELY_BEARISH: ["Extremely bearish", "down"], NEUTRAL: ["Neutral", "flat"] };
   // ======================= THE CROWD (StockTwits): mood versus normal, and what people are saying =======================
@@ -990,19 +1088,20 @@
   }
   function crowdMood(c, sym, name) {
     const x = (c.moods || {})[sym]; if (!x) return "";
-    const w = crowdWordFor(x); const tk = (c.talk || {})[sym]; const hist = (c.history || {})[sym] || [];
-    const wk = hist.length > 1 ? hist[hist.length - 1].v - hist[0].v : null;
-    const now = tk && isNum(tk.bull_share) ? (tk.bull_share >= 60 ? ["leaning bullish", "up"] : tk.bull_share <= 40 ? ["leaning bearish", "down"] : ["split", "flat"]) : null;
-    const clash = now && ((w[1] === "up" && now[1] === "down") || (w[1] === "down" && now[1] === "up"));
+    const wk = crowdWordFor(x); const tk = (c.talk || {})[sym];
+    const last = tk && tk.last50 && isNum(tk.last50.share) ? tk.last50 : null;
+    const w = last ? leanWord(last.share) : wk;
+    const clash = last && wk && ((wk[1] === "up" && w[1] === "down") || (wk[1] === "down" && w[1] === "up"));
     return `<div class="cr-card" data-ticker-page="${esc(sym)}" role="button" tabindex="0">
       <div class="cr-card-h"><span><b>${esc(sym)}</b><i>${esc(name)}</i></span>${x.volume_label ? `<span class="cr-chat" title="How much people are posting versus normal">chatter ${esc(String(x.volume_label).toLowerCase().replace(/_/g, " "))}</span>` : ""}</div>
-      <div class="cr-word ${w[1]}">${w[0]}</div>
-      <div class="cr-scale"><span>bearish</span>${crowdMeter(x.score, w)}<span>bullish</span></div>
-      <div class="cr-nums"><span><b>${isNum(x.score) ? x.score : "–"}</b>/100 vs a normal 50</span>${isNum(wk) ? `<span class="${cls(wk)}">${wk >= 0 ? "+" : ""}${Math.round(wk)} this week</span>` : ""}</div>
-      ${crowdLine(hist)}
-      ${now ? `<div class="cr-now ${clash ? "clash" : ""}"><b>Last ${tk.posts} posts:</b> ${tk.bull} bullish, ${tk.bear} bearish, <span class="${now[1]}">${now[0]}</span>${clash ? ". The latest chatter is going against the week's mood." : "."}</div>` : ""}
+      <div class="cr-word ${w[1]}">${w[0]}<small>${last ? "right now" : "this week"}</small></div>
+      ${last ? `<div class="cr-now2">Latest ${last.bull + last.bear} tagged posts: <b class="up">${last.bull} bullish</b> · <b class="down">${last.bear} bearish</b> · of ${tk.posts} read over ${esc(spanWords(tk))}</div>` : ""}
+      ${tk ? timelineBars(tk.timeline) : ""}
+      <div class="cr-weekrow"><span>Week mood vs normal</span>${crowdMeter(x.score, wk)}<b class="${wk[1]}">${wk[0]} · ${isNum(x.score) ? x.score : "–"}/100</b></div>
+      ${clash ? `<div class="cr-now clash">The latest chatter is going against the week's mood.</div>` : ""}
     </div>`;
   }
+
   // the crowd on names outside the snapshot (the user's watchlist), fetched on demand and kept for 15 minutes
   const crowdExtra = {}; const crowdBusy = new Set();
   async function loadCrowdSym(sym) {
@@ -2216,6 +2315,7 @@
     const ttl = $("#hud-title"), sub = $("#hud-sub");
     if (ttl) { ttl.textContent = currentView === "ticker" ? (tickerSel || "Ticker") : (PAGE_TITLES[currentView] || "Your market overview"); }
     horizonBar();
+    const mini = $("#hud-mini"); if (mini) { mini.hidden = currentView !== "home"; mini.innerHTML = currentView === "home" ? heroMini(r) : ""; }
     if (sub) { sub.innerHTML = `${esc(r.session_label.split(",")[0])} ${esc(r.session_date.slice(5).replace("-", "/"))} · report ${esc(r.generated_at.slice(11, 16))} ET · <span data-qstamp>${quoteStamp()}</span>`; }
     app.innerHTML = viewHtml(r);
     firstRender = false;
@@ -2255,8 +2355,12 @@
     if (ap.length) { const m = ap.reduce((a, g) => a + g.chg_1m, 0) / ap.length; out.push({ k: "Risk appetite", s: scoreOn(m, -5, 5), v: fpct(m, 1), note: "Junk bonds vs Treasuries, small vs large caps, and discretionary vs staples over one month" }); }
     const tp = ((r.regime || {}).tone || {}).probabilities;
     if (tp) { const d = (tp.risk_on || 0) - (tp.risk_off || 0); out.push({ k: "Model read", s: Math.round(50 + 50 * d), v: pretty(r.regime.tone.choice).replace(/^./, (c) => c.toUpperCase()), note: "OneView's read of futures, the fear gauge, rates and headlines" }); }
+    const pl = prosSnap && prosSnap.status === "ok" && ((prosSnap.consensus || {}).tickers || []).find((x) => x.sym === "SPY");
+    if (pl && isNum(pl.lean) && pl.bull + pl.bear >= 3) out.push({ k: "Top traders", s: Math.round(pl.lean * 100), v: `${pl.bull}↑ ${pl.bear}↓`, note: "Calls on SPY in the last 72 hours from the StockTwits traders with a measured 70%+ hit rate, weighted by their records" });
     const cm = crowd && crowd.status === "ok" && (crowd.moods || {}).SPY;
-    if (cm && isNum(cm.score)) out.push({ k: "Crowd", s: Math.round(cm.score), v: `${Math.round(cm.score)}/100`, note: "StockTwits mood on SPY versus its normal (50 = normal). Extremes are a crowding warning, not a signal" });
+    const ct = crowd && crowd.status === "ok" && (crowd.talk || {}).SPY;
+    if (ct && ct.last50 && isNum(ct.last50.share)) out.push({ k: "Crowd now", s: ct.last50.share, v: `${ct.last50.bull}↑ ${ct.last50.bear}↓`, note: "The latest tagged StockTwits posts on SPY: share that are bullish. A crowd at an extreme is a crowding warning, not a signal" });
+    else if (cm && isNum(cm.score)) out.push({ k: "Crowd", s: Math.round(cm.score), v: `${Math.round(cm.score)}/100`, note: "StockTwits mood on SPY versus its normal (50 = normal). Extremes are a crowding warning, not a signal" });
     return out.filter((x) => isNum(x.s));
   }
   function pulseGauge(r) {
@@ -2401,13 +2505,13 @@
     return `<section class="pulse">
       <div class="pulse-head"><span class="pz-live ${r.market_state === "open" ? "on" : ""}"><i></i>${st} · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
         <h2>The market in 10 seconds</h2><p>${pulseLine(r)}</p></div>
-      <div class="pulse-grid">${pulseGauge(r)}${pulseIndexes(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
+      <div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
       <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners</i></div>
     </section>`;
   }
   function refreshPulse(which) {
     if (currentView !== "home" || !report) return;
-    const make = { gauge: pulseGauge, levels: pulseLevels, sectors: pulseSectors }[which]; const el = $(`.pz[data-pz="${which}"]`); if (!make || !el) return;
+    const make = { gauge: pulseGauge, levels: pulseLevels, sectors: pulseSectors, crowd: heroCrowd, pros: heroPros, bets: heroBets }[which]; const el = $(`.pz[data-pz="${which}"]`); if (!make || !el) return;
     const tmp = document.createElement("div"); tmp.innerHTML = make(report); if (tmp.firstElementChild) { tmp.firstElementChild.classList.add("no-anim"); el.replaceWith(tmp.firstElementChild); }
   }
   document.addEventListener("click", (e) => {
@@ -2417,7 +2521,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secPros(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
@@ -3023,6 +3127,8 @@
     setTimeout(pollDirection, 3000);
     setInterval(pollCrowd, 300000);
     setInterval(pollOdds, 600000);
+    setInterval(pollPros, 600000);
+    setTimeout(pollPros, 5000);
     setTimeout(pollOdds, 4500);
     setTimeout(pollCrowd, 3500);
     setInterval(pollLiveScan, 60000);
