@@ -45,6 +45,11 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 
 
 
+
+## Themes (menu: Markets, then Themes)
+
+Ten current US market themes, each split into the sectors that make it up: AI & semiconductors, Power & AI infrastructure, Cloud & software, Banks, rates & fintech, The US consumer, Health care & weight-loss drugs, Energy & materials, Industrials & defense, Crypto & frontier tech, and EVs & autos. The scoreboard at the top ranks them over 1 week, 1 month or 3 months, with the S&P 500 marked on every bar. Each theme is colour-coded: **Leading** (beating the S&P over a month and still pulling ahead this week), **Improving** (behind but gaining), **Weakening** (ahead but slipping) or **Lagging** (behind and still falling behind). Every card says what drives the theme, its average return and its gap to the S&P, how many of its stocks are in an uptrend (above the 50-day average), a bar per sector with a dot per stock, and the leaders and laggards; tap any ticker for its page. The AI data-centre deep dive with the model's read is at the bottom.
+
 ## Company map (menu: Company map)
 
 Type a company (NVIDIA, TSLA, Apple) and press Map it. A bubble opens into a map you can drag and zoom: customers on the right, suppliers on the left, partners on top, rivals below, risks and big shareholders around them. A dashed red ring marks a single point of failure, such as TSMC for NVIDIA. Click any company on the map to map it next. Below the map: why it is critical and where it could break (each with the fact behind it), where the money went last year (revenue to costs, profit, taxes, buybacks and capacity), four years of growth, the balance sheet, its biggest customers quoted from its latest annual report on SEC EDGAR, the capital spending of its biggest customers, what the price assumes, and who owns it. Foreign companies' statements are converted to US dollars at today's rate. The supply-chain connections come from OneView's map built from public filings and reporting; companies outside it show their industry peers and holders instead.

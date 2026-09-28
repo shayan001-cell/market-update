@@ -532,6 +532,94 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= US MARKET THEMES: ten themes, each split into its sectors =======================
+  const TI = {
+    ai: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
+    power: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+    cloud: '<svg viewBox="0 0 24 24"><path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1-1 8z"/></svg>',
+    bank: '<svg viewBox="0 0 24 24"><path d="M3 10 12 4l9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/></svg>',
+    cart: '<svg viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/><path d="M3 4h2l2.4 11h11l2-8H6.2"/></svg>',
+    health: '<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.4-9-9a5 5 0 0 1 9-3 5 5 0 0 1 9 3c-2 4.6-9 9-9 9z"/><path d="M9 12h2l1-2 1.5 4 1-2H17"/></svg>',
+    oil: '<svg viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></svg>',
+    factory: '<svg viewBox="0 0 24 24"><path d="M3 20V10l5 3V10l5 3V6l8 4v10z"/><path d="M3 20h18"/></svg>',
+    rocket: '<svg viewBox="0 0 24 24"><path d="M5 19c1-3 2.5-4.5 4-5l1 1c-.5 1.5-2 3-5 4z"/><path d="M14.5 4.5C18 3 21 3 21 3s0 3-1.5 6.5L13 16l-5-5z"/><circle cx="15.5" cy="8.5" r="1.4"/></svg>',
+    car: '<svg viewBox="0 0 24 24"><path d="M5 16h14l-1.5-5.5A2 2 0 0 0 15.6 9H8.4a2 2 0 0 0-1.9 1.5z"/><path d="M4 16v3h3v-3M17 16v3h3v-3"/><circle cx="8" cy="16" r="1"/><circle cx="16" cy="16" r="1"/></svg>',
+  };
+  const US_THEMES = [
+    { key: "ai", name: "AI & semiconductors", icon: TI.ai, drives: "The chips behind artificial intelligence. Moves with AI spending, chip supply and export rules.",
+      groups: [["Compute chips", ["NVDA", "AMD", "AVGO", "ARM", "TSM", "MRVL", "ALAB", "CRDO", "INTC"]], ["Memory & storage", ["MU", "SNDK", "WDC", "STX"]], ["Networking & optics", ["ANET", "CIEN", "COHR", "LITE", "AAOI", "FN"]], ["Chip equipment", ["ASML", "AMAT", "LRCX", "KLAC", "TER"]], ["Other chips", ["QCOM", "TXN", "ON", "MPWR"]]] },
+    { key: "power", name: "Power & AI infrastructure", icon: TI.power, drives: "Data centres need servers, cooling and a lot of electricity. Moves with data-centre building and power prices.",
+      groups: [["Servers & cooling", ["SMCI", "DELL", "HPE", "VRT", "MOD", "NVT"]], ["Power & grid", ["GEV", "ETN", "PWR", "VST", "CEG", "NRG", "TLN"]], ["Nuclear & new power", ["OKLO", "SMR", "BE"]], ["Data-centre property", ["EQIX", "DLR", "IRM"]]] },
+    { key: "cloud", name: "Cloud & software", icon: TI.cloud, drives: "The platforms that rent AI and the software built on it. Moves with cloud growth and interest rates.",
+      groups: [["Hyperscalers", ["MSFT", "GOOGL", "AMZN", "META", "ORCL"]], ["AI clouds", ["CRWV", "NBIS"]], ["Software", ["CRM", "NOW", "ADBE", "INTU", "SNOW", "DDOG", "PLTR", "APP", "SHOP"]], ["Cybersecurity", ["CRWD", "PANW", "ZS", "NET"]]] },
+    { key: "fin", name: "Banks, rates & fintech", icon: TI.bank, drives: "Lenders, brokers and payments. Moves with interest rates, loan growth and trading activity.",
+      groups: [["Big banks", ["JPM", "BAC", "WFC", "C"]], ["Brokers & asset managers", ["GS", "MS", "SCHW", "BLK", "HOOD"]], ["Payments", ["V", "MA", "AXP", "PYPL"]], ["Fintech lenders", ["SOFI", "AFRM", "UPST"]]] },
+    { key: "cons", name: "The US consumer", icon: TI.cart, drives: "What Americans buy. Moves with jobs, wages, inflation and confidence.",
+      groups: [["Big-box retail", ["WMT", "COST", "TGT", "DG", "DLTR"]], ["Brands & restaurants", ["MCD", "SBUX", "CMG", "NKE", "LULU", "CELH", "ELF"]], ["Household staples", ["KO", "PEP", "PG"]], ["Home & housing", ["HD", "LOW", "OPEN", "CVNA"]], ["Streaming & media", ["NFLX", "DIS", "SPOT", "WBD", "RBLX"]]] },
+    { key: "health", name: "Health care & weight-loss drugs", icon: TI.health, drives: "Drug makers, biotech and insurers. Moves with drug approvals, weight-loss drug demand and US policy.",
+      groups: [["Weight-loss leaders", ["LLY", "NVO"]], ["Big pharma", ["JNJ", "PFE", "MRK", "ABBV"]], ["Biotech", ["AMGN", "GILD", "REGN", "VRTX", "MRNA"]], ["Care & devices", ["UNH", "ISRG", "HIMS"]]] },
+    { key: "energy", name: "Energy & materials", icon: TI.oil, drives: "Oil, gas and metals. Moves with commodity prices, the dollar and global growth.",
+      groups: [["Oil & gas", ["XOM", "CVX", "OXY", "SLB"]], ["Metals & mining", ["FCX", "NEM", "NUE"]]] },
+    { key: "ind", name: "Industrials & defense", icon: TI.factory, drives: "Planes, machines, freight and weapons. Moves with factory activity, government spending and tariffs.",
+      groups: [["Aerospace & defense", ["LMT", "RTX", "BA", "GE"]], ["Machinery", ["CAT", "DE", "HON"]], ["Transport", ["UPS", "FDX", "UBER"]]] },
+    { key: "frontier", name: "Crypto & frontier tech", icon: TI.rocket, drives: "The high-risk corner: crypto, quantum computing and space. Moves with risk appetite and Bitcoin.",
+      groups: [["Crypto", ["COIN", "MSTR", "IBIT", "MARA"]], ["Quantum computing", ["IONQ", "RGTI", "QUBT"]], ["Space", ["RKLB", "ASTS", "LUNR"]], ["Flying taxis & AI apps", ["ACHR", "JOBY", "SOUN", "BBAI"]]] },
+    { key: "ev", name: "EVs & autos", icon: TI.car, drives: "Carmakers old and new. Moves with rates, subsidies, tariffs and Tesla.",
+      groups: [["Tesla", ["TSLA"]], ["EV makers", ["RIVN", "LCID", "NIO"]], ["Detroit", ["GM", "F"]]] },
+  ];
+  let themePeriod = "1m";
+  const TP_FIELD = { "1w": "ret_5d", "1m": "ret_1m", "3m": "ret_3m" }, TP_WORD = { "1w": "1 week", "1m": "1 month", "3m": "3 months" };
+  function themeRec(r, t) {
+    const s = stockFor(t), l = (r.lite || {})[t]; const o = s || l; if (!o) return null; const tech = o.technicals || {};
+    return { t, name: (s && s.name) || (l && l.name) || t, chg: qp(t, o).chg, ret_5d: tech.ret_5d, ret_1m: tech.ret_1m, ret_3m: tech.ret_3m, up: tech.above_sma50 === true, trend: tech.trend };
+  }
+  const avgOf = (xs, f) => { const v = xs.map((x) => x[f]).filter(isNum); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  function themeStats(r) {
+    const spy = (idxOf(r, "SPY") || {}).technicals || {};
+    return US_THEMES.map((th) => {
+      const groups = th.groups.map(([name, ts]) => { const recs = ts.map((t) => themeRec(r, t)).filter(Boolean); return { name, recs, ret: avgOf(recs, TP_FIELD[themePeriod]), r5: avgOf(recs, "ret_5d"), r1m: avgOf(recs, "ret_1m"), up: recs.filter((x) => x.up).length }; }).filter((g) => g.recs.length);
+      const all = groups.flatMap((g) => g.recs);
+      const r1m = avgOf(all, "ret_1m"), r5 = avgOf(all, "ret_5d");
+      const rel1m = isNum(r1m) && isNum(spy.ret_1m) ? r1m - spy.ret_1m : null, rel5 = isNum(r5) && isNum(spy.ret_5d) ? r5 - spy.ret_5d : null;
+      const state = !isNum(rel1m) || !isNum(rel5) ? ["No read", "flat"] : rel1m >= 0 ? (rel5 >= 0 ? ["Leading", "lead"] : ["Weakening", "weak"]) : (rel5 >= 0 ? ["Improving", "imp"] : ["Lagging", "lag"]);
+      const ret = avgOf(all, TP_FIELD[themePeriod]); const spyRet = spy[TP_FIELD[themePeriod]];
+      const sorted = all.filter((x) => isNum(x[TP_FIELD[themePeriod]])).sort((a, b) => b[TP_FIELD[themePeriod]] - a[TP_FIELD[themePeriod]]);
+      return { ...th, groups, all, ret, vs: isNum(ret) && isNum(spyRet) ? ret - spyRet : null, state, up: all.filter((x) => x.up).length, leaders: sorted.slice(0, 3), laggards: sorted.slice(-2).reverse() };
+    }).filter((x) => x.all.length);
+  }
+  const STATE_HELP = { lead: "beating the S&P over a month and still pulling ahead this week", imp: "behind the S&P over a month but gaining this week", weak: "ahead of the S&P over a month but slipping this week", lag: "behind the S&P and still falling behind", flat: "" };
+  function secUsThemes(r) {
+    const T = themeStats(r); if (!T.length) return "";
+    const spy = ((idxOf(r, "SPY") || {}).technicals || {})[TP_FIELD[themePeriod]];
+    const ranked = T.slice().sort((a, b) => (b.ret ?? -1e9) - (a.ret ?? -1e9));
+    const mx = Math.max(1, ...ranked.map((x) => Math.abs(x.ret || 0)), Math.abs(spy || 0));
+    const seg = Object.keys(TP_WORD).map((k) => `<button type="button" class="${k === themePeriod ? "on" : ""}" data-theme-period="${k}">${k.toUpperCase()}</button>`).join("");
+    const board = ranked.map((x) => `<li data-jump='[data-tm="${x.key}"]' role="button" tabindex="0"><span class="tb-ic">${x.icon}</span><span class="tb-n">${esc(x.name)}</span><span class="ps-bar"><i class="${cls(x.ret)}" style="${(x.ret || 0) >= 0 ? "left:50%" : "right:50%"};width:${((Math.abs(x.ret || 0) / mx) * 50).toFixed(1)}%"></i>${isNum(spy) ? `<b class="tb-spy" style="left:${(50 + (spy / mx) * 50).toFixed(1)}%" title="S&P 500 ${fpct(spy, 1)}"></b>` : ""}</span><span class="ps-v ${cls(x.ret)}">${fpct(x.ret, 1)}</span><span class="tm-state s-${x.state[1]}">${x.state[0]}</span></li>`).join("");
+    const lead = ranked.filter((x) => x.state[1] === "lead").map((x) => x.name), lag = ranked.filter((x) => x.state[1] === "lag").map((x) => x.name);
+    const cards = T.map((x) => {
+      const gm = Math.max(1, ...x.groups.map((g) => Math.abs(g.ret || 0)));
+      const rows = x.groups.map((g) => `<li><span class="tg-n">${esc(g.name)}</span><span class="ps-bar"><i class="${cls(g.ret)}" style="${(g.ret || 0) >= 0 ? "left:50%" : "right:50%"};width:${((Math.abs(g.ret || 0) / gm) * 50).toFixed(1)}%"></i></span><span class="ps-v ${cls(g.ret)}">${fpct(g.ret, 1)}</span><span class="tg-dots" title="${g.up} of ${g.recs.length} above their 50-day average">${g.recs.map((s) => `<i class="${s.up ? "on" : ""}"></i>`).join("")}</span></li>`).join("");
+      const chip = (s) => `<span class="tm-chip ${cls(s[TP_FIELD[themePeriod]])}" data-ticker-page="${esc(s.t)}" title="${esc(s.name)}">${esc(s.t)}<i>${fpct(s[TP_FIELD[themePeriod]], 1)}</i></span>`;
+      const pctUp = x.all.length ? Math.round((x.up / x.all.length) * 100) : 0;
+      return `<article class="tm-card s-${x.state[1]}" data-tm="${x.key}">
+        <div class="tm-top"><span class="tm-ic">${x.icon}</span><div class="tm-tt"><h3>${esc(x.name)}</h3><p>${esc(x.drives)}</p></div><span class="tm-state s-${x.state[1]}" title="${esc(STATE_HELP[x.state[1]])}">${x.state[0]}</span></div>
+        <div class="tm-kpis"><div><b class="${cls(x.ret)}">${fpct(x.ret, 1)}</b><span>average, ${TP_WORD[themePeriod]}</span></div><div><b class="${cls(x.vs)}">${fpct(x.vs, 1)}</b><span>vs the S&amp;P 500</span></div><div class="tm-ring" style="--p:${pctUp}"><em>${x.up}/${x.all.length}</em><span>in an uptrend</span></div></div>
+        <ul class="tm-groups">${rows}</ul>
+        <div class="tm-movers"><div><span class="cr-lbl">Leading</span>${x.leaders.map(chip).join("")}</div><div><span class="cr-lbl">Lagging</span>${x.laggards.map(chip).join("")}</div></div>
+      </article>`; }).join("");
+    return `<section class="pulse tms">
+      <div class="pulse-head"><span class="pz-live"><i></i>US market themes · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
+        <h2>Where the market's story is</h2><p>${lead.length ? `<b class="up">Leading:</b> ${esc(lead.join(", "))}. ` : ""}${lag.length ? `<b class="down">Lagging:</b> ${esc(lag.join(", "))}.` : ""} Each theme is split into the sectors that make it up. Numbers are equal-weight averages of the stocks listed.</p></div>
+      <article class="pz tm-board"><div class="pz-h"><span class="pz-eye">The scoreboard</span><div class="pz-seg">${seg}</div></div>
+        <ul class="tb-list">${board}</ul>
+        <div class="tm-key">${[["lead", "Leading"], ["imp", "Improving"], ["weak", "Weakening"], ["lag", "Lagging"]].map(([k, l]) => `<span class="tm-state s-${k}">${l}</span><i>${STATE_HELP[k]}</i>`).join("")}<span class="tb-spyk"><b></b>S&amp;P 500 over the same period</span></div></article>
+      <div class="tm-grid">${cards}</div>
+      <details class="ctx-more"><summary>Deep dive: the AI data-centre build-out, part by part, with the model's read</summary>${secTheme(r)}</details>
+      <div class="pz-foot">Themes and the stocks in them are OneView's grouping. "Uptrend" means above the 50-day average. Information, not advice.</div>
+    </section>`;
+  }
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-theme-period]"); if (!b || !report) return; themePeriod = b.getAttribute("data-theme-period"); const el = $("#app .tms"); if (!el) return; const y = ($("#app .view") || {}).scrollTop; const tmp = document.createElement("div"); tmp.innerHTML = secUsThemes(report); el.replaceWith(tmp.firstElementChild); const v = $("#app .view"); if (v && y != null) v.scrollTop = y; wireStocks(); });
+
   // ======================= COMPANY MAP: type a name, see how the money and the dependencies connect =======================
   let mapSym = null, mapData = null, mapBusy = false, mapErr = null, mapSim = null;
   try { mapSym = sessionStorage.getItem("mu-map") || null; } catch (e) {}
@@ -2304,7 +2392,7 @@
   };
   const MENU = [
     { k: "home" }, { k: "watch" },
-    { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "The AI build-out, part by part"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"]] },
+    { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"]] },
     { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["record", "Every call scored against the market"]] },
     { g: "admin", label: "Admin", admin: true, icon: ICONS.admin, items: [["desk", "Three scores per name and the big-cap scan"], ["check", "Every 15-minute read, scored"], ["admin", "Users, sessions and traffic"]] },
   ];
@@ -2888,7 +2976,7 @@
       case "admin": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one admin-view">${secAdmin()}</div>`;
       case "scan": return `<div class="view sub">${subTabs("scan")}<div class="subview">${subTab.scan === "lowfloat" ? secLowFloat(r) : secScan(r)}</div></div>`;
       case "stock": return `<div class="view stock">${secStocks(r)}</div>`;
-      case "theme": return `<div class="view one">${secTheme(r)}</div>`;
+      case "theme": return `<div class="view one tms-view">${secUsThemes(r)}</div>`;
       case "smart": return `<div class="view sub">${subTabs("smart")}<div class="subview">${subTab.smart === "options" ? secOptions(r) : secSmart(r)}</div></div>`;
       case "macro": return `<div class="view one ctx-view">${secContext(r)}</div>`;
       default: currentView = "home"; return viewHtml(r);
