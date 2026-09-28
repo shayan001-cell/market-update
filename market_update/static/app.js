@@ -3105,8 +3105,8 @@
   function secPulse(r) {
     const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";
     return `<section class="pulse">
-      <div class="pulse-head"><span class="pz-live ${r.market_state === "open" ? "on" : ""}"><i></i>${st} · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
-        <div class="mk-title">${mkTimer()}<h2 class="mk-h">Market <span>NOW</span></h2></div><p>${pulseLine(r)}</p></div>
+      <div class="pulse-head"><div class="mk-title">${mkTimer()}<h2 class="mk-h">Market <span>NOW</span></h2><span class="pz-live ${r.market_state === "open" ? "on" : ""}" title="Data updated ${esc(r.generated_at.slice(11, 16))} ET"><i></i>${st} · ${esc(r.generated_at.slice(11, 16))} ET</span></div>
+        <p>${pulseLine(r)}</p></div>
       <div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
       <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
     </section>`;

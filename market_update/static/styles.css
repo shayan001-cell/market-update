@@ -2994,3 +2994,11 @@ body:has(#gate.gate-full:not([hidden])){overflow:hidden}
 @keyframes mkbusy{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.pulse-head h2.mk-h span::after,.mk-timer.busy .mk-arc{animation:none}}
 @media (max-width:520px){.mk-title{gap:10px}.mk-timer svg{width:34px;height:34px}.mk-t b{font-size:15px}}
+/* Market NOW row: timer · title · session badge on one line, with room between them */
+.mk-title{gap:14px 26px;margin:4px 0 12px}
+.mk-title .pz-live{margin-left:8px;align-self:center}
+@media (max-width:520px){.mk-title{gap:10px 14px}.mk-title .pz-live{margin-left:0}}
+.pulse{container-type:inline-size}
+.pulse-head h2.mk-h{font-size:clamp(24px,4.4cqi,40px)}
+.mk-title{gap:12px 20px}
+.mk-title .pz-live{margin-left:4px;white-space:nowrap}
