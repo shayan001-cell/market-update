@@ -1078,7 +1078,7 @@ def _send_link(email: str, link: str) -> bool:
 @app.get("/api/auth/mail-status")
 async def auth_mail_status() -> dict[str, Any]:
     """What the sign-in card shows: which transport sends the links and from whom (never the credentials)."""
-    return mail.status()
+    return {**mail.status(), "instant_login": instant_login_on(), "instant_until": config.INSTANT_LOGIN_UNTIL}
 
 
 async def _issue_link(request: Request, email: str) -> dict[str, Any]:
@@ -1102,12 +1102,46 @@ async def _issue_link(request: Request, email: str) -> dict[str, Any]:
     return out
 
 
+def instant_login_on() -> bool:
+    if os.environ.get("MU_INSTANT_LOGIN", "1").strip() in ("0", "false", "off", "no"):
+        return False
+    return fetch.now_et().date().isoformat() <= config.INSTANT_LOGIN_UNTIL
+
+
+def _client_ip(request: Request) -> str:
+    return (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else "") or "?")
+
+
+_instant_hits: dict[str, list[float]] = {}
+INSTANT_PER_IP_HOUR = 12
+
+
 @app.post("/api/auth/request")
 async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
     email = str(payload.get("email", "")).strip().lower()
     if not _EMAIL_RE.match(email) or len(email) > 120:
         raise HTTPException(status_code=400, detail="enter a valid email address")
-    return JSONResponse(await _issue_link(request, email))
+    if not instant_login_on():
+        return JSONResponse(await _issue_link(request, email))
+    # Email-only sign-in (temporary): no link is sent. Tracked, rate-limited per network address, never admin.
+    ip = _client_ip(request); now = time.time()
+    hits = [h for h in _instant_hits.get(ip, []) if now - h < 3600]
+    if len(hits) >= INSTANT_PER_IP_HOUR:
+        raise HTTPException(status_code=429, detail="too many sign-ins from this network; try again in an hour")
+    _instant_hits[ip] = hits + [now]
+    db.ensure_user(email)
+    db.touch_login(email)
+    if not (db.profile(email) or {}).get("tickers"):
+        db.set_watchlist(email, list(config.DEFAULT_WATCHLIST))
+    ua = request.headers.get("user-agent", "")
+    db.log_activity(email, "login_instant", f"ip {ip} · {ua[:150]}")
+    log.info("instant sign-in (email not verified): %s from %s", email, ip)
+    cookie = _sign(f"{email}|{time.time() + SESSION_DAYS * 86400}")
+    db.open_session(cookie, email, SESSION_DAYS * 86400, ua, verified=False)
+    resp = JSONResponse({"status": "instant", "token": cookie, "email": email})
+    resp.set_cookie(SESSION_COOKIE, cookie, max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax")
+    return resp
 
 
 _PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OneView · sign-in link</title>
@@ -1170,7 +1204,8 @@ async def api_me(request: Request) -> JSONResponse:
         return JSONResponse({"status": "anonymous", "logged_in": False}, status_code=401, headers={"Cache-Control": "no-store"})
     prof = db.profile(email) or {"tickers": [], "accepted_disclaimer_at": None, "created": None}
     state_ = db.login_state(email)
-    resp = JSONResponse({"status": "ok", "logged_in": True, "email": email, "sessions": state_["active_sessions"], "role": _role(email),
+    verified = db.session_verified(_raw_session(request))
+    resp = JSONResponse({"status": "ok", "logged_in": True, "email": email, "sessions": state_["active_sessions"], "role": _role(email) if verified else "user", "verified": verified,
                          "name": prof.get("name") or "",
                          "profile": {"accepted_disclaimer_at": prof.get("accepted_disclaimer_at"), "tickers": prof.get("tickers", []), "created": prof.get("created"), "name": prof.get("name")}},
                         headers={"Cache-Control": "no-store"})
@@ -1202,9 +1237,7 @@ async def api_profile_name(request: Request, payload: dict[str, Any] = Body(...)
 
 @app.get("/api/admin/overview")
 async def api_admin_overview(request: Request) -> JSONResponse:
-    email = _session_email(request)
-    if not email or _role(email) != "admin":
-        raise HTTPException(status_code=403, detail="admin only")
+    email = _require_admin(request)
     ov = await asyncio.to_thread(db.admin_overview)
     ov["admin"] = email
     ov["build"] = {"build_id": (state["report"] or {}).get("build_id"), "generated_at": (state["report"] or {}).get("generated_at"), "builds": state["builds"], "building": state["building"]}
@@ -1548,7 +1581,7 @@ def st_tools() -> list[dict[str, Any]]:
 
 def _require_admin(request: Request) -> str:
     email = _session_email(request)
-    if not email or email.lower() not in {e.lower() for e in config.ADMIN_EMAILS}:
+    if not email or email.lower() not in {e.lower() for e in config.ADMIN_EMAILS} or not db.session_verified(_raw_session(request)):
         raise HTTPException(status_code=403, detail="admin only")
     return email
 

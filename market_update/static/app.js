@@ -2636,6 +2636,7 @@
   function mailLine() {
     if (STATIC_MODE) return "";
     if (!mailStatus) return `<div class="mail-line muted">Checking the mail service…</div>`;
+    if (mailStatus.instant_login) return `<div class="mail-line ok">No email needed for now: enter your address and you go straight in.</div>`;
     return mailStatus.configured ? `<div class="mail-line ok">Links are sent by <b>${esc(mailStatus.from_name)}</b>. Check your spam folder the first time.</div>`
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
@@ -2743,7 +2744,10 @@
       });
     }
 
-    if (!user && !STATIC_MODE && !mailStatus) api("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); }).catch(() => {});
+    const instantCopy = () => { if (!mailStatus || !mailStatus.instant_login) return; const p = $("#login-core > p"); if (p) p.textContent = "Enter your email to sign in. No password, no link to wait for.";
+      const b = $("#login-submit span"); if (b) b.textContent = "Continue"; const h = $("#login-core .ov-hint"); if (h) h.textContent = "You go straight in."; };
+    if (!user && !STATIC_MODE && !mailStatus) api("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); instantCopy(); }).catch(() => {});
+    else instantCopy();
   }
   function wireGate() {
     const lf = $("#login-form");
@@ -2753,11 +2757,16 @@
       if (STATIC_MODE) return;
       const inp = $("#login-email"); if (!inp.checkValidity() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { st.className = "gate-status err"; st.textContent = "Enter a valid email address."; inp.focus(); return; }
       const btn = $("#login-submit"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-      st.textContent = "Sending your link…";
+      st.textContent = mailStatus && mailStatus.instant_login ? "Signing you in…" : "Sending your link…";
       try {
         const res = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
-        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "The link could not be sent. Try again in a moment."; if (btn) { btn.disabled = false; btn.textContent = "Send sign-in link"; } inp.focus(); return; }
+        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "The link could not be sent. Try again in a moment."; if (btn) { btn.disabled = false; btn.textContent = mailStatus && mailStatus.instant_login ? "Continue" : "Send sign-in link"; } inp.focus(); return; }
+        if (j.status === "instant" && j.token) {                   // email-only sign-in (temporary): straight in, no link
+          authToken = j.token; try { localStorage.setItem("mu-token", j.token); localStorage.setItem("mu-last-active", String(Date.now())); } catch (e2) {}
+          signedOutNote = false; byeDismissed = true; st.textContent = "Signing you in…";
+          await loadUser(); if (report) renderAll(); renderGate(); return;
+        }
         const core = $("#login-core"); if (core) { core.innerHTML = sentHtml(email, j); startSentTimer(j.expires_in_s || 600);
           const rs = core.querySelector("[data-resend]"); if (rs) { rs.disabled = true; setTimeout(() => { rs.disabled = false; }, 60000); rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); } }
       } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now. Try again in a moment."; const b2 = $("#login-submit"); if (b2) { b2.disabled = false; b2.textContent = "Send my sign-in link"; } }
@@ -3429,11 +3438,16 @@
     const T = A.traffic, mx = Math.max(1, ...T.series.map((x) => x.requests));
     const bars = T.series.map((x, i) => `<rect x="${i * 6}" y="${60 - (x.requests / mx) * 58}" width="5" height="${(x.requests / mx) * 58}" class="${x.pages ? "pg" : ""}"><title>${new Date(x.minute * 60000).toTimeString().slice(0, 5)}: ${x.requests} requests, ${x.pages} page loads</title></rect>`).join("");
     const tile = (l, v, sub) => `<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${sub || ""}</div></div>`;
-    const online = A.online.map((u) => `<tr><td class="sym"><b>${esc(u.name || u.email.split("@")[0])}</b><div class="meta2">${esc(u.email)}</div></td><td>${ago(u.last_seen)}</td><td>${ago(u.since)}</td><td class="num">${u.sessions}</td><td class="hl small">${esc((u.user_agent || "").slice(0, 70))}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">Nobody is signed in right now.</td></tr>';
+    const online = A.online.map((u) => `<tr><td class="sym"><b>${esc(u.name || u.email.split("@")[0])}</b>${u.unverified ? ' <span class="tag warn" title="Signed in by typing the email, without a link">email not verified</span>' : ""}<div class="meta2">${esc(u.email)}</div></td><td>${ago(u.last_seen)}</td><td>${ago(u.since)}</td><td class="num">${u.sessions}</td><td class="hl small">${esc((u.user_agent || "").slice(0, 70))}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">Nobody is signed in right now.</td></tr>';
     const users = A.users.map((u) => `<tr><td class="sym"><span class="st-dot ${u.online ? "up" : "none"}"></span> <b>${esc(u.name || u.email.split("@")[0])}</b><div class="meta2">${esc(u.email)}</div></td><td>${u.online ? '<span class="up">online</span>' : "offline"}</td><td>${ago(u.last_login)}</td><td class="num">${u.tickers}</td><td>${u.accepted_disclaimer_at ? "yes" : "no"}</td><td>${ago(u.created)}</td></tr>`).join("");
     const recent = A.recent.map((x) => `<tr><td class="num">${new Date(x.at * 1000).toTimeString().slice(0, 8)}</td><td>${esc(x.email || "–")}</td><td><span class="tag ${{ login: "ok", logout: "", link_requested: "acc", watchlist: "acc", analyzed: "warn" }[x.action] || ""}">${pretty(x.action)}</span></td><td class="hl small">${esc(x.detail || "")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">No activity yet.</td></tr>';
     return `<section class="admin"><h2>Admin dashboard <span class="muted">${esc(A.admin)} · refreshed ${new Date(A.as_of * 1000).toTimeString().slice(0, 8)} · sessions table in market_update.db</span></h2>
       <div class="grid c6" style="margin-bottom:12px">${tile("Signed in now", A.online.length, "distinct users")}${tile("Active sessions", A.active_sessions, "browsers with a live login")}${tile("Requests, last hour", T.requests_last_hour, `${T.requests_24h} in 24 h`)}${tile("Page loads, 24 h", T.pages_24h, "")}${tile("Logins, 24 h", T.logins_24h, "")}${tile("Accounts", A.users_total, `build ${A.build.build_id || "–"}${A.build.building ? " · building" : ""}`)}</div>
+      ${(() => { const I = A.instant_logins || []; if (!I.length) return ""; const who = new Set(I.map((x) => x.email));
+        const rows = I.slice(0, 80).map((x) => { const m = String(x.detail || "").match(/^ip (\S+) · (.*)$/) || []; const ua = m[2] || ""; const dev = /iPhone|iPad/.test(ua) ? "iPhone / iPad" : /Android/.test(ua) ? "Android" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : ua ? "other" : "–";
+          return `<tr><td class="num">${new Date(x.at * 1000).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</td><td><b>${esc(x.email || "–")}</b></td><td class="mono">${esc(m[1] || "–")}</td><td>${esc(dev)}</td></tr>`; }).join("");
+        return `<div class="card" style="margin-bottom:12px"><h3>Email-only sign-ins <span class="muted">while mail is blocked, typing an email signs people in without a link · ${I.length} sign-ins by ${who.size} addresses · these sessions never get admin rights</span></h3>
+          <table class="tbl"><thead><tr><th>When (ET)</th><th>Email typed</th><th>Network address</th><th>Device</th></tr></thead><tbody>${rows}</tbody></table></div>`; })()}
       <div class="card" style="margin-bottom:12px"><h3>Intraday check <span class="muted">what we said every 15 minutes vs what the market did; scored at the close and one hour on</span></h3>
         <div class="wc-actions" style="margin-top:8px"><a class="btn sm" href="#view=check" data-view-link="check">Open the intraday check</a><a class="btn sm ghost" href="/track-record" target="_blank" rel="noopener">Public track record</a><span class="meta2">App link for the group: ${esc(location.origin)}/#view=check (sign-in required)</span></div></div>
       <div class="card" style="margin-bottom:12px"><h3>StockTwits connector <span class="muted">reads crowd sentiment through StockTwits' official connector; sign in once as the owner</span></h3>

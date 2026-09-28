@@ -142,6 +142,9 @@ DEFAULT_LIST = "My watchlist"
 
 
 def _migrate(con: sqlite3.Connection) -> None:
+    scols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
+    if "verified" not in scols:
+        con.execute("ALTER TABLE sessions ADD COLUMN verified INTEGER NOT NULL DEFAULT 1")
     cols_users = {r[1] for r in con.execute("PRAGMA table_info(users)")}
     if "brief_opt_out" not in cols_users:
         con.execute("ALTER TABLE users ADD COLUMN brief_opt_out INTEGER NOT NULL DEFAULT 0")
@@ -235,10 +238,14 @@ def admin_overview() -> dict[str, Any]:
         series = [{"minute": m, "requests": traffic.get(m, (0, 0))[0], "pages": traffic.get(m, (0, 0))[1]} for m in range(minute - 119, minute + 1)]
         day = con.execute("SELECT COALESCE(SUM(requests), 0), COALESCE(SUM(pages), 0) FROM traffic WHERE minute > ?", (minute - 1440,)).fetchone()
         recent = [dict(r) for r in con.execute("SELECT at, email, action, detail FROM activity ORDER BY id DESC LIMIT 40")]
-        logins_24h = con.execute("SELECT COUNT(*) FROM activity WHERE action = 'login' AND at > ?", (now - 86400,)).fetchone()[0]
+        logins_24h = con.execute("SELECT COUNT(*) FROM activity WHERE action IN ('login', 'login_instant') AND at > ?", (now - 86400,)).fetchone()[0]
+        instant = [dict(r) for r in con.execute("SELECT at, email, detail FROM activity WHERE action = 'login_instant' ORDER BY id DESC LIMIT 200")]
+        unverified = {r[0] for r in con.execute("SELECT DISTINCT email FROM sessions WHERE logged_in = 1 AND expires > ? AND verified = 0", (now,))}
+        for l in live:
+            l["unverified"] = l["email"] in unverified
     return {"as_of": now, "online": live, "active_sessions": active_sessions, "users": users, "users_total": len(users),
             "traffic": {"series": series, "requests_24h": day[0], "pages_24h": day[1], "requests_last_hour": sum(x["requests"] for x in series[-60:]),
-                        "logins_24h": logins_24h}, "recent": recent}
+                        "logins_24h": logins_24h}, "recent": recent, "instant_logins": instant}
 
 
 # ---- sign-in tokens ------------------------------------------------------------
@@ -266,12 +273,26 @@ def consume_token(token: str) -> dict[str, Any] | None:
 
 
 # ---- sessions: the "is this user logged in" record ------------------------------
-def open_session(cookie_value: str, email: str, ttl_s: int, user_agent: str | None) -> None:
+def open_session(cookie_value: str, email: str, ttl_s: int, user_agent: str | None, verified: bool = True) -> None:
     now = time.time()
     with connect() as con:
         con.execute("DELETE FROM sessions WHERE expires < ?", (now - 7 * 86400,))
-        con.execute("INSERT OR REPLACE INTO sessions(id, email, created, expires, last_seen, logged_in, user_agent) VALUES (?, ?, ?, ?, ?, 1, ?)",
-                    (_sid(cookie_value), email, now, now + ttl_s, now, (user_agent or "")[:200]))
+        con.execute("INSERT OR REPLACE INTO sessions(id, email, created, expires, last_seen, logged_in, user_agent, verified) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                    (_sid(cookie_value), email, now, now + ttl_s, now, (user_agent or "")[:200], 1 if verified else 0))
+
+
+def session_verified(cookie_value: str | None) -> bool:
+    """True when this session came through an emailed link (not an email-only sign-in)."""
+    if not cookie_value:
+        return False
+    with connect() as con:
+        row = con.execute("SELECT verified FROM sessions WHERE id = ?", (_sid(cookie_value),)).fetchone()
+        return bool(row and row[0])
+
+
+def instant_logins(limit: int = 200) -> list[dict[str, Any]]:
+    with connect() as con:
+        return [dict(r) for r in con.execute("SELECT at, email, detail FROM activity WHERE action = 'login_instant' ORDER BY id DESC LIMIT ?", (limit,))]
 
 
 def session(cookie_value: str | None) -> dict[str, Any] | None:

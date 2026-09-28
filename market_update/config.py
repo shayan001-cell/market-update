@@ -230,3 +230,9 @@ ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("MU_ADMIN_EMAILS", "sh
 
 # Every new account (and every guest) starts with these seven; users add or remove from there.
 DEFAULT_WATCHLIST = ["NVDA", "TSLA", "AMD", "PLTR", "COIN", "INTC", "SPY"]
+
+
+# Temporary email-only sign-in while outgoing mail is blocked (2026-09-28, owner's request): typing an email signs
+# the person in without a link. Every such sign-in is logged; these sessions never get admin rights. It switches
+# itself off after INSTANT_LOGIN_UNTIL, or at once with MU_INSTANT_LOGIN=0.
+INSTANT_LOGIN_UNTIL = os.environ.get("MU_INSTANT_LOGIN_UNTIL", "2026-10-05")
