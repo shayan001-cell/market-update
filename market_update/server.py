@@ -27,6 +27,21 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+def _raise_file_limit(target: int = 10240) -> None:
+    """launchd starts agents with a 256 open-file limit; a build (many sockets + yfinance's per-thread cache
+    handles) runs past that and fails with Errno 24. Lift the soft limit as far as the hard limit allows."""
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        want = target if hard == resource.RLIM_INFINITY else min(target, hard)
+        if soft < want:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_raise_file_limit()
+
 from fastapi import Response, Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -387,34 +402,75 @@ def _watch_for_email(email: str, report: dict[str, Any], closing: dict[str, dict
     return out
 
 
+def _is_throttle(msg: str) -> bool:
+    m = msg.lower()
+    return "unusual sending activity" in m or "5.4.6" in m or ("rate" in m and "limit" in m)
+
+
+BULK_COOLDOWN_S = 3 * 3600      # after a provider block, bulk mail waits this long so the account can recover
+
+
+def _bulk_blocked() -> bool:
+    return time.time() < state.get("mail_blocked_until", 0)
+
+
+def _note_throttle() -> None:
+    state["mail_blocked_until"] = time.time() + BULK_COOLDOWN_S
+    log.warning("mail provider is throttling: bulk email paused for %d h (sign-in links still try)", BULK_COOLDOWN_S // 3600)
+
+
+def _read_marker(marker: Path) -> tuple[set[str], bool]:
+    """(emails already sent, day finished). Old-style markers hold a count and mean the day is done."""
+    if not marker.exists():
+        return set(), False
+    try:
+        raw = marker.read_text().strip()
+        if not raw.startswith("{"):
+            return set(), True
+        j = json.loads(raw)
+        return set(j.get("sent", [])), bool(j.get("manual")) or j.get("remaining", 0) <= 0
+    except Exception:  # noqa: BLE001
+        return set(), True
+
+
 def _mail_brief(b: dict[str, Any], day: str) -> None:
-    """One short email per signed-in user, once per day, after the 07:00 briefing."""
+    """One short email per signed-in user, once per day, after the 07:00 briefing. Like the close email, the
+    marker lists who has it, a retry sends only to the rest, and a provider block stops the run at once."""
     marker = _brief_dir() / f"{day}.mailed"
-    if marker.exists() or not mail.status().get("configured"):
+    if not mail.status().get("configured") or _bulk_blocked():
         return
+    done, finished = _read_marker(marker)
+    if finished:
+        return
+    recipients = [u for u in db.brief_recipients() if u["email"] not in done]
     report = state.get("report") or {}
     site = (os.environ.get("MU_SITE_URL", "").rstrip("/") or config.PUBLIC_URL) + "/#view=home&brief=1"   # opens the desk on the briefing
     sent = 0
-    for u in db.brief_recipients():
+    throttled = False
+    for u in recipients:
         try:
             unsub = f"{_api_root()}/brief/unsubscribe?t={_sign(u['email'])}"
             subject, text, html = mail.brief_email(u.get("name") or "", b, _watch_for_email(u["email"], report), site, unsub)
             mail.send(u["email"], subject, text, html, unsubscribe_url=unsub)
-            sent += 1
+            done.add(u["email"]); sent += 1
+            time.sleep(1.2)
         except Exception as e:  # noqa: BLE001
-            log.warning("briefing email to %s failed: %s", u["email"], e)
-    if sent:
-        marker.write_text(str(sent))
-    else:
-        log.error("briefing emailed to nobody; will retry")
-    log.info("briefing emailed to %d users", sent)
+            msg = str(e)
+            log.warning("briefing email to %s failed: %s", u["email"], msg[:160])
+            if _is_throttle(msg):
+                throttled = True
+                _note_throttle()
+                break
+    remaining = len(db.brief_recipients()) - len(done)
+    marker.write_text(json.dumps({"sent": sorted(done), "remaining": remaining, "throttled": throttled}))
+    log.info("briefing emailed to %d users this run, %d done, %d remaining%s", sent, len(done), remaining, " (provider throttled)" if throttled else "")
 
 
 def _mail_close(b: dict[str, Any], day: str) -> None:
     """One after-the-close email per signed-in user, once per day. The marker lists who has it, so a retry
     after a provider throttle sends only to the rest; a throttle reply stops the run instead of burning the list."""
     marker = _brief_dir() / f"{day}-close.mailed"
-    if not mail.status().get("configured"):
+    if not mail.status().get("configured") or _bulk_blocked():
         return
     done: set[str] = set()
     if marker.exists():
@@ -446,8 +502,9 @@ def _mail_close(b: dict[str, Any], day: str) -> None:
         except Exception as e:  # noqa: BLE001
             msg = str(e)
             log.warning("close email to %s failed: %s", u["email"], msg[:160])
-            if "Unusual sending activity" in msg or "5.4.6" in msg or "rate" in msg.lower() and "limit" in msg.lower():
+            if _is_throttle(msg):
                 throttled = True
+                _note_throttle()
                 break
     marker.write_text(json.dumps({"sent": sorted(done), "remaining": len(db.brief_recipients()) - len(done), "throttled": throttled}))
     log.info("close briefing emailed to %d users this run, %d done, %d remaining%s", sent, len(done), len(db.brief_recipients()) - len(done), " (provider throttled; will retry)" if throttled else "")
@@ -708,7 +765,7 @@ async def brief_scheduler() -> None:
                     state["briefs_prev"] = _load_briefs(y); state["briefs_prev_day"] = y
             # the morning email retries every 30 minutes until at least one message goes out (mail provider hiccups)
             morning = (state.get("briefs") or {}).get("morning")
-            if morning and mins >= 7 * 60 and mins < 15 * 60 and not (_brief_dir() / f"{today}.mailed").exists() and time.time() - state.get("brief_mail_try", 0) >= 1800:
+            if morning and mins >= 7 * 60 and mins < 15 * 60 and not _read_marker(_brief_dir() / f"{today}.mailed")[1] and not _bulk_blocked() and time.time() - state.get("brief_mail_try", 0) >= 1800:
                 state["brief_mail_try"] = time.time()
                 await asyncio.to_thread(_mail_brief, morning, today)
             # the after-close email retries every 30 minutes until 21:00

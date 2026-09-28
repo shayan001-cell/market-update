@@ -605,7 +605,7 @@
   let brief = null;                     // {date, briefs: {morning, midday, close}}
   async function pollBrief() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (currentView === "home" && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const cm = $(".view.home .col-main"); if (cm) cm.prepend(tmp.firstElementChild); } wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
+    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (currentView === "home" && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const pu = $(".view.home .pulse"), cm = $(".view.home .col-main"); if (pu) pu.insertAdjacentElement("afterend", tmp.firstElementChild); else if (cm) cm.prepend(tmp.firstElementChild); } refreshPulse("levels"); wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
   }
   const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
   const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
@@ -704,7 +704,7 @@
   async function pollCrowd() {
     if (STATIC_MODE) return;
     try { const res = await api("/api/stocktwits", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); crowd = j;
-      if (currentView === "home" && report) { const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
+      if (currentView === "home" && report) { refreshPulse("gauge"); const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
   }
   const ST_LABEL = { BULLISH: ["Bullish", "up"], EXTREMELY_BULLISH: ["Extremely bullish", "up"], BEARISH: ["Bearish", "down"], EXTREMELY_BEARISH: ["Extremely bearish", "down"], NEUTRAL: ["Neutral", "flat"] };
   function secCrowd(r) {
@@ -1868,9 +1868,196 @@
     if (currentView === "home") jumpToBrief();
   }
 
+  // ======================= THE PULSE: the market in ten seconds =======================
+  // Everything here is arithmetic on data already in the report (prices, averages, ATR, flows, the
+  // model's tone read, the StockTwits crowd). Nothing is a forecast; the scenarios are "if this, then that".
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const scoreOn = (x, lo, hi) => (isNum(x) ? Math.round(clamp01((x - lo) / (hi - lo)) * 100) : null);
+  const macroOf = (r, sym) => (r.macro || []).find((m) => m.symbol === sym);
+  const idxOf = (r, sym) => (r.indices || []).find((i) => i.symbol === sym);
+  const gaugeOf = (r, key) => (((r.flows || {}).gauges) || []).find((g) => g.key === key);
+  let pulseSym = "SPY", pulsePeriod = "1d";
+  const PULSE_BANDS = [[0, 25, "Fear", "down"], [25, 45, "Nervous", "warn"], [45, 56, "Neutral", "flat"], [56, 76, "Confident", "up"], [76, 101, "FOMO", "up"]];
+  const bandOf = (s) => PULSE_BANDS.find(([lo, hi]) => s >= lo && s < hi) || PULSE_BANDS[2];
+  const rsiWord = (x) => (!isNum(x) ? "" : x < 35 ? "oversold" : x < 45 ? "weak" : x < 60 ? "steady" : x < 70 ? "strong" : "overheated");
+  const vixWord = (x) => (!isNum(x) ? "" : x < 15 ? "calm" : x < 20 ? "normal" : x < 30 ? "nervous" : "panic");
+  function pulseInputs(r) {
+    const spy = idxOf(r, "SPY"), t = (spy && spy.technicals) || {};
+    const out = [];
+    const above = [t.above_sma20, t.above_sma50, t.above_sma200].filter((x) => x === true).length;
+    if (spy) out.push({ k: "Trend", s: Math.round(above / 3 * 100), v: `${above} of 3`, note: `S&P 500 is above ${above} of its 3 key averages (20, 50 and 200 day)` });
+    if (isNum(t.rsi14)) out.push({ k: "Momentum", s: scoreOn(t.rsi14, 30, 70), v: `RSI ${fnum(t.rsi14, 0)}`, note: `14-day RSI ${fnum(t.rsi14, 0)}: ${rsiWord(t.rsi14)}. Under 30 is washed out, over 70 is overheated` });
+    const vix = macroOf(r, "^VIX"); const vl = vix ? qp("^VIX", vix).last : null;
+    if (isNum(vl)) out.push({ k: "Fear gauge", s: scoreOn(vl, 30, 12), v: `VIX ${fnum(vl, 1)}`, note: `VIX ${fnum(vl, 1)}: ${vixWord(vl)}. Under 15 is calm, over 30 is panic` });
+    const br = gaugeOf(r, "breadth");
+    if (br && isNum(br.chg_1m)) out.push({ k: "Breadth", s: scoreOn(br.chg_1m, -5, 5), v: fpct(br.chg_1m, 1), note: br.chg_1m < 0 ? "The average stock is lagging the S&P over the month: a few giants are doing the lifting" : "The average stock is keeping up with the S&P: the rally is broad" });
+    const ap = ["credit", "size", "offense"].map((k) => gaugeOf(r, k)).filter((g) => g && isNum(g.chg_1m));
+    if (ap.length) { const m = ap.reduce((a, g) => a + g.chg_1m, 0) / ap.length; out.push({ k: "Risk appetite", s: scoreOn(m, -5, 5), v: fpct(m, 1), note: "Junk bonds vs Treasuries, small vs large caps, and discretionary vs staples over one month" }); }
+    const tp = ((r.regime || {}).tone || {}).probabilities;
+    if (tp) { const d = (tp.risk_on || 0) - (tp.risk_off || 0); out.push({ k: "Model read", s: Math.round(50 + 50 * d), v: pretty(r.regime.tone.choice).replace(/^./, (c) => c.toUpperCase()), note: "OneView's read of futures, the fear gauge, rates and headlines" }); }
+    const cm = crowd && crowd.status === "ok" && (crowd.moods || {}).SPY;
+    if (cm && isNum(cm.score)) out.push({ k: "Crowd", s: Math.round(cm.score), v: `${Math.round(cm.score)}/100`, note: "StockTwits sentiment on SPY. Extremes are a crowding warning, not a signal" });
+    return out.filter((x) => isNum(x.s));
+  }
+  function pulseGauge(r) {
+    const ins = pulseInputs(r); if (!ins.length) return "";
+    const score = Math.round(ins.reduce((a, x) => a + x.s, 0) / ins.length); const [, , word, bc] = bandOf(score);
+    const ang = -90 + score * 1.8;
+    const bars = ins.map((x) => { const b = bandOf(x.s); return `<li title="${esc(x.note)}"><span class="pg-k">${esc(x.k)}</span><span class="pg-bar"><i class="${b[3]}" style="width:${Math.max(4, x.s)}%"></i></span><span class="pg-v">${esc(x.v)}</span></li>`; }).join("");
+    return `<article class="pz pz-gauge" data-pz="gauge">
+      <div class="pz-h"><span class="pz-eye">Market mood</span><span class="pz-hint" title="The average of the bars below, each scored 0 (fear) to 100 (FOMO). Hover a bar to see what it measures. A mood, not a forecast.">what's this?</span></div>
+      <div class="pg-dial">
+        <svg viewBox="0 0 220 128" role="img" aria-label="Mood ${score} of 100: ${word}">
+          <defs><linearGradient id="pgGrad" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="var(--down)"/><stop offset=".45" stop-color="var(--warn)"/><stop offset="1" stop-color="var(--up)"/></linearGradient></defs>
+          <path d="M20 112 A90 90 0 0 1 200 112" class="pg-track"/>
+          <path d="M20 112 A90 90 0 0 1 200 112" class="pg-arc" pathLength="100" style="stroke-dasharray:${score} 100"/>
+          <g class="pg-needle" style="--a:${ang}deg"><line x1="110" y1="112" x2="110" y2="34"/><circle cx="110" cy="112" r="7"/></g>
+        </svg>
+        <div class="pg-read"><b class="pg-score">${score}</b><span class="pg-word ${bc}">${word}</span></div>
+        <div class="pg-ends"><span>Fear</span><span>FOMO</span></div>
+      </div>
+      <ul class="pg-list">${bars}</ul>
+    </article>`;
+  }
+  function areaSpark(values, cl, id) {
+    const v = (values || []).filter(isNum); if (v.length < 2) return "";
+    const w = 200, h = 56, lo = Math.min(...v), hi = Math.max(...v), rg = hi - lo || 1;
+    const pts = v.map((x, i) => [(i / (v.length - 1)) * w, h - 4 - ((x - lo) / rg) * (h - 10)]);
+    const line = pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+    return `<svg class="aspark ${cl}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".32"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><polygon points="0,${h} ${line} ${w},${h}" fill="url(#${id})"/><polyline points="${line}"/></svg>`;
+  }
+  const IDX_NAMES = { SPY: "S&P 500", QQQ: "Nasdaq 100", IWM: "Small caps", DIA: "Dow 30" };
+  function pulseIndexes(r) {
+    const tiles = ["SPY", "QQQ", "IWM", "DIA"].map((sym) => { const x = idxOf(r, sym); if (!x) return ""; const t = x.technicals || {};
+      const closes = (x.ohlc || []).slice(-30).map((c) => c.c); const m1 = closes.length > 1 ? (closes[closes.length - 1] / closes[0] - 1) * 100 : null;
+      const q = qp(sym, x); const pos = isNum(t.hi52) && isNum(t.lo52) && isNum(q.last) ? clamp01((q.last - t.lo52) / (t.hi52 - t.lo52)) : null;
+      const tr = t.above_sma50 && t.above_sma200 ? ["Uptrend", "up"] : !t.above_sma50 && !t.above_sma200 ? ["Downtrend", "down"] : ["Mixed trend", "warn"];
+      return `<div class="pi-tile" data-ticker-page="${sym}" role="button" tabindex="0">
+        <div class="pi-top"><span><b>${sym}</b><i>${IDX_NAMES[sym]}</i></span><span class="pi-chip ${tr[1]}">${tr[0]}</span></div>
+        <div class="pi-px">${priceHtml(sym, x)}</div>
+        ${areaSpark(closes, cls(m1), "pa" + sym)}
+        <div class="pi-foot"><span>30 days <b class="${cls(m1)}">${fpct(m1, 1)}</b></span>${pos != null ? `<span class="pi-52" title="Where the price sits between its 52-week low and high"><i style="left:${(pos * 100).toFixed(1)}%"></i></span><span>${isNum(t.pct_from_hi52) ? (t.pct_from_hi52 > -0.5 ? "at the 52-wk high" : fpct(t.pct_from_hi52, 1) + " from high") : ""}</span>` : ""}</div>
+      </div>`; }).join("");
+    return `<article class="pz pz-idx" data-pz="idx"><div class="pz-h"><span class="pz-eye">The big four</span><span class="pz-hint">tap one for its page</span></div><div class="pi-grid">${tiles}</div></article>`;
+  }
+  function levelsFor(r, sym) {
+    const x = idxOf(r, sym); if (!x) return null; const t = x.technicals || {}, pa = x.price_action || {};
+    const last = qp(sym, x).last; const atr = t.atr14; if (!isNum(last) || !isNum(atr)) return null;
+    const bi = brief && brief.briefs && brief.briefs.morning && (brief.briefs.morning.indexes || {})[sym];
+    let S = bi && isNum(bi.nearest_support) && bi.nearest_support < last ? bi.nearest_support : null;
+    let R = bi && isNum(bi.nearest_resistance) && bi.nearest_resistance > last ? bi.nearest_resistance : null;
+    const highs = (pa.swing_highs || []).map((p) => p.v).filter(isNum), lows = (pa.swing_lows || []).map((p) => p.v).filter(isNum);
+    if (R == null) { const a = highs.filter((v) => v > last); R = a.length ? Math.min(...a) : (isNum(t.hi52) && t.hi52 > last + atr * 0.25 ? t.hi52 : last + atr * 1.5); }
+    if (S == null) { const b = lows.filter((v) => v < last); S = b.length ? Math.max(...b) : (isNum(t.sma20) && t.sma20 < last ? t.sma20 : last - atr * 1.5); }
+    const upNext = [...highs.filter((v) => v > R + atr * 0.2), isNum(t.hi52) && t.hi52 > R + atr * 0.2 ? t.hi52 : null].filter(isNum);
+    const up2 = upNext.length ? Math.min(...upNext) : R + atr;
+    const dnNext = [...lows.filter((v) => v < S - atr * 0.2), isNum(t.sma50) && t.sma50 < S - atr * 0.2 ? t.sma50 : null].filter(isNum);
+    const dn2 = dnNext.length ? Math.max(...dnNext) : S - atr;
+    const trend = t.above_sma50 && t.above_sma200 ? "up" : !t.above_sma50 && !t.above_sma200 ? "down" : "mixed";
+    return { sym, last, atr, S, R, up2, dn2, trend, sma50: t.sma50, atrPct: t.atr_pct };
+  }
+  function pulseLevels(r) {
+    const L = levelsFor(r, pulseSym) || levelsFor(r, (pulseSym = "SPY")); if (!L) return "";
+    const lo = Math.min(L.dn2, L.last - L.atr) , hi = Math.max(L.up2, L.last + L.atr); const pad = (hi - lo) * 0.06; const a = lo - pad, b = hi + pad;
+    const at = (v) => (((v - a) / (b - a)) * 100).toFixed(2) + "%";
+    const gap = (u, v) => Math.abs(u - v) / (b - a) * 100;          // in track percent: under ~9 the two labels would touch
+    const tightDn = gap(L.dn2, L.S) < 9 ? " tight" : "", tightUp = gap(L.up2, L.R) < 9 ? " tight" : "";
+    const pct = (v) => fpct((v / L.last - 1) * 100, 1);
+    const inRange = clamp01((L.last - L.S) / (L.R - L.S));
+    const where = inRange > 0.66 ? "closer to the ceiling" : inRange < 0.34 ? "closer to the floor" : "in the middle of the box";
+    const seg = ["SPY", "QQQ", "IWM"].map((s) => `<button type="button" class="${s === pulseSym ? "on" : ""}" data-pulse-sym="${s}">${s}</button>`).join("");
+    const lean = (k) => (L.trend === k ? `<em class="pl-lean">with the trend</em>` : "");
+    return `<article class="pz pz-levels" data-pz="levels">
+      <div class="pz-h"><span class="pz-eye">What could happen next</span><div class="pz-seg" role="tablist">${seg}</div></div>
+      <p class="pl-lede"><b>${L.sym} ${fnum(L.last)}</b> is ${where}. A normal day moves it about <b>±${fnum(L.atr)}</b> (${fnum(L.atrPct, 1)}%).</p>
+      <div class="pl-track" aria-hidden="true">
+        <span class="pl-zone" style="left:${at(L.S)};width:calc(${at(L.R)} - ${at(L.S)})"></span>
+        <span class="pl-atr" style="left:${at(L.last - L.atr)};width:calc(${at(L.last + L.atr)} - ${at(L.last - L.atr)})"></span>
+        <span class="pl-mk dn2${tightDn}" style="left:${at(L.dn2)}"><i></i><b>${fnum(L.dn2)}</b></span>
+        <span class="pl-mk s" style="left:${at(L.S)}"><i></i><b>${fnum(L.S)}</b><em>floor</em></span>
+        <span class="pl-mk px" style="left:${at(L.last)}"><i></i><em>now ${fnum(L.last)}</em></span>
+        <span class="pl-mk r" style="left:${at(L.R)}"><i></i><b>${fnum(L.R)}</b><em>ceiling</em></span>
+        <span class="pl-mk up2${tightUp}" style="left:${at(L.up2)}"><i></i><b>${fnum(L.up2)}</b></span>
+      </div>
+      <div class="pl-legend"><span><i class="z"></i>the box</span><span><i class="a"></i>a normal day's move</span></div>
+      <ol class="pl-scen">
+        <li class="up"><span class="pl-if">Breaks above <b>${fnum(L.R)}</b> <small>${pct(L.R)}</small></span><span class="pl-then">Buyers take over. Next stop <b>${fnum(L.up2)}</b> ${lean("up")}</span></li>
+        <li class="flat"><span class="pl-if">Stays between <b>${fnum(L.S)}</b> and <b>${fnum(L.R)}</b></span><span class="pl-then">Chop. Bounces off both edges, no real trend ${L.trend === "mixed" ? `<em class="pl-lean">trend is mixed</em>` : ""}</span></li>
+        <li class="down"><span class="pl-if">Drops below <b>${fnum(L.S)}</b> <small>${pct(L.S)}</small></span><span class="pl-then">Sellers take over. Next floor <b>${fnum(L.dn2)}</b> ${lean("down")}</span></li>
+      </ol>
+      <div class="pz-foot">Levels are recent swing highs and lows. "If this, then that", not a prediction.</div>
+    </article>`;
+  }
+  const VITALS = [
+    ["^VIX", "Fear gauge", (q) => vixWord(q.last), (q) => (q.last >= 20 ? "warn" : "up")],
+    ["^TNX", "10-yr yield", (q) => (q.chg > 0 ? "rising" : q.chg < 0 ? "easing" : "flat"), (q) => (q.chg > 0 ? "down" : q.chg < 0 ? "up" : "flat")],
+    ["DX-Y.NYB", "US dollar", (q) => (q.chg > 0 ? "stronger" : q.chg < 0 ? "weaker" : "flat"), () => "flat"],
+    ["CL=F", "Oil", (q) => (q.chg > 0 ? "inflation risk" : q.chg < 0 ? "relief" : "flat"), (q) => (q.chg > 0 ? "warn" : "flat")],
+    ["GC=F", "Gold", (q) => (q.chg > 0 ? "safety bid" : q.chg < 0 ? "fear fading" : "flat"), () => "flat"],
+    ["BTC-USD", "Bitcoin", (q) => (q.chg > 0 ? "risk-on" : q.chg < 0 ? "cooling" : "flat"), (q) => cls(q.chg)],
+  ];
+  function pulseVitals(r) {
+    const tiles = VITALS.map(([sym, label, word, tone]) => { const m = macroOf(r, sym); if (!m) return ""; const q = qp(sym, m);
+      return `<div class="pv-tile"><div class="pv-h"><span>${label}</span><em class="${tone(q)}">${esc(word(q))}</em></div><div class="pv-px">${priceHtml(sym, m)}</div>${spark(m.spark, cls(q.chg))}</div>`; }).join("");
+    return `<article class="pz pz-vitals" data-pz="vitals"><div class="pz-h"><span class="pz-eye">Vital signs</span><span class="pz-hint">the things that move everything</span></div><div class="pv-grid">${tiles}</div></article>`;
+  }
+  function pulseSectors(r) {
+    const key = { "1d": "chg_1d", "1w": "chg_5d", "1m": "chg_1m" }[pulsePeriod];
+    const rows = ((r.flows || {}).sectors || []).map((x) => ({ ...x, v: pulsePeriod === "1d" ? qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg : x[key] })).filter((x) => isNum(x.v)).sort((a, b) => b.v - a.v);
+    if (!rows.length) return "";
+    const mx = Math.max(0.5, ...rows.map((x) => Math.abs(x.v)));
+    const bars = rows.map((x) => { const w = (Math.abs(x.v) / mx) * 50; return `<li><span class="ps-l">${esc(x.label)}</span><span class="ps-bar"><i class="${cls(x.v)}" style="${x.v >= 0 ? `left:50%` : `right:50%`};width:${w.toFixed(1)}%"></i></span><span class="ps-v ${cls(x.v)}">${fpct(x.v, 1)}</span></li>`; }).join("");
+    const seg = [["1d", "Today"], ["1w", "Week"], ["1m", "Month"]].map(([k, l]) => `<button type="button" class="${k === pulsePeriod ? "on" : ""}" data-pulse-period="${k}">${l}</button>`).join("");
+    const top = rows[0], bot = rows[rows.length - 1];
+    return `<article class="pz pz-sectors" data-pz="sectors"><div class="pz-h"><span class="pz-eye">Where the money went</span><div class="pz-seg">${seg}</div></div>
+      <p class="pl-lede"><b class="${cls(top.v)}">${esc(top.label)}</b> led, <b class="${cls(bot.v)}">${esc(bot.label)}</b> lagged.</p><ul class="ps-list">${bars}</ul></article>`;
+  }
+  const RADAR = { breadth: ["More stocks joining in", "Only the giants carrying it"], size: ["Small caps winning", "Big caps preferred"], offense: ["Offense over defense", "Defense over offense"], credit: ["Bond market relaxed", "Bond market nervous"], growth: ["Growth beating fear", "Fear beating growth"], semis: ["Chips leading", "Chips lagging"] };
+  function pulseRadar(r) {
+    const gs = (((r.flows || {}).gauges) || []);
+    const items = gs.map((g) => { if (g.key === "vixterm") { if (!isNum(g.value)) return ""; const st = g.value > 1; return `<li class="${st ? "down" : "up"}"><span class="pr-ar">${st ? "!" : "✓"}</span><span><b>${st ? "Short-term stress" : "No short-term stress"}</b><i>VIX vs 3-month VIX ${fnum(g.value, 2)}</i></span></li>`; }
+      const t = RADAR[g.key]; if (!t || !isNum(g.chg_1m)) return ""; const up = g.chg_1m >= 0; const good = up;
+      return `<li class="${good ? "up" : "down"}"><span class="pr-ar">${up ? "▲" : "▼"}</span><span><b>${t[up ? 0 : 1]}</b><i>${esc(g.label)} · ${fpct(g.chg_1m, 1)} in a month</i></span></li>`; }).join("");
+    if (!items) return "";
+    return `<article class="pz pz-radar" data-pz="radar"><div class="pz-h"><span class="pz-eye">Risk radar</span><span class="pz-hint">green = risk-on</span></div><ul class="pr-list">${items}</ul></article>`;
+  }
+  function pulseHeat(r) {
+    const list = activeList(); if (!list.length) return "";
+    const tiles = list.map((t) => { const s = (r.stocks || []).find((x) => x.ticker === t); const q = qp(t, s); const v = s ? verdictFor(s) : null;
+      const ch = isNum(q.chg) && Math.abs(q.chg) < 0.05 ? 0 : q.chg;       // no "-0.0%": a move that rounds to nothing is flat
+      const k = isNum(ch) ? Math.min(1, Math.abs(ch) / 4) : 0; const c = cls(ch);
+      return `<button type="button" class="ph-tile ${c}" style="--k:${(0.12 + k * 0.6).toFixed(2)}" data-ticker-page="${esc(t)}"><b>${esc(t)}</b><span class="ph-chg">${isNum(ch) && ch === 0 ? "0.0%" : fpct(ch, 1)}</span>${v ? `<em>${esc(v.word)}</em>` : ""}</button>`; }).join("");
+    const ups = list.filter((t) => { const s = (r.stocks || []).find((x) => x.ticker === t); return (qp(t, s).chg || 0) > 0; }).length;
+    return `<article class="pz pz-heat" data-pz="heat"><div class="pz-h"><span class="pz-eye">Your watchlist · ${esc(lists.active)}</span><span class="pz-hint">${ups} of ${list.length} green · colour = size of the move</span></div><div class="ph-grid">${tiles}</div></article>`;
+  }
+  function pulseLine(r) {
+    const spy = idxOf(r, "SPY"); const q = spy ? qp("SPY", spy) : {}; const tone = ((r.regime || {}).tone || {}).choice;
+    const mv = isNum(q.chg) ? (Math.abs(q.chg) < 0.15 ? "went nowhere" : q.chg > 0 ? `rose ${fpct(q.chg, 1)}` : `fell ${fpct(Math.abs(q.chg), 1, false)}`) : "";
+    const day = r.market_state === "open" ? "today" : "last session";
+    return `The S&P 500 ${mv} ${day}. ${tone && EX.tone[tone] ? esc(EX.tone[tone]) : ""}`;
+  }
+  function secPulse(r) {
+    const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";
+    return `<section class="pulse">
+      <div class="pulse-head"><span class="pz-live ${r.market_state === "open" ? "on" : ""}"><i></i>${st} · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
+        <h2>The market in 10 seconds</h2><p>${pulseLine(r)}</p></div>
+      <div class="pulse-grid">${pulseGauge(r)}${pulseIndexes(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
+      <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners</i></div>
+    </section>`;
+  }
+  function refreshPulse(which) {
+    if (currentView !== "home" || !report) return;
+    const make = { gauge: pulseGauge, levels: pulseLevels, sectors: pulseSectors }[which]; const el = $(`.pz[data-pz="${which}"]`); if (!make || !el) return;
+    const tmp = document.createElement("div"); tmp.innerHTML = make(report); if (tmp.firstElementChild) { tmp.firstElementChild.classList.add("no-anim"); el.replaceWith(tmp.firstElementChild); }
+  }
+  document.addEventListener("click", (e) => {
+    const s = e.target.closest("[data-pulse-sym]"); if (s) { pulseSym = s.getAttribute("data-pulse-sym"); refreshPulse("levels"); return; }
+    const p = e.target.closest("[data-pulse-period]"); if (p) { pulsePeriod = p.getAttribute("data-pulse-period"); refreshPulse("sectors"); }
+  });
+
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
