@@ -223,6 +223,9 @@ LOW_FLOAT_ROWS = 20
 LOW_FLOAT_MAX_JUDGED = 10
 
 # ---- accounts ----
+# Briefing emails (07:00 morning and after the close) are OFF unless MU_BULK_MAIL=1. Sign-in links always send.
+BULK_MAIL = os.environ.get("MU_BULK_MAIL", "0").strip().lower() in ("1", "true", "yes", "on")
+
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("MU_ADMIN_EMAILS", "shayan001@live.ca").split(",") if e.strip()}
 
 # Every new account (and every guest) starts with these seven; users add or remove from there.

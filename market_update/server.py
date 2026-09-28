@@ -437,7 +437,7 @@ def _mail_brief(b: dict[str, Any], day: str) -> None:
     """One short email per signed-in user, once per day, after the 07:00 briefing. Like the close email, the
     marker lists who has it, a retry sends only to the rest, and a provider block stops the run at once."""
     marker = _brief_dir() / f"{day}.mailed"
-    if not mail.status().get("configured") or _bulk_blocked():
+    if not config.BULK_MAIL or not mail.status().get("configured") or _bulk_blocked():
         return
     done, finished = _read_marker(marker)
     if finished:
@@ -470,7 +470,7 @@ def _mail_close(b: dict[str, Any], day: str) -> None:
     """One after-the-close email per signed-in user, once per day. The marker lists who has it, so a retry
     after a provider throttle sends only to the rest; a throttle reply stops the run instead of burning the list."""
     marker = _brief_dir() / f"{day}-close.mailed"
-    if not mail.status().get("configured") or _bulk_blocked():
+    if not config.BULK_MAIL or not mail.status().get("configured") or _bulk_blocked():
         return
     done: set[str] = set()
     if marker.exists():
