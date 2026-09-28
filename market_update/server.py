@@ -1478,6 +1478,7 @@ def _st_rpc(method: str, params: dict[str, Any] | None = None, session: str | No
     if r.status_code >= 400:
         raise RuntimeError(f"mcp {method} {r.status_code}: {r.text[:200]}")
     sid = r.headers.get("Mcp-Session-Id") or session
+    r.encoding = "utf-8"               # event-stream replies carry no charset; requests would guess latin-1 and garble emoji
     body = r.text
     if "text/event-stream" in r.headers.get("content-type", ""):
         chunks = [ln[5:].strip() for ln in body.splitlines() if ln.startswith("data:")]
@@ -1485,13 +1486,20 @@ def _st_rpc(method: str, params: dict[str, Any] | None = None, session: str | No
     return (json.loads(body) if body.strip() else {}), sid
 
 
-def st_call(tool: str, arguments: dict[str, Any]) -> Any:
-    """Initialize a session, call one tool, return its result content."""
-    init, sid = _st_rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "OneView", "version": "0.3"}})
+def st_open() -> str | None:
+    """Open one MCP session; pass its id to st_call to make many calls without re-initializing each time."""
+    _, sid = _st_rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "OneView", "version": "0.4"}})
     try:
         _st_rpc("notifications/initialized", {}, sid)
     except Exception:  # noqa: BLE001
         pass
+    return sid
+
+
+def st_call(tool: str, arguments: dict[str, Any], sid: str | None = None) -> Any:
+    """Call one tool (in the given session, or a fresh one) and return its result content."""
+    if sid is None:
+        sid = st_open()
     res, _ = _st_rpc("tools/call", {"name": tool, "arguments": arguments}, sid)
     return res.get("result", res)
 
@@ -1529,28 +1537,143 @@ def _st_text(res: Any) -> Any:
     return res
 
 
+# ---- what the crowd is saying: topics, the bull/bear split of recent posts, and a few clean quotes ----------
+import re as _re
+
+ST_TOPICS: list[tuple[str, str, str]] = [
+    ("options", "Calls and puts", r"\b(calls?|puts?|options?|0dte|strikes?|contracts?|expir\w*|premium)\b"),
+    ("fed", "Fed and rates", r"\b(fed|fomc|powell|rate ?cuts?|rate ?hikes?|rates|yields?|bonds?|treasur\w*)\b"),
+    ("policy", "Politics and policy", r"\b(trump|tariffs?|white house|oval office|address|executive order|congress|shutdown|sanctions?|ban)\b"),
+    ("earnings", "Earnings", r"\b(earnings|eps|guidance|revenue|quarter|q[1-4]|er)\b"),
+    ("ai", "AI and chips", r"\b(ai|gpus?|chips?|semis?|data ?cent(er|re)s?|nvidia|blackwell)\b"),
+    ("crypto", "Crypto", r"\b(btc|bitcoin|crypto|eth|ethereum|solana)\b"),
+    ("oil", "Oil and energy", r"\b(oil|crude|diesel|opec|energy|gas prices?)\b"),
+    ("hype", "Breakout hype", r"\b(moon\w*|rip\w*|squeeze|breakout|ath|all[- ]time high|rocket|send it|lfg)\b"),
+    ("fear", "Crash and top talk", r"\b(crash\w*|dump\w*|bubble|collapse|recession|sell-?off|top is in|capitulat\w*)\b"),
+    ("dip", "Buying the dip", r"\b(dip|btfd|loading|accumulat\w*|adding more|bought more)\b"),
+]
+_ST_TOPIC_RX = [(k, lbl, _re.compile(rx, _re.I)) for k, lbl, rx in ST_TOPICS]
+# posts that insult, swear or name-call never reach the page; usernames and avatars are never shown at all
+_ST_BLOCK = _re.compile(r"(f+u+c+k|sh[i1]t|b[i1]tch|cunt|retard|fag|n[i1]gg|whore|slut|pedo|diddl|rap(e|ist)|dick|puss(y|ies)|felon|idiot|moron|stupid|dumb\s*ass|kys|kill (yo)?urself|porn|nazi|kabob|curry|pajeet|chink|gook|towelhead|tranny|libtard|commie scum|bootlick\w*|clown|loser|scum|traitor)", _re.I)
+_ST_URL = _re.compile(r"https?://\S+")
+
+
+def _st_clean_quote(body: str, sym: str | None = None, tagged: list[str] | None = None) -> str | None:
+    """A post worth quoting on this symbol: on topic (it leads with this ticker, or tags at most two), real words
+    rather than a bare link title, no insults, no ticker walls, no shouting."""
+    import html as _html
+    raw = _html.unescape(body or "")
+    if sym:
+        first = _re.search(r"\$([A-Za-z][A-Za-z.]*)", raw)
+        leads = bool(first and first.group(1).upper() == sym.upper())
+        early = f"${sym.upper()}" in raw[:40].upper()                               # named in the opening words
+        if not (leads or (early and len(tagged or []) <= 3)):
+            return None
+    if _ST_URL.search(raw) and len(_ST_URL.sub("", raw).strip()) < 70:          # a shared link with a headline is promotion, not a view
+        return None
+    t = _ST_URL.sub("", _html.unescape(body or "")).replace(" ", " ")
+    t = _re.sub(r"\s+", " ", t).strip()
+    if len(t) < 28 or len(t) > 320 or _ST_BLOCK.search(t):
+        return None
+    if len(_re.findall(r"\$[A-Za-z.]+", t)) > 4:                         # a wall of tickers is spam, not an opinion
+        return None
+    letters = [c for c in t if c.isalpha()]
+    if len(letters) > 20 and sum(c.isupper() for c in letters) / len(letters) > 0.6:   # shouting
+        return None
+    return t if len(t) <= 230 else t[:227].rsplit(" ", 1)[0] + "…"
+
+
+def _st_talk(sym: str, sid: str | None) -> dict[str, Any] | None:
+    """Read the last ~30 posts on one symbol and turn them into numbers: how many lean bullish or bearish,
+    which topics come up, which other tickers get mentioned, and up to three clean posts from each side."""
+    res = _st_text(st_call("get_symbol_messages", {"symbol": sym, "limit": 30}, sid)) or {}
+    msgs = res.get("messages") if isinstance(res, dict) else None
+    if not msgs:
+        return None
+    bull = bear = 0
+    topics: dict[str, int] = {}
+    co: dict[str, int] = {}
+    quotes: dict[str, list[dict[str, Any]]] = {"bull": [], "bear": []}
+    seen: set[str] = set()
+    for m in msgs:
+        body = m.get("body") or ""
+        side = (m.get("sentiment") or "").lower()
+        if side == "bullish":
+            bull += 1
+        elif side == "bearish":
+            bear += 1
+        for k, _lbl, rx in _ST_TOPIC_RX:
+            if rx.search(body):
+                topics[k] = topics.get(k, 0) + 1
+        for s2 in m.get("symbols") or []:
+            s2 = str(s2).upper()
+            if s2 != sym and len(co) < 60:
+                co[s2] = co.get(s2, 0) + 1
+        key = "bull" if side == "bullish" else "bear" if side == "bearish" else None
+        if key and len(quotes[key]) < 3:
+            q = _st_clean_quote(body, sym, m.get("symbols") or [])
+            sig = (q or "")[:40].lower()
+            if q and sig not in seen:
+                seen.add(sig)
+                quotes[key].append({"text": q, "at": m.get("created_at"), "id": m.get("id")})
+    tagged = bull + bear
+    labels = {k: lbl for k, lbl, _ in ST_TOPICS}
+    return {"symbol": sym, "posts": len(msgs), "bull": bull, "bear": bear, "untagged": len(msgs) - tagged,
+            "bull_share": round(bull / tagged * 100) if tagged else None,
+            "topics": [{"key": k, "label": labels[k], "n": n} for k, n in sorted(topics.items(), key=lambda x: -x[1]) if n >= 2][:5],
+            "also": [{"symbol": k, "n": n} for k, n in sorted(co.items(), key=lambda x: -x[1]) if n >= 2][:6],
+            "quotes": quotes, "newest": msgs[0].get("created_at"), "oldest": msgs[-1].get("created_at")}
+
+
 def _stocktwits_sync() -> dict[str, Any]:
-    """One crowd snapshot: market mood (SPY, QQQ), trending names, the big caps' mood. About a dozen calls."""
-    out: dict[str, Any] = {"as_of": time.time(), "moods": {}, "trending": [], "source": "StockTwits (official connector)"}
+    """One crowd snapshot: the mood of the market and the big caps versus their own normal, a week of the
+    market's mood, the trending names, and what people are saying on the names that matter most right now.
+    One MCP session, about twenty calls."""
+    out: dict[str, Any] = {"as_of": time.time(), "moods": {}, "history": {}, "trending": [], "talk": {}, "source": "StockTwits (official connector)"}
+    try:
+        sid = st_open()
+    except Exception as e:  # noqa: BLE001
+        log.warning("stocktwits session: %s", e)
+        sid = None
     for sym in ST_BIG:
         try:
-            s = _st_text(st_call("get_sentiment", {"symbol": sym})) or {}
-            out["moods"][sym] = {"symbol": sym, "score": s.get("score"), "label": s.get("label"), "bullish_pct": s.get("bullish_pct"), "bullish_delta": s.get("bullish_delta")}
+            s = _st_text(st_call("get_sentiment", {"symbol": sym}, sid)) or {}
+            out["moods"][sym] = {"symbol": sym, "score": s.get("score"), "label": s.get("label"), "bullish_pct": s.get("bullish_pct"),
+                                 "bearish_pct": s.get("bearish_pct"), "bullish_delta": s.get("bullish_delta")}
         except Exception as e:  # noqa: BLE001
             log.warning("stocktwits sentiment %s: %s", sym, e)
     for sym in ("SPY", "QQQ"):
         try:
-            v = _st_text(st_call("get_message_volume", {"symbol": sym})) or {}
+            v = _st_text(st_call("get_message_volume", {"symbol": sym}, sid)) or {}
             now = next((x for x in v.get("series", []) if x.get("timeframe") == "now"), None)
             if now and sym in out["moods"]:
                 out["moods"][sym]["volume_label"] = now.get("normalized_label") or now.get("label"); out["moods"][sym]["volume_score"] = now.get("normalized_value")
         except Exception as e:  # noqa: BLE001
             log.warning("stocktwits volume %s: %s", sym, e)
+        try:
+            h = _st_text(st_call("get_sentiment_history", {"symbol": sym, "zoom": "1W"}, sid)) or {}
+            ser = [x for x in (h.get("series") or []) if isinstance(x.get("value"), (int, float))]
+            step = max(1, len(ser) // 48)
+            out["history"][sym] = [{"t": x.get("time"), "v": x["value"]} for x in ser[::step]] + ([{"t": ser[-1].get("time"), "v": ser[-1]["value"]}] if ser and (len(ser) - 1) % step else [])
+        except Exception as e:  # noqa: BLE001
+            log.warning("stocktwits history %s: %s", sym, e)
     try:
-        t = _st_text(st_call("get_trending_symbols", {"limit": 12, "asset_class": "equities"})) or {}
-        out["trending"] = [{"symbol": x.get("symbol"), "title": x.get("title"), "price": x.get("price"), "change_pct": x.get("change"), "watchers": x.get("watchers"), "rank": x.get("rank")} for x in t.get("symbols", [])]
+        t = _st_text(st_call("get_trending_symbols", {"limit": 12, "asset_class": "equities"}, sid)) or {}
+        out["trending"] = [{"symbol": x.get("symbol"), "title": x.get("title"), "price": x.get("price"), "change_pct": x.get("change"), "watchers": x.get("watchers"),
+                            "rank": x.get("rank"), "spark": [p for p in (x.get("spark") or []) if isinstance(p, (int, float))][-40:], "session": x.get("session")} for x in t.get("symbols", [])]
     except Exception as e:  # noqa: BLE001
         log.warning("stocktwits trending: %s", e)
+    # what people are saying: the two index funds, the two big caps furthest from their normal mood, the top two trending names
+    big = sorted([m for s2, m in out["moods"].items() if s2 not in ("SPY", "QQQ") and isinstance(m.get("score"), (int, float))], key=lambda m: -abs(m["score"] - 50))
+    talk_syms = list(dict.fromkeys(["SPY", "QQQ"] + [m["symbol"] for m in big[:2]] + [x["symbol"] for x in out["trending"][:2] if x.get("symbol")]))[:6]
+    for sym in talk_syms:
+        try:
+            tk = _st_talk(sym, sid)
+            if tk:
+                out["talk"][sym] = tk
+        except Exception as e:  # noqa: BLE001
+            log.warning("stocktwits messages %s: %s", sym, e)
+    out["talk_order"] = [s2 for s2 in talk_syms if s2 in out["talk"]]
     quotes = (state.get("live_scan") or {}).get("quotes") or {}
     day = fetch.now_et().date().isoformat()
     try:

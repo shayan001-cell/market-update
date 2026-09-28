@@ -707,19 +707,82 @@
       if (currentView === "home" && report) { refreshPulse("gauge"); const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
   }
   const ST_LABEL = { BULLISH: ["Bullish", "up"], EXTREMELY_BULLISH: ["Extremely bullish", "up"], BEARISH: ["Bearish", "down"], EXTREMELY_BEARISH: ["Extremely bearish", "down"], NEUTRAL: ["Neutral", "flat"] };
+  // ======================= THE CROWD (StockTwits): mood versus normal, and what people are saying =======================
+  // StockTwits' score (0-100) compares the crowd with that stock's own normal: 50 is a normal day. The raw share of
+  // bullish-tagged posts always runs high (the crowd leans long), so it is shown only as a footnote.
+  const CROWD_WORD = (sc) => (!isNum(sc) ? ["no read", "flat"] : sc < 20 ? ["Extremely bearish", "down"] : sc < 40 ? ["Bearish", "down"] : sc < 46 ? ["Slightly bearish", "down"] : sc <= 54 ? ["Normal", "flat"] : sc <= 60 ? ["Slightly bullish", "up"] : sc <= 80 ? ["Bullish", "up"] : ["Extremely bullish", "up"]);
+  const CROWD_LBL = { EXTREMELY_BULLISH: ["Extremely bullish", "up"], BULLISH: ["Bullish", "up"], SLIGHTLY_BULLISH: ["Slightly bullish", "up"], NEUTRAL: ["Normal", "flat"], SLIGHTLY_BEARISH: ["Slightly bearish", "down"], BEARISH: ["Bearish", "down"], EXTREMELY_BEARISH: ["Extremely bearish", "down"] };
+  const crowdWordFor = (x) => CROWD_LBL[String((x && x.label) || "").toUpperCase().replace(/\s+/g, "_")] || CROWD_WORD(x && x.score);   // StockTwits' own label wins
+  let crowdSym = null;
+  const agoShort = (iso) => { if (!iso) return ""; const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000); return s < 90 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  function crowdMeter(sc, w) {
+    w = w || CROWD_WORD(sc);
+    return `<div class="cr-meter" title="50 is this stock's normal mood. Higher is more bullish than usual, lower is more bearish than usual."><span class="cr-mid"></span>${isNum(sc) ? `<i class="${w[1]}" style="left:${Math.max(0, Math.min(100, sc))}%"></i>` : ""}</div>`;
+  }
+  function crowdLine(series) {
+    const v = (series || []).map((x) => x.v).filter(isNum); if (v.length < 2) return "";
+    const W = 260, H = 54, y = (x) => H - 3 - (x / 100) * (H - 6);
+    const pts = v.map((x, i) => `${((i / (v.length - 1)) * W).toFixed(1)},${y(x).toFixed(1)}`).join(" ");
+    const last = v[v.length - 1], first = v[0];
+    return `<svg class="cr-line ${last >= 50 ? "up" : "down"}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Crowd mood over the last week, from ${first} to ${last}"><line x1="0" x2="${W}" y1="${y(50).toFixed(1)}" y2="${y(50).toFixed(1)}" class="cr-50"/><polyline points="${pts}"/></svg>`;
+  }
+  function crowdMood(c, sym, name) {
+    const x = (c.moods || {})[sym]; if (!x) return "";
+    const w = crowdWordFor(x); const tk = (c.talk || {})[sym]; const hist = (c.history || {})[sym] || [];
+    const wk = hist.length > 1 ? hist[hist.length - 1].v - hist[0].v : null;
+    const now = tk && isNum(tk.bull_share) ? (tk.bull_share >= 60 ? ["leaning bullish", "up"] : tk.bull_share <= 40 ? ["leaning bearish", "down"] : ["split", "flat"]) : null;
+    const clash = now && ((w[1] === "up" && now[1] === "down") || (w[1] === "down" && now[1] === "up"));
+    return `<div class="cr-card" data-ticker-page="${esc(sym)}" role="button" tabindex="0">
+      <div class="cr-card-h"><span><b>${esc(sym)}</b><i>${esc(name)}</i></span>${x.volume_label ? `<span class="cr-chat" title="How much people are posting versus normal">chatter ${esc(String(x.volume_label).toLowerCase().replace(/_/g, " "))}</span>` : ""}</div>
+      <div class="cr-word ${w[1]}">${w[0]}</div>
+      <div class="cr-scale"><span>bearish</span>${crowdMeter(x.score, w)}<span>bullish</span></div>
+      <div class="cr-nums"><span><b>${isNum(x.score) ? x.score : "–"}</b>/100 vs a normal 50</span>${isNum(wk) ? `<span class="${cls(wk)}">${wk >= 0 ? "+" : ""}${Math.round(wk)} this week</span>` : ""}</div>
+      ${crowdLine(hist)}
+      ${now ? `<div class="cr-now ${clash ? "clash" : ""}"><b>Last ${tk.posts} posts:</b> ${tk.bull} bullish, ${tk.bear} bearish, <span class="${now[1]}">${now[0]}</span>${clash ? ". The latest chatter is going against the week's mood." : "."}</div>` : ""}
+    </div>`;
+  }
+  function crowdTalk(c) {
+    const order = c.talk_order || Object.keys(c.talk || {}); if (!order.length) return "";
+    if (!crowdSym || !order.includes(crowdSym)) crowdSym = order[0];
+    const t = c.talk[crowdSym]; const tagged = t.bull + t.bear;
+    const tabs = order.map((s) => `<button type="button" class="${s === crowdSym ? "on" : ""}" data-crowd-sym="${esc(s)}">${esc(s)}</button>`).join("");
+    const bs = tagged ? Math.round((t.bull / tagged) * 100) : 0;
+    const lean = !tagged ? "Nobody tagged a side" : bs >= 65 ? "Mostly bullish talk" : bs >= 55 ? "Leaning bullish" : bs <= 35 ? "Mostly bearish talk" : bs <= 45 ? "Leaning bearish" : "An even fight";
+    const topics = (t.topics || []).map((x) => `<span class="cr-topic">${esc(x.label)}<i>${x.n}</i></span>`).join("");
+    const also = (t.also || []).map((x) => `<span class="cr-also" data-ticker-page="${esc(String(x.symbol).replace(/\.X$/, "-USD"))}">$${esc(x.symbol)}</span>`).join("");
+    const q = (side) => (t.quotes[side] || []).map((m) => `<blockquote class="cr-q ${side === "bull" ? "up" : "down"}"><p>${esc(m.text)}</p><footer>${agoShort(m.at)}${m.id ? ` · <a href="https://stocktwits.com/message/${encodeURIComponent(m.id)}" target="_blank" rel="noopener">open</a>` : ""}</footer></blockquote>`).join("") || `<div class="cr-none">No clean ${side === "bull" ? "bullish" : "bearish"} post in this batch.</div>`;
+    return `<div class="cr-talk" data-crowd-talk>
+      <div class="cr-talk-h"><h4>What people are saying</h4><div class="pz-seg">${tabs}</div></div>
+      <div class="cr-sum"><b>${lean}</b> on ${esc(crowdSym)}: <span class="up">${t.bull} bullish</span> vs <span class="down">${t.bear} bearish</span> in the last ${t.posts} posts${t.untagged ? ` (${t.untagged} took no side)` : ""}, ${(() => { const a = agoShort(t.oldest); return a === "just now" ? "all in the last minute" : a ? `all from the last ${esc(a.replace(" ago", ""))}` : ""; })()}.</div>
+      <div class="cr-split" aria-hidden="true"><i class="up" style="width:${tagged ? bs : 50}%"></i><i class="down" style="width:${tagged ? 100 - bs : 50}%"></i></div>
+      ${topics ? `<div class="cr-row"><span class="cr-lbl">Hot topics</span><div class="cr-topics">${topics}</div></div>` : ""}
+      ${also ? `<div class="cr-row"><span class="cr-lbl">Also mentioned</span><div class="cr-topics">${also}</div></div>` : ""}
+      <div class="cr-quotes"><div><h5 class="up">The bull side</h5>${q("bull")}</div><div><h5 class="down">The bear side</h5>${q("bear")}</div></div>
+      <div class="pz-foot">Real posts from StockTwits, newest first. Usernames are hidden and posts with insults or slurs are left out. Opinions, not advice.</div>
+    </div>`;
+  }
   function secCrowd(r) {
     const c = crowd; if (!c || c.status !== "ok") return "";
     const m = c.moods || {};
-    const mood = (sym, name) => { const x = m[sym]; if (!x) return ""; const L = ST_LABEL[x.label] || [pretty(x.label || "–"), "flat"]; return `<div class="cw-mood ${L[1]}" data-ticker-page="${esc(sym)}"><div class="cw-h"><b>${esc(sym)}</b><span class="muted">${esc(name)}</span></div><div class="cw-l ${L[1]}">${L[0]}</div><div class="meta2">crowd score <b>${isNum(x.score) ? x.score : "–"}</b>/100 · ${isNum(x.bullish_pct) ? x.bullish_pct.toFixed(0) + "% bullish" : ""}${isNum(x.bullish_delta) ? ` (${x.bullish_delta >= 0 ? "+" : ""}${x.bullish_delta.toFixed(0)} pts today)` : ""}${x.volume_label ? ` · chatter ${esc(String(x.volume_label).toLowerCase().replace(/_/g, " "))}` : ""}</div></div>`; };
-    const bigs = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "TSLA", "GOOGL", "AVGO"].map((sym) => { const x = m[sym]; if (!x) return ""; const L = ST_LABEL[x.label] || [pretty(x.label || "–"), "flat"]; return `<span class="bf-mega" data-ticker-page="${esc(sym)}"><b>${esc(sym)}</b><i class="${L[1]}">${L[0].toLowerCase()}</i><span class="muted">${isNum(x.score) ? x.score : "–"}</span></span>`; }).join("");
-    const trend = (c.trending || []).slice(0, 10).map((t) => `<span class="bf-mega" data-ticker-page="${esc(t.symbol)}"><b>${esc(t.symbol)}</b><span class="delta ${cls(t.change_pct)}">${fpct(t.change_pct, 1)}</span><span class="muted">${isNum(t.watchers) ? fvol(t.watchers) + " watching" : ""}</span></span>`).join("");
-    return `<section class="crowd"><h3>StockTwits crowd <span class="muted">what the retail crowd is saying · refreshed every 10 minutes in market hours · ${esc(etTime(c.as_of))} ET</span></h3>
-      ${explain("The crowd's mood on the market and the biggest names, from StockTwits' own sentiment score (0 to 100, from posts tagged bullish or bearish), plus the names trending right now. A crowd that is extremely bullish or bearish is a crowding signal, not a forecast; it also feeds the desk's 15-minute direction read and is logged every day so it can be scored.")}
-      <div class="cw-grid"><div class="cw-moods">${mood("SPY", "S&P 500")}${mood("QQQ", "Nasdaq 100")}</div>
-        <div><h4>Big caps: crowd mood</h4><div class="bf-megas">${bigs || '<span class="muted">no data</span>'}</div></div>
-        <div><h4>Trending on StockTwits right now</h4><div class="bf-megas">${trend || '<span class="muted">no data</span>'}</div></div></div>
+    const bigs = ["NVDA", "AAPL", "MSFT", "AMZN", "META", "TSLA", "GOOGL", "AVGO"].filter((s) => m[s]).map((s) => { const x = m[s]; const w = crowdWordFor(x); const q = qp(s, (r.stocks || []).find((z) => z.ticker === s));
+      return `<li data-ticker-page="${esc(s)}"><b>${esc(s)}</b>${crowdMeter(x.score, w)}<span class="cr-bw ${w[1]}">${w[0]}</span><span class="cr-bs">${isNum(x.score) ? x.score : "–"}</span>${(() => { const ch = isNum(q.chg) && Math.abs(q.chg) < 0.05 ? 0 : q.chg; return `<span class="delta ${cls(ch)}">${ch === 0 ? "0.0%" : fpct(ch, 1)}</span>`; })()}</li>`; }).join("");
+    const trend = (c.trending || []).slice(0, 8).map((t) => `<div class="cr-tr" data-ticker-page="${esc(t.symbol)}" role="button" tabindex="0"><div class="cr-tr-h"><b>${esc(t.symbol)}</b><span class="delta ${cls(t.change_pct)}">${fpct(t.change_pct, 1)}</span></div><i class="cr-tr-n">${esc(t.title || "")}</i>${spark(t.spark, (t.spark || []).length > 1 ? cls(t.spark[t.spark.length - 1] - t.spark[0]) : "flat")}<span class="cr-tr-w" title="The line is the latest session${t.session && /POST|OVERNIGHT|PRE/.test(t.session) ? " (extended hours)" : ""}">${isNum(t.watchers) ? fvol(t.watchers) + " watching" : ""}</span></div>`).join("");
+    return `<section class="crowd crowd2">
+      <div class="cr-head"><h3>The crowd <span class="muted">StockTwits · updated ${esc(etTime(c.as_of))} ET · every 10 minutes in market hours</span></h3></div>
+      <p class="cr-how">Each score compares today's mood with that stock's normal. <b>50 is a normal day</b>, higher is more bullish than usual, lower is more bearish than usual. A crowd at an extreme is a warning that a trade is crowded, not a signal to follow it.</p>
+      <div class="cr-top">${crowdMood(c, "SPY", "S&P 500")}${crowdMood(c, "QQQ", "Nasdaq 100")}</div>
+      ${crowdTalk(c)}
+      <div class="cr-bottom">
+        ${bigs ? `<div class="cr-bigs"><h4>Big caps vs their normal mood</h4><ul>${bigs}</ul></div>` : ""}
+        ${trend ? `<div class="cr-trend"><h4>Trending on StockTwits right now</h4><div class="cr-tr-grid">${trend}</div></div>` : ""}
+      </div>
     </section>`;
   }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-crowd-sym]"); if (!b || !crowd) return;
+    crowdSym = b.getAttribute("data-crowd-sym"); const el = $("[data-crowd-talk]"); if (!el) return;
+    const tmp = document.createElement("div"); tmp.innerHTML = crowdTalk(crowd); el.replaceWith(tmp.firstElementChild); wireStocks();
+  });
   let social = null, socialAll = false;
   const TP = {
     theme: { tariffs_trade: "Tariffs & trade", fed_rates: "Fed & rates", taxes_spending: "Taxes & spending", geopolitics: "Geopolitics", energy_oil: "Energy & oil", specific_company_or_sector: "A company or industry", crypto: "Crypto", immigration_labor: "Immigration & labor", not_market: "Not about markets" },
@@ -1896,7 +1959,7 @@
     const tp = ((r.regime || {}).tone || {}).probabilities;
     if (tp) { const d = (tp.risk_on || 0) - (tp.risk_off || 0); out.push({ k: "Model read", s: Math.round(50 + 50 * d), v: pretty(r.regime.tone.choice).replace(/^./, (c) => c.toUpperCase()), note: "OneView's read of futures, the fear gauge, rates and headlines" }); }
     const cm = crowd && crowd.status === "ok" && (crowd.moods || {}).SPY;
-    if (cm && isNum(cm.score)) out.push({ k: "Crowd", s: Math.round(cm.score), v: `${Math.round(cm.score)}/100`, note: "StockTwits sentiment on SPY. Extremes are a crowding warning, not a signal" });
+    if (cm && isNum(cm.score)) out.push({ k: "Crowd", s: Math.round(cm.score), v: `${Math.round(cm.score)}/100`, note: "StockTwits mood on SPY versus its normal (50 = normal). Extremes are a crowding warning, not a signal" });
     return out.filter((x) => isNum(x.s));
   }
   function pulseGauge(r) {
