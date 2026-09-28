@@ -1115,9 +1115,10 @@
   const moneyTag = (v, url, src) => `<span class="od-money">${usd(v)} traded${thin(v)}${url ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">${esc(src || "open")}</a>` : ""}</span>`;
   async function pollOdds() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/odds", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") return; oddsSnap = j;
+    const retry = () => { if (!oddsSnap) setTimeout(pollOdds, 20000); };      // still warming after a restart: ask again soon
+    try { const res = await api("/api/odds", { cache: "no-store" }); if (!res.ok) { retry(); return; } const j = await res.json(); if (j.status !== "ok") { retry(); return; } oddsSnap = j;
       if (onFeedView() && report) { const el = $(".odds"); const tmp = document.createElement("div"); tmp.innerHTML = secOdds(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const anchor = $(".crowd") || $(".home-hero"); if (anchor) anchor.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
-      if (onFeedView() && report) refreshPulse("bets");
+      if (onFeedView() && report) { refreshPulse("bets"); const mb = document.querySelector("[data-mk-bets]"); if (mb) { const tmp = document.createElement("div"); tmp.innerHTML = mkBets(); if (tmp.firstElementChild) mb.replaceWith(tmp.firstElementChild); } }
       if (currentView === "watch") rerenderWatch();
     } catch (e) { /* server restarting */ }
   }
@@ -3102,11 +3103,30 @@
     el.classList.toggle("busy", t.sub === "refreshing"); el.setAttribute("aria-label", `Next data refresh in ${t.txt}`);
     el.querySelector(".mk-t b").textContent = t.txt; el.querySelector(".mk-t i").textContent = t.sub;
     el.querySelector(".mk-arc").setAttribute("stroke-dashoffset", (MK_C * (1 - t.frac)).toFixed(2)); }, 1000);
+  // Market NOW: the money on the line, from Kalshi and Polymarket, in one strip under the title
+  function mkBets() {
+    const m = oddsSnap && oddsSnap.market;
+    if (!m) return STATIC_MODE ? "" : `<div class="mkb" data-mk-bets><span class="mkb-h">Money on the line</span><span class="mkb-wait">Reading Kalshi and Polymarket…</span></div>`;
+    const tone = (p) => (p >= 0.55 ? "up" : p <= 0.45 ? "down" : "flat");
+    const fedTone = (l) => (/increase|hike/i.test(l) ? "down" : /decrease|cut/i.test(l) ? "up" : "flat");
+    const chip = (q, p, what, src, vol, c) => !isNum(p) ? "" : `<button type="button" class="mkb-c" data-jump=".odds" title="${esc(q)}: ${pc(p)} · ${esc(src)}${vol ? " · " + usd(vol) + " traded" : ""}">
+      <span class="mkb-q">${q}</span><span class="mkb-v"><b class="${c}">${pc(p)}</b><em>${what}</em></span><span class="mkb-bar"><i class="${c}" style="width:${Math.round(p * 100)}%"></i></span><span class="mkb-s"><i class="src-${src.toLowerCase()}">${src}</i>${vol ? usd(vol) : ""}</span></button>`;
+    const fed = m.fed, top = fed && fed.options && fed.options[0];
+    const when = fed ? (fed.title.match(/in\s+(\w+)/i) || [])[1] : "";
+    const out = [
+      top ? chip(`Fed${when ? " · " + esc(when) : ""}`, top.p, esc(top.label.toLowerCase()), "Polymarket", fed.volume, fedTone(top.label)) : "",
+      m.spx_close ? chip("S&amp;P 500 next close", m.spx_close.p_above_spot, "above " + fnum(m.spx_close.spot, 0) + " (now)", "Kalshi", m.spx_close.volume, tone(m.spx_close.p_above_spot)) : "",
+      m.ndx_close ? chip("Nasdaq-100 next close", m.ndx_close.p_above_spot, "above " + fnum(m.ndx_close.spot, 0) + " (now)", "Kalshi", m.ndx_close.volume, tone(m.ndx_close.p_above_spot)) : "",
+      m.recession ? chip("US recession in 2026", m.recession.p, "yes", "Polymarket", m.recession.volume, m.recession.p >= 0.3 ? "down" : "up") : "",
+      m.spx_year && m.spx_year.up && m.spx_year.up[0] ? chip(`S&amp;P 500 hits ${fnum(m.spx_year.up[0].k, 0)}`, m.spx_year.up[0].p, "by December", "Polymarket", m.spx_year.volume, "flat") : "",
+    ].join("");
+    return out ? `<div class="mkb" data-mk-bets><span class="mkb-h">Money on the line <i>Kalshi · Polymarket</i></span><div class="mkb-row">${out}</div></div>` : "";
+  }
   function secPulse(r) {
     const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";
     return `<section class="pulse">
       <div class="pulse-head"><div class="mk-title">${mkTimer()}<h2 class="mk-h">Market <span>NOW</span></h2><span class="pz-live ${r.market_state === "open" ? "on" : ""}" title="Data updated ${esc(r.generated_at.slice(11, 16))} ET"><i></i>${st} · ${esc(r.generated_at.slice(11, 16))} ET</span></div>
-        <p>${pulseLine(r)}</p></div>
+        <p>${pulseLine(r)}</p>${mkBets()}</div>
       <div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
       <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
     </section>`;

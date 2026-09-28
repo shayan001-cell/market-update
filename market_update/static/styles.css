@@ -3002,3 +3002,35 @@ body:has(#gate.gate-full:not([hidden])){overflow:hidden}
 .pulse-head h2.mk-h{font-size:clamp(24px,4.4cqi,40px)}
 .mk-title{gap:12px 20px}
 .mk-title .pz-live{margin-left:4px;white-space:nowrap}
+
+/* ---------- Market NOW: money on the line (Kalshi · Polymarket) ---------- */
+.mkb{margin:14px 0 2px;display:grid;gap:8px}
+.mkb-h{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:10px}
+.mkb-h i{font-style:normal;font-weight:600;letter-spacing:.06em;text-transform:none;color:var(--text-2);opacity:.8}
+.mkb-wait{font-size:12.5px;color:var(--muted)}
+.mkb-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.mkb-c{all:unset;box-sizing:border-box;cursor:pointer;display:grid;gap:5px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);box-shadow:inset 0 1px 0 rgba(255,255,255,.05);transition:border-color .2s cubic-bezier(.16,1,.3,1),background .2s cubic-bezier(.16,1,.3,1),transform .2s cubic-bezier(.16,1,.3,1);min-width:0}
+.mkb-c:hover{border-color:rgba(255,122,47,.4);background:rgba(255,122,47,.06)}
+.mkb-c:active{transform:scale(.98)}
+.mkb-c:focus-visible{outline:2px solid #FFB27A;outline-offset:2px}
+.mkb-q{font-size:11.5px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mkb-v{display:flex;align-items:baseline;gap:6px;min-width:0}
+.mkb-v b{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:22px;font-weight:700;line-height:1;color:var(--text)}
+.mkb-v b.up{color:var(--up)} .mkb-v b.down{color:var(--down)}
+.mkb-v em{font-style:normal;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mkb-bar{height:4px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.mkb-bar i{display:block;height:100%;border-radius:99px;background:var(--muted)}
+.mkb-bar i.up{background:var(--up)} .mkb-bar i.down{background:var(--down)} .mkb-bar i.flat{background:#FFB27A}
+.mkb-s{display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:var(--muted)}
+.mkb-s i{font-style:normal;font-weight:700;letter-spacing:.04em}
+.mkb-s i.src-kalshi{color:#6EE7B7} .mkb-s i.src-polymarket{color:#85A7FF}
+:root[data-theme="light"] .mkb-c,:root[data-theme="light"] .mk-timer{background:var(--surface);border-color:var(--line);box-shadow:none}
+:root[data-theme="light"] .mkb-bar,:root[data-theme="light"] .mk-trk{background:var(--surface-2);stroke:var(--line)}
+:root[data-theme="light"] .mkb-s i.src-kalshi{color:#0F8F5F} :root[data-theme="light"] .mkb-s i.src-polymarket{color:#2F5BD3}
+:root[data-theme="light"] .pz-refresh{background:var(--surface);border-color:var(--line)}
+.mkb-row{grid-template-columns:repeat(5,minmax(0,1fr))}
+.mkb-v{display:grid;gap:3px}
+.mkb-q,.mkb-v em{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25}
+.mkb-q{min-height:2.5em}
+@container (max-width:620px){.mkb-row{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@container (max-width:400px){.mkb-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
