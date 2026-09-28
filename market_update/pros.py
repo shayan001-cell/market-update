@@ -24,14 +24,15 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 DISCOVERY_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AMD",
                      "PLTR", "AVGO", "MU", "COIN", "MSTR", "HOOD", "SMCI", "NFLX"]
-CANDIDATES = 45          # accounts scored per run (the rest of the budget goes to reading their posts)
-USER_POSTS = 150         # posts read per candidate
+CANDIDATES = 30          # accounts scored per run
+USER_POSTS = 90          # posts read per candidate (three pages)
 HORIZON = 5              # sessions between entry and outcome
-MIN_SCORED = 12
+MIN_SCORED = 10
 MIN_HIT = 0.70
 TOP_N = 20
 CONSENSUS_H = 72
 WASH = 0.2               # percent
+DISCOVERY_POSTS = 90     # posts read per ticker to find the accounts (three pages)
 
 
 def yf_symbol(s: str) -> str | None:

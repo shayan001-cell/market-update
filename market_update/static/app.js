@@ -574,7 +574,7 @@
   function heroPros(r) {
     const p = prosSnap;
     if (!p || p.status !== "ok") return `<article class="pz pz-pros" data-pz="pros"><div class="pz-h"><span class="pz-eye">Top traders · measured</span></div>
-      <p class="pl-lede">OneView is scoring the most-followed StockTwits traders on every call they made: did the price go their way over the next five sessions? The first run takes about 15 minutes.</p><div class="cr-loading">Scoring the calls…</div></article>`;
+      <p class="pl-lede">OneView is scoring the most-followed StockTwits traders on every call they made: did the price go their way over the next five sessions? The first run takes about 6 minutes.</p><div class="cr-loading">Scoring the calls…</div></article>`;
     const q = p.qualified || [], c = p.consensus || {};
     const lean = (sym) => (c.tickers || []).find((x) => x.sym === sym);
     const row = (sym, name) => { const x = lean(sym); if (!x) return `<div class="tp-lean"><b>${sym}</b><span class="muted">no calls in ${c.window_h || 72} h</span></div>`;
@@ -2144,25 +2144,39 @@
       ? `<div class="ov-form" id="login-core"><h1>Welcome to OneView</h1><p>Sign-in runs on the app server; this copy is not connected to one yet.</p>
         ${APP_URL ? `<a class="ov-primary" href="${esc(APP_URL)}/?signin=1">Go to the sign-in page</a>` : `<p class="ov-hint">Ask the site owner for the app link.</p>`}</div>`
       : `<div class="ov-form" id="login-core">
+        <span class="lg-kicker">Sign in or create your desk</span>
         <h1>Welcome to OneView</h1>
-        <p>Enter your email to receive a one-time sign-in link.</p>
+        <p>Enter your email and we send a one-time link. No password, no card.</p>
         <form id="login-form" class="ov-fields" novalidate>
           <label for="login-email">Email address</label>
           <input type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email" inputmode="email" autofocus>
-          <button class="ov-primary" type="submit" id="login-submit">Send sign-in link</button>
+          <button class="ov-primary lg-btn" type="submit" id="login-submit"><span>Send my sign-in link</span><i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></button>
           <div class="ov-hint">No password needed.</div>
         </form>
         <div id="login-status" class="gate-status" role="status" aria-live="polite">${signedOutNote ? "Thank you, see you back again." : ""}</div>
         ${mailLine()}
         ${waJoin()}
       </div>`;
-    return `<div class="ov-login login-stage"><div class="ov-lines" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-      <section class="ov-brand" aria-label="OneView">
-        ${brandLogo(235)}<span class="ov-badge">Formerly Webex Traders</span>
-        <div class="ov-statement"><h2 class="ov-tagline">Read the market.<br><span>Own your next move.</span></h2><p>A clearer view for day trades, swing setups, and long-term decisions.</p></div>
+    const live = (() => { try { if (!report) return ""; const pick = [["SPY", "S&P 500"], ["QQQ", "Nasdaq 100"], ["^VIX", "VIX"], ["BTC-USD", "Bitcoin"]];
+      const items = pick.map(([sym, lbl]) => { const o = (report.indices || []).find((x) => x.symbol === sym) || (report.macro || []).find((x) => x.symbol === sym); if (!o) return ""; const q = qp(sym, o); if (!isNum(q.last)) return "";
+        return `<span><i>${lbl}</i><b>${fnum(q.last, q.last < 100 ? 2 : 2)}</b><em class="${cls(q.chg)}">${fpct(q.chg, 2)}</em></span>`; }).join("");
+      return items ? `<div class="lg-live"><span class="lg-dot"></span><span class="lg-live-l">Live now</span>${items}</div>` : ""; } catch (e) { return ""; } })();
+    const bars = [38, 52, 44, 61, 57, 70, 64, 48, 42, 35].map((h, i) => `<i class="${h >= 55 ? "up" : h <= 45 ? "down" : ""}" style="height:${h}%;animation-delay:${i * 60}ms"></i>`).join("");
+    return `<div class="ov-login login-stage lg2"><div class="lg-aurora" aria-hidden="true"><i></i><i></i><i></i></div><div class="lg-grain" aria-hidden="true"></div>
+      <section class="ov-brand lg-left" aria-label="OneView">
+        ${brandLogo(220)}
+        <span class="lg-eyebrow"><i></i>Formerly Webex Traders · free to use</span>
+        <h2 class="ov-tagline">Read the market.<br><span>Own your next move.</span></h2>
+        <p class="lg-sub">One page that shows what is happening and what could happen next, from the crowd, the proven traders and the money on the line.</p>
+        <div class="lg-proof">
+          <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-bars" aria-hidden="true">${bars}</div><b>What people are saying</b><span>About 200 posts per name, read newest first, so the headline is the mood right now.</span></div></div>
+          <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-badge" aria-hidden="true"><em>70%+</em><small>right</small></div><b>Top traders, measured</b><span>Every call scored against what the price did. Only the ones who are right 70% of the time or more.</span></div></div>
+          <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-stack" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div><b>Real-money odds</b><span>The Fed, the S&amp;P 500 and your names, priced by Polymarket and Kalshi.</span></div></div>
+        </div>
+        ${live}
         <p class="ov-fine">Market data, model reads and scans are information, not advice.</p>
       </section>
-      <section class="ov-formpanel" aria-label="Sign in">${form}</section>
+      <section class="ov-formpanel lg-right" aria-label="Sign in"><div class="lg-shell">${form}</div></section>
     </div>`;
   }
   function sentHtml(email, j) {
@@ -2239,7 +2253,7 @@
         if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "The link could not be sent. Try again in a moment."; if (btn) { btn.disabled = false; btn.textContent = "Send sign-in link"; } inp.focus(); return; }
         const core = $("#login-core"); if (core) { core.innerHTML = sentHtml(email, j); startSentTimer(j.expires_in_s || 600);
           const rs = core.querySelector("[data-resend]"); if (rs) { rs.disabled = true; setTimeout(() => { rs.disabled = false; }, 60000); rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); } }
-      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now. Try again in a moment."; const b2 = $("#login-submit"); if (b2) { b2.disabled = false; b2.textContent = "Send sign-in link"; } }
+      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now. Try again in a moment."; const b2 = $("#login-submit"); if (b2) { b2.disabled = false; b2.textContent = "Send my sign-in link"; } }
     });
     const go = $("#picks-go"); if (!go) return;
     const state = () => { const ok = $("#disc-ok").checked; const vals = [...new Set([...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean))]; go.disabled = !(ok && vals.length >= 3); const st = $("#picks-status"); if (st && !st.classList.contains("err")) st.textContent = ok ? (vals.length >= 3 ? "" : `${3 - vals.length} more to go`) : "Tick the box above first"; return vals; };

@@ -2001,7 +2001,7 @@ def _pros_sync() -> dict[str, Any]:
     from . import pros
     t0 = time.time()
     sid = st_open()
-    found = pros.discover(lambda sym: _st_messages(sym, sid, 200), lambda name: bool(_ST_BLOCK.search(name or "")))
+    found = pros.discover(lambda sym: _st_messages(sym, sid, pros.DISCOVERY_POSTS), lambda name: bool(_ST_BLOCK.search(name or "")))
     cands = found[:pros.CANDIDATES]
     calls_by_user: dict[str, list[dict[str, Any]]] = {}
     for u in cands:
@@ -2035,7 +2035,7 @@ def _pros_sync() -> dict[str, Any]:
            "calls": sum(len(v) for v in calls_by_user.values()), "scored": sum(x["scored"] for x in summaries),
            "qualified": qualified, "near": near, "consensus": cons,
            "method": {"horizon_sessions": pros.HORIZON, "min_scored": pros.MIN_SCORED, "min_hit": pros.MIN_HIT, "wash_pct": pros.WASH,
-                      "symbols": pros.DISCOVERY_SYMBOLS, "posts_per_symbol": 200, "posts_per_trader": pros.USER_POSTS}}
+                      "symbols": pros.DISCOVERY_SYMBOLS, "posts_per_symbol": pros.DISCOVERY_POSTS, "posts_per_trader": pros.USER_POSTS}}
     fetch._cache_put("pros_snapshot", out)
     try:
         (config.OUTPUT_DIR / "pros.json").write_text(json.dumps(out, default=str))
