@@ -1010,7 +1010,7 @@
     const w = leanWord(last.share); const wk = mood ? crowdWordFor(mood) : null;
     const q = (t.quotes.bull[0] && t.quotes.bear[0]) ? [t.quotes.bull[0], t.quotes.bear[0]] : [t.quotes.bull[0] || t.quotes.bear[0]].filter(Boolean);
     return `<div class="hc-col">
-      <div class="hc-h"><b>${sym}</b><i>${name}</i><span class="hc-n">${t.posts} posts · ${esc(spanWords(t))}</span></div>
+      <div class="hc-h"><b>${sym}</b><i>${name}</i><span class="hc-n" title="The newest ${t.posts} posts on ${sym}. People wrote them over the last ${esc(spanWords(t))}: busy names fill ${t.posts} posts in minutes, quiet ones take days.">Last ${t.posts} posts · written over ${esc(spanWords(t))}</span></div>
       <div class="hc-word ${w[1]}">${w[0]}<small>right now</small></div>
       <div class="hc-now">Latest ${last.bull + last.bear} tagged posts: <b class="up">${last.bull} bullish</b> · <b class="down">${last.bear} bearish</b></div>
       ${timelineBars(t.timeline)}
