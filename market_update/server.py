@@ -815,6 +815,7 @@ async def _startup() -> None:
     asyncio.create_task(brief_scheduler())
     asyncio.create_task(direction_loop())
     asyncio.create_task(stocktwits_loop())
+    asyncio.create_task(odds_loop())
     asyncio.create_task(desk_loop())
     asyncio.create_task(live_scanner())
 
@@ -1496,12 +1497,41 @@ def st_open() -> str | None:
     return sid
 
 
-def st_call(tool: str, arguments: dict[str, Any], sid: str | None = None) -> Any:
-    """Call one tool (in the given session, or a fresh one) and return its result content."""
+import threading as _threading
+
+ST_MIN_GAP = 2.4          # seconds between tool calls: the connector allows about 30 a minute per account
+_st_lock = _threading.Lock()
+_st_last = [0.0]
+_st_demand = [0]          # on-demand requests waiting (a user opened a name): the background snapshot steps aside
+
+
+def st_call(tool: str, arguments: dict[str, Any], sid: str | None = None, urgent: bool = False) -> Any:
+    """Call one tool (in the given session, or a fresh one) and return its result content. Every call goes
+    through one pacer so the whole server stays under the connector's rate limit; a rate-limit reply waits and
+    retries. Background calls yield to a user's on-demand request."""
     if sid is None:
         sid = st_open()
-    res, _ = _st_rpc("tools/call", {"name": tool, "arguments": arguments}, sid)
-    return res.get("result", res)
+    if urgent:
+        _st_demand[0] += 1
+    try:
+        for attempt in range(4):
+            while not urgent and _st_demand[0] > 0:
+                time.sleep(0.5)
+            with _st_lock:
+                wait = _st_last[0] + ST_MIN_GAP - time.time()
+                if wait > 0:
+                    time.sleep(wait)
+                _st_last[0] = time.time()
+                res, _ = _st_rpc("tools/call", {"name": tool, "arguments": arguments}, sid)
+            err = res.get("error") if isinstance(res, dict) else None
+            if err and (err.get("code") == -32029 or "rate limit" in str(err.get("message", "")).lower()):
+                time.sleep(6 * (attempt + 1))
+                continue
+            return res.get("result", res)
+        raise RuntimeError(f"stocktwits {tool}: rate limited")
+    finally:
+        if urgent:
+            _st_demand[0] -= 1
 
 
 def st_tools() -> list[dict[str, Any]]:
@@ -1583,11 +1613,48 @@ def _st_clean_quote(body: str, sym: str | None = None, tagged: list[str] | None 
     return t if len(t) <= 230 else t[:227].rsplit(" ", 1)[0] + "…"
 
 
-def _st_talk(sym: str, sid: str | None) -> dict[str, Any] | None:
-    """Read the last ~30 posts on one symbol and turn them into numbers: how many lean bullish or bearish,
-    which topics come up, which other tickers get mentioned, and up to three clean posts from each side."""
-    res = _st_text(st_call("get_symbol_messages", {"symbol": sym, "limit": 30}, sid)) or {}
-    msgs = res.get("messages") if isinstance(res, dict) else None
+ST_SAMPLE = 200          # posts read per symbol; the connector returns 30 a page, so about seven pages
+
+
+def _st_messages(sym: str, sid: str | None, want: int = ST_SAMPLE, urgent: bool = False) -> list[dict[str, Any]]:
+    msgs: list[dict[str, Any]] = []
+    cursor = None
+    seen: set[Any] = set()
+    for _ in range(12):
+        args: dict[str, Any] = {"symbol": sym, "limit": 50}
+        if cursor:
+            args["max"] = cursor
+        res: Any = {}
+        batch: list[dict[str, Any]] = []
+        for attempt in range(3):                          # the connector sometimes answers a burst with an empty page
+            try:
+                res = _st_text(st_call("get_symbol_messages", args, sid, urgent)) or {}
+            except Exception as e:  # noqa: BLE001
+                log.info("stocktwits page %s retry %d: %s", sym, attempt, e); res = {}
+            batch = [m for m in (res.get("messages") or []) if m.get("id") not in seen] if isinstance(res, dict) else []
+            if batch or (isinstance(res, dict) and res.get("more") is False):
+                break
+            time.sleep(1.0)
+        if not batch:
+            break
+        for m in batch:
+            seen.add(m.get("id"))
+        msgs += batch
+        c = res.get("cursor") or {}
+        nxt = c.get("max") if isinstance(c, dict) else None
+        cursor = nxt if nxt and nxt != cursor else batch[-1].get("id")
+        if len(msgs) >= want or res.get("more") is False:
+            break
+    if len(msgs) < want:
+        log.info("stocktwits %s: read %d of %d posts", sym, len(msgs), want)
+    return msgs[:want]
+
+
+def _st_talk(sym: str, sid: str | None, want: int = ST_SAMPLE, urgent: bool = False) -> dict[str, Any] | None:
+    """Read the last ~200 posts on one symbol and turn them into numbers: how many lean bullish or bearish,
+    how that split moved between the older and the newer half, which topics come up, which other tickers get
+    mentioned, and up to three clean posts from each side."""
+    msgs = _st_messages(sym, sid, want, urgent)
     if not msgs:
         return None
     bull = bear = 0
@@ -1618,7 +1685,13 @@ def _st_talk(sym: str, sid: str | None) -> dict[str, Any] | None:
                 quotes[key].append({"text": q, "at": m.get("created_at"), "id": m.get("id")})
     tagged = bull + bear
     labels = {k: lbl for k, lbl, _ in ST_TOPICS}
-    return {"symbol": sym, "posts": len(msgs), "bull": bull, "bear": bear, "untagged": len(msgs) - tagged,
+
+    def share(part: list[dict[str, Any]]) -> dict[str, Any]:
+        b = sum(1 for m in part if (m.get("sentiment") or "").lower() == "bullish"); r2 = sum(1 for m in part if (m.get("sentiment") or "").lower() == "bearish")
+        return {"bull": b, "bear": r2, "bull_share": round(b / (b + r2) * 100) if b + r2 else None, "from": part[-1].get("created_at") if part else None, "to": part[0].get("created_at") if part else None}
+    half = len(msgs) // 2
+    newer, older = share(msgs[:half]), share(msgs[half:])
+    return {"symbol": sym, "posts": len(msgs), "bull": bull, "bear": bear, "untagged": len(msgs) - tagged, "newer": newer, "older": older,
             "bull_share": round(bull / tagged * 100) if tagged else None,
             "topics": [{"key": k, "label": labels[k], "n": n} for k, n in sorted(topics.items(), key=lambda x: -x[1]) if n >= 2][:5],
             "also": [{"symbol": k, "n": n} for k, n in sorted(co.items(), key=lambda x: -x[1]) if n >= 2][:6],
@@ -1665,7 +1738,7 @@ def _stocktwits_sync() -> dict[str, Any]:
         log.warning("stocktwits trending: %s", e)
     # what people are saying: the two index funds, the two big caps furthest from their normal mood, the top two trending names
     big = sorted([m for s2, m in out["moods"].items() if s2 not in ("SPY", "QQQ") and isinstance(m.get("score"), (int, float))], key=lambda m: -abs(m["score"] - 50))
-    talk_syms = list(dict.fromkeys(["SPY", "QQQ"] + [m["symbol"] for m in big[:2]] + [x["symbol"] for x in out["trending"][:2] if x.get("symbol")]))[:6]
+    talk_syms = list(dict.fromkeys(["SPY", "QQQ", "IWM", "DIA"] + [m["symbol"] for m in big[:2]] + [x["symbol"] for x in out["trending"][:2] if x.get("symbol")]))[:8]
     for sym in talk_syms:
         try:
             tk = _st_talk(sym, sid)
@@ -1823,6 +1896,112 @@ async def api_desk(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "tv_available": await asyncio.to_thread(_tv_available), "tv_max": 12, **d}, headers={"Cache-Control": "no-store"})
 
 
+ODDS_INDEX = ["SPY", "QQQ", "IWM", "DIA"]
+ODDS_MAX_TICKERS = 60
+
+
+def _spot(sym: str) -> float | None:
+    """The price every other view shows: the live minute quote, else the report's last price, else the quick quote."""
+    q = ((state.get("live_scan") or {}).get("quotes") or {}).get(sym) or {}
+    if isinstance(q.get("last"), (int, float)):
+        return float(q["last"])
+    rep = state.get("report") or {}
+    for s2 in (rep.get("stocks") or []) + (rep.get("indices") or []):
+        if s2.get("ticker", s2.get("symbol")) == sym:
+            v = s2.get("last_price", s2.get("last"))
+            if isinstance(v, (int, float)):
+                return float(v)
+    lt = (rep.get("lite") or {}).get(sym) or {}
+    return float(lt["last_price"]) if isinstance(lt.get("last_price"), (int, float)) else None
+
+
+def _name_of(sym: str) -> str | None:
+    rep = state.get("report") or {}
+    for s2 in rep.get("stocks") or []:
+        if s2.get("ticker") == sym:
+            return s2.get("name")
+    lt = (rep.get("lite") or {}).get(sym) or {}
+    if lt.get("name"):
+        return lt["name"]
+    ad = ((state.get("adhoc") or {}).get(sym) or {}).get("stock") or {}
+    if ad.get("name"):
+        return ad["name"]
+    try:                                                   # every US listing, from the daily symbol directory (cached a day)
+        idx = state.get("_name_index")
+        if idx is None:
+            idx = {r[0]: r[1] for r in fetch.fetch_symbol_index() if len(r) > 1}
+            state["_name_index"] = idx
+        return idx.get(sym)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _odds_sync() -> dict[str, Any]:
+    """Betting-market odds: the market-wide picture (Fed, recession, S&P 500 and Nasdaq-100 next close,
+    S&P year-end targets) and the per-ticker markets for the four index funds and every watched name."""
+    from . import odds
+    idx = fetch.fetch_quotes(["^GSPC", "^NDX"])
+    market = odds.market_odds({k: (v or {}).get("last") for k, v in idx.items()})
+    try:
+        watched = db.all_watchlist_tickers()
+    except Exception:  # noqa: BLE001
+        watched = []
+    syms = list(dict.fromkeys(ODDS_INDEX + [t.upper() for t in watched if t and "-" not in t and "=" not in t and "^" not in t]))[:ODDS_MAX_TICKERS]
+    tickers: dict[str, Any] = {}
+    for sym in syms:
+        try:
+            tickers[sym] = odds.ticker_odds(sym, _spot(sym), _name_of(sym))
+        except Exception as e:  # noqa: BLE001
+            log.warning("odds %s: %s", sym, e)
+        time.sleep(0.15)                                   # polite to a free public API
+    out = {"as_of": time.time(), "market": market, "tickers": tickers, "index": {k: (v or {}).get("last") for k, v in idx.items()}}
+    fetch._cache_put("odds_snapshot", out)
+    return out
+
+
+async def odds_loop() -> None:
+    await asyncio.sleep(20)
+    while True:
+        try:
+            interval = 900 if fetch.market_state() in ("pre", "open", "post") else 3600
+            if time.time() - state.get("odds_at", 0) >= interval:
+                state["odds"] = await asyncio.to_thread(_odds_sync); state["odds_at"] = time.time()
+        except Exception:  # noqa: BLE001
+            log.exception("odds loop error")
+        await asyncio.sleep(60)
+
+
+@app.get("/api/odds")
+async def api_odds(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    snap = state.get("odds") or fetch._cache_get("odds_snapshot", 12 * 3600)
+    if not snap:
+        return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"status": "ok", **snap}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/odds/{sym}")
+async def api_odds_sym(sym: str, request: Request) -> JSONResponse:
+    """One ticker's betting markets on demand (a name added since the last snapshot), cached for 15 minutes."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    from . import odds
+    sym = sym.upper().strip()[:12]
+    snap = state.get("odds") or {}
+    have = (snap.get("tickers") or {}).get(sym)
+    cache = state.setdefault("odds_one", {})
+    if have and time.time() - snap.get("as_of", 0) < 1800:
+        return JSONResponse({"status": "ok", **have}, headers={"Cache-Control": "no-store"})
+    hit = cache.get(sym)
+    if not hit or time.time() - hit.get("as_of", 0) > 900:
+        try:
+            hit = await asyncio.to_thread(odds.ticker_odds, sym, _spot(sym), _name_of(sym)); cache[sym] = hit
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"status": "error", "detail": str(e)[:120]}, status_code=502)
+    return JSONResponse({"status": "ok", **hit}, headers={"Cache-Control": "no-store"})
+
+
 async def stocktwits_loop() -> None:
     while True:
         try:
@@ -1843,6 +2022,32 @@ async def api_stocktwits(request: Request) -> JSONResponse:
     if not snap:
         return JSONResponse({"status": "not_connected" if not _st_load().get("access_token") else "warming"}, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "ok", **snap}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/crowd/{sym}")
+async def api_crowd_sym(sym: str, request: Request) -> JSONResponse:
+    """The crowd on one ticker (a watchlist name): mood versus normal and the last ~200 posts, cached 15 minutes."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    sym = sym.upper().strip()[:12]
+    snap = state.get("stocktwits") or {}
+    if sym in (snap.get("talk") or {}) and time.time() - snap.get("as_of", 0) < 1800:
+        return JSONResponse({"status": "ok", "mood": (snap.get("moods") or {}).get(sym), "talk": snap["talk"][sym], "as_of": snap.get("as_of")}, headers={"Cache-Control": "no-store"})
+    cache = state.setdefault("crowd_one", {})
+    hit = cache.get(sym)
+    if not hit or time.time() - hit.get("as_of", 0) > 900:
+        if not _st_load().get("access_token"):
+            return JSONResponse({"status": "not_connected"})
+        def work() -> dict[str, Any]:
+            sid = st_open()
+            s0 = _st_text(st_call("get_sentiment", {"symbol": sym}, sid, True)) or {}
+            mood = {"symbol": sym, "score": s0.get("score"), "label": s0.get("label"), "bullish_pct": s0.get("bullish_pct"), "bullish_delta": s0.get("bullish_delta")}
+            return {"as_of": time.time(), "mood": mood, "talk": _st_talk(sym, sid, ST_SAMPLE, True)}
+        try:
+            hit = await asyncio.to_thread(work); cache[sym] = hit
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"status": "error", "detail": str(e)[:120]}, status_code=502)
+    return JSONResponse({"status": "ok", **hit}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/stocktwits/status")

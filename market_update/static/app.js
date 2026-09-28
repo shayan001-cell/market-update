@@ -531,6 +531,120 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= THE BETTING MARKETS: what people with money on the line expect =======================
+  let oddsSnap = null; const oddsExtra = {}; const oddsBusy = new Set();
+  const usd = (x) => (!isNum(x) ? "–" : x >= 1e6 ? "$" + (x / 1e6).toFixed(1) + "M" : x >= 1e3 ? "$" + (x / 1e3).toFixed(x >= 1e5 ? 0 : 1) + "K" : "$" + Math.round(x));
+  const pc = (p) => (isNum(p) ? Math.round(p * 100) + "%" : "–");
+  const thin = (v) => (isNum(v) && v < 1000 ? `<span class="od-thin" title="Under $1,000 traded: one or two people's opinion. Treat with care.">thin</span>` : "");
+  const moneyTag = (v, url, src) => `<span class="od-money">${usd(v)} traded${thin(v)}${url ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">${esc(src || "open")}</a>` : ""}</span>`;
+  async function pollOdds() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/odds", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") return; oddsSnap = j;
+      if (currentView === "home" && report) { const el = $(".odds"); const tmp = document.createElement("div"); tmp.innerHTML = secOdds(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const anchor = $(".crowd") || $(".home-hero"); if (anchor) anchor.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
+      if (currentView === "watch") rerenderWatch();
+    } catch (e) { /* server restarting */ }
+  }
+  async function loadOddsSym(sym) {
+    if (STATIC_MODE || oddsBusy.has(sym) || (oddsSnap && oddsSnap.tickers && oddsSnap.tickers[sym])) return;
+    const have = oddsExtra[sym]; if (have && Date.now() - have.at < 900000) return;
+    oddsBusy.add(sym);
+    try { const res = await api(`/api/odds/${encodeURIComponent(sym)}`, { cache: "no-store" }); const j = res.ok ? await res.json() : {}; oddsExtra[sym] = { at: Date.now(), data: j.status === "ok" ? j : null }; } catch (e) { oddsExtra[sym] = { at: Date.now(), data: null }; }
+    oddsBusy.delete(sym);
+    if (currentView === "watch" && wlSel === sym) rerenderWatch();
+  }
+  const oddsFor = (sym) => (oddsSnap && oddsSnap.tickers && oddsSnap.tickers[sym]) || (oddsExtra[sym] && oddsExtra[sym].data) || null;
+  const hasOdds = (o) => o && (o.updown || o.above || o.hit || (o.other || []).length);
+  function ladderSvg(L, fmt) {
+    const pts = (L.points || []).filter((x) => isNum(x.k) && isNum(x.p)); if (pts.length < 3) return "";
+    const spot = L.spot || L.spot_price; const ks = pts.map((x) => x.k); const lo = Math.min(...ks), hi = Math.max(...ks);
+    // zoom to where the curve actually moves (5% to 95%)
+    const a = (pts.find((x) => x.p < 0.97) || pts[0]).k, b = ([...pts].reverse().find((x) => x.p > 0.03) || pts[pts.length - 1]).k;
+    const x0 = Math.min(a, spot || a), x1 = Math.max(b, spot || b), pad = (x1 - x0) * 0.08 || 1, A = x0 - pad, B = x1 + pad;
+    const W = 320, H = 96, X = (k) => ((k - A) / (B - A)) * W, Y = (p) => 8 + (1 - p) * (H - 24);
+    const line = pts.filter((x) => x.k >= A && x.k <= B).map((x) => `${X(x.k).toFixed(1)},${Y(x.p).toFixed(1)}`).join(" ");
+    return `<svg class="od-lad" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="0" x2="${W}" y1="${Y(0.5)}" y2="${Y(0.5)}" class="od-50"/>
+      <polyline points="${line}"/>
+      ${spot ? `<line x1="${X(spot)}" x2="${X(spot)}" y1="4" y2="${H - 14}" class="od-now"/><text x="${Math.min(W - 4, Math.max(4, X(spot)))}" y="${H - 2}" text-anchor="middle">now ${fmt(spot)}</text>` : ""}
+      ${L.median ? `<circle cx="${X(L.median)}" cy="${Y(0.5)}" r="4" class="od-mid"/>` : ""}
+    </svg>`;
+  }
+  function closeCard(label, d) {
+    if (!d) return "";
+    const pa = d.p_above_spot, lean = !isNum(pa) ? "" : pa >= 0.55 ? ["expects it higher", "up"] : pa <= 0.45 ? ["expects it lower", "down"] : ["sees a coin flip", "flat"];
+    return `<div class="od-card"><div class="od-h"><b>${esc(label)}</b><span>${esc((d.when || "").replace(/^On /, ""))}</span></div>
+      <div class="od-big ${lean[1] || ""}">${pc(pa)}</div>
+      <p class="od-p">chance it closes <b>above today's ${fnum(d.spot, 0)}</b>. The market ${lean[0] || ""}; its middle guess for the close is <b>${fnum(d.median, 0)}</b> (${fpct((d.median / d.spot - 1) * 100, 1)}).</p>
+      ${ladderSvg(d, (v) => fnum(v, 0))}
+      <div class="od-foot">${moneyTag(d.volume, d.url, "Kalshi")}</div></div>`;
+  }
+  function secOdds(r) {
+    const o = oddsSnap; if (!o || !o.market) return "";
+    const m = o.market;
+    const fed = m.fed ? (() => { const opts = m.fed.options.filter((x) => x.p >= 0.005); const top = opts[0];
+      const color = (l) => (/increase|hike/i.test(l) ? "down" : /decrease|cut/i.test(l) ? "up" : "flat");
+      return `<div class="od-card od-fed"><div class="od-h"><b>${esc(m.fed.title.replace("?", ""))}</b><span>ends ${esc(String(m.fed.end || "").slice(0, 10))}</span></div>
+        <div class="od-big ${color(top.label)}">${pc(top.p)}</div><p class="od-p">chance of <b>${esc(top.label.toLowerCase())}</b>, the favourite. A hike is a headwind for stocks, a cut a tailwind.</p>
+        <div class="od-stack">${opts.map((x) => `<i class="${color(x.label)}" style="width:${(x.p * 100).toFixed(1)}%" title="${esc(x.label)} ${pc(x.p)}"></i>`).join("")}</div>
+        <ul class="od-opts">${opts.slice(0, 4).map((x) => `<li><span class="od-dot ${color(x.label)}"></span>${esc(x.label)}<b>${pc(x.p)}</b></li>`).join("")}</ul>
+        <div class="od-foot">${moneyTag(m.fed.volume, m.fed.url, "Polymarket")}</div></div>`; })() : "";
+    const rec = m.recession ? `<div class="od-card od-small"><div class="od-h"><b>${esc(m.recession.title.replace("?", ""))}</b></div><div class="od-big ${m.recession.p >= 0.3 ? "down" : "up"}">${pc(m.recession.p)}</div><p class="od-p">chance, priced by the market.</p><div class="od-foot">${moneyTag(m.recession.volume, m.recession.url, "Polymarket")}</div></div>` : "";
+    const yr = m.spx_year ? `<div class="od-card od-small"><div class="od-h"><b>S&amp;P 500 by the end of December</b></div>
+        <div class="od-targets">${(m.spx_year.up || []).map((x) => `<span class="up">hits ${fnum(x.k, 0)}<b>${pc(x.p)}</b></span>`).join("")}${(m.spx_year.down || []).map((x) => `<span class="down">falls to ${fnum(x.k, 0)}<b>${pc(x.p)}</b></span>`).join("")}</div>
+        <div class="od-foot">${moneyTag(m.spx_year.volume, m.spx_year.url, "Polymarket")}</div></div>` : "";
+    const fund = ["SPY", "QQQ", "IWM", "DIA"].map((s) => { const t = (o.tickers || {})[s]; const u = t && t.updown; if (!u) return `<div class="od-fund none"><b>${s}</b><span>no market</span></div>`;
+      return `<div class="od-fund"><b>${s}</b><div class="od-meter"><i style="width:${(u.p_up * 100).toFixed(0)}%"></i></div><span class="${u.p_up >= 0.55 ? "up" : u.p_up <= 0.45 ? "down" : "flat"}">${pc(u.p_up)} up</span><em>${esc(u.when)} · ${usd(u.volume)}${u.volume < 1000 ? " · thin" : ""}</em></div>`; }).join("");
+    const mine = activeList().filter((s) => !["SPY", "QQQ", "IWM", "DIA"].includes(s));
+    const rows = mine.map((s) => ({ s, t: oddsFor(s) })).filter((x) => hasOdds(x.t));
+    const none = mine.filter((s) => !hasOdds(oddsFor(s)));
+    const wl = rows.map(({ s, t }) => { const u = t.updown, a = t.above, h = t.hit; const px = qp(s, stockFor(s) || (r.lite || {})[s] || {}).last;
+      const midPct = a && a.median && isNum(px) ? (a.median / px - 1) * 100 : null; const vol = Math.max(u ? u.volume : 0, a ? a.volume : 0, h ? h.volume : 0);
+      return `<tr data-ticker-page="${esc(s)}"><td><b>${esc(s)}</b></td>
+        <td>${u ? `<span class="${u.p_up >= 0.55 ? "up" : u.p_up <= 0.45 ? "down" : "flat"}">${pc(u.p_up)}</span><i>${esc(u.when)}</i>` : "–"}</td>
+        <td>${a && isNum(a.p_above_spot) ? `<span class="${a.p_above_spot >= 0.55 ? "up" : a.p_above_spot <= 0.45 ? "down" : "flat"}">${pc(a.p_above_spot)}</span><i>${esc(a.when)}</i>` : "–"}</td>
+        <td>${a && a.median ? `${fnum(a.median)} <span class="${cls(midPct)}">${fpct(midPct, 1)}</span>` : "–"}</td>
+        <td>${h ? `${h.up ? `<span class="up">↑ ${fnum(h.up.k, 0)} ${pc(h.up.p)}</span>` : ""}${h.down ? ` <span class="down">↓ ${fnum(h.down.k, 0)} ${pc(h.down.p)}</span>` : ""}<i>${esc(h.when)}</i>` : "–"}</td>
+        <td class="od-oth">${(t.other || []).slice(0, 2).map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener" data-stop>${esc(x.title.replace(/\?$/, ""))}${x.label ? " · " + esc(x.label) : ""}</a><b>${pc(x.p)}</b>`).join("<br>") || "–"}</td>
+        <td class="od-v">${usd(Math.max(vol, ...(t.other || []).map((x) => x.volume || 0)))}${Math.max(vol, ...(t.other || []).map((x) => x.volume || 0)) < 1000 ? '<span class="od-thin">thin</span>' : ""}</td></tr>`; }).join("");
+    return `<section class="odds">
+      <div class="od-head"><h3>The betting markets <span class="muted">Polymarket and Kalshi · real money on the outcome · updated ${esc(etTime(o.as_of))} ET</span></h3></div>
+      <p class="cr-how">A price of 64¢ on "Yes" means the market puts the chance at about 64%. These are bets, not forecasts from OneView. Where little money has traded the number is marked <span class="od-thin">thin</span>: treat it as one or two people's opinion.</p>
+      <div class="od-grid">${fed}${closeCard("S&P 500 next close", m.spx_close)}${closeCard("Nasdaq-100 next close", m.ndx_close)}<div class="od-col">${rec}${yr}</div></div>
+      <div class="od-funds"><h4>Index funds: up or down next session</h4><div class="od-fund-grid">${fund}</div></div>
+      <div class="od-wl"><h4>Your watchlist on the betting markets</h4>
+        ${wl ? `<div class="od-tablew"><table class="od-table"><thead><tr><th>Name</th><th>Up next session</th><th>Closes above today</th><th>Market's middle guess</th><th>Will it hit</th><th>Other bets</th><th>Money</th></tr></thead><tbody>${wl}</tbody></table></div>` : `<div class="cr-none">None of your names has an open betting market right now.</div>`}
+        ${none.length ? `<div class="od-none">No open betting market for: ${none.map(esc).join(", ")}. Prediction markets list mostly the biggest names.</div>` : ""}
+      </div>
+    </section>`;
+  }
+  // the selected Watchlist name: its crowd and its betting markets, both fetched on demand
+  function wlCrowdOdds(sym) {
+    if (STATIC_MODE) return "";
+    const t = talkFor(sym), ex = crowdExtra[sym];
+    if (!t && !ex) setTimeout(() => loadCrowdSym(sym), 0);
+    const o = oddsFor(sym), oe = oddsExtra[sym];
+    if (!o && !oe) setTimeout(() => loadOddsSym(sym), 0);
+    const mood = (crowd && crowd.moods && crowd.moods[sym]) || (ex && ex.mood);
+    const w = mood ? crowdWordFor(mood) : null;
+    const tg = t ? t.bull + t.bear : 0, bs = tg ? Math.round((t.bull / tg) * 100) : null;
+    const crowdHtml = t ? `<div class="wd-crowd"><div class="wd-ch"><span>StockTwits · last ${t.posts} posts over ${esc(spanWords(t))}</span>${w && isNum(mood.score) ? `<b class="${w[1]}">${w[0]} <small>${mood.score}/100 vs normal</small></b>` : ""}</div>
+        <div class="cr-split"><i class="up" style="width:${bs ?? 50}%"></i><i class="down" style="width:${100 - (bs ?? 50)}%"></i></div>
+        <div class="wd-cn"><span class="up">${t.bull} bullish</span><span class="down">${t.bear} bearish</span>${isNum((t.older || {}).bull_share) && isNum((t.newer || {}).bull_share) ? `<span>shift ${t.older.bull_share}% → ${t.newer.bull_share}% bullish</span>` : ""}</div>
+        ${(t.topics || []).length ? `<div class="cr-topics">${t.topics.slice(0, 4).map((x) => `<span class="cr-topic">${esc(x.label)}<i>${x.n}</i></span>`).join("")}</div>` : ""}</div>`
+      : `<div class="wd-crowd"><div class="cr-loading">${ex ? "No StockTwits posts to read on this name." : "Reading the last 200 StockTwits posts. About half a minute the first time."}</div></div>`;
+    let oddsHtml;
+    if (hasOdds(o)) {
+      const u = o.updown, a = o.above, h = o.hit;
+      oddsHtml = `<div class="wd-odds">
+        ${u ? `<div><span>Up ${esc(u.when)}</span><b class="${u.p_up >= 0.55 ? "up" : u.p_up <= 0.45 ? "down" : "flat"}">${pc(u.p_up)}</b><em>${usd(u.volume)}${u.volume < 1000 ? " · thin" : ""}</em></div>` : ""}
+        ${a && isNum(a.p_above_spot) ? `<div><span>Above today ${esc(a.when)}</span><b class="${a.p_above_spot >= 0.55 ? "up" : a.p_above_spot <= 0.45 ? "down" : "flat"}">${pc(a.p_above_spot)}</b><em>middle ${fnum(a.median)} · ${usd(a.volume)}${a.volume < 1000 ? " · thin" : ""}</em></div>` : ""}
+        ${h && h.up ? `<div><span>Hits ${fnum(h.up.k, 0)} (${esc(h.when)})</span><b class="up">${pc(h.up.p)}</b><em>${usd(h.volume)}</em></div>` : ""}
+        ${h && h.down ? `<div><span>Drops to ${fnum(h.down.k, 0)} (${esc(h.when)})</span><b class="down">${pc(h.down.p)}</b><em>${usd(h.volume)}</em></div>` : ""}
+        ${(o.other || []).map((x) => `<div class="wd-oth"><span>${esc(x.title.replace(/\?$/, ""))}${x.label ? " · " + esc(x.label) : ""}</span><b>${pc(x.p)}</b><em>${usd(x.volume)}${x.volume < 1000 ? " · thin" : ""} · <a href="${esc(x.url)}" target="_blank" rel="noopener">open</a></em></div>`).join("")}
+      </div><div class="pz-foot">Polymarket prices. A bet, not a OneView forecast.${(u || a || h) && (u || a || h).url ? ` <a href="${esc((u || a || h).url)}" target="_blank" rel="noopener">open</a>` : ""}</div>`;
+    } else oddsHtml = `<div class="cr-none">${o || oe ? "No open betting market on this name. Prediction markets list mostly the biggest names." : "Looking up the betting markets…"}</div>`;
+    return `<div class="wd-sec"><h5>The crowd</h5>${crowdHtml}</div><div class="wd-sec"><h5>The betting markets</h5>${oddsHtml}</div>`;
+  }
   // ======================= WATCHLIST: one list to scan, one panel to understand =======================
   let wlSel = null, wlSort = "mine", wlFilter = "all";
   try { const j = JSON.parse(localStorage.getItem("mu-wl-ui") || "{}"); wlSort = j.sort || "mine"; wlFilter = j.filter || "all"; } catch (e) {}
@@ -622,7 +736,7 @@
       ? [["Moves a day", fpct(t.atr_pct, 1, false), ""], ["Volume vs normal", isNum(s.rel_volume) ? s.rel_volume.toFixed(1) + "×" : "–", s.rel_volume >= 1.5 ? "up" : ""], ["Yesterday's range", `${fnum(t.prev_low)}–${fnum(t.prev_high)}`, ""], ["Gap at the open", fpct(s.gap_pct, 1), cls(s.gap_pct)], ["RSI 14", fnum(t.rsi14, 0), t.rsi14 >= 70 ? "warn" : t.rsi14 <= 30 ? "warn" : ""], ["Day score", isNum(s.scores.day) ? Math.round(s.scores.day * 100) + "/100" : "–", ""]]
       : [["5 days", fpct(t.ret_5d, 1), cls(t.ret_5d)], ["1 month", fpct(t.ret_1m, 1), cls(t.ret_1m)], ["vs 20-day avg", fpct(t.dist_sma20_pct, 1), cls(t.dist_sma20_pct)], ["RSI 14", fnum(t.rsi14, 0), t.rsi14 >= 70 || t.rsi14 <= 30 ? "warn" : ""], ["Setup", a.setup ? pretty(a.setup.choice) : "–", ""], ["Checklist", ck ? `${ck.passed}/${ck.total}` : "–", ck ? (ck.passed >= 8 ? "up" : ck.passed >= 6 ? "warn" : "down") : ""]];
     const who = whoHtml(s);
-    return `${head}${chart}${range52}${reads}${why}${planHtml}
+    return `${head}${chart}${range52}${reads}${why}${planHtml}${wlCrowdOdds(x.t)}
       <div class="wd-stats">${stats.map(([k, v, c]) => `<div><span>${k}</span><b class="${c}">${esc(String(v))}</b></div>`).join("")}</div>
       ${who ? `<div class="wd-who"><h5>Who is buying</h5>${who}</div>` : ""}
       <div class="wd-act"><button type="button" class="btn" data-wl-open="${esc(x.t)}">Full analysis</button><button type="button" class="btn ghost" data-wl-page="${esc(x.t)}">Open page</button><a class="btn ghost" href="${tvLink(x.t)}" target="_blank" rel="noopener">Chart</a><button type="button" class="btn ghost wd-rm" data-wl-remove="${esc(x.t)}">Remove</button></div>`;
@@ -889,24 +1003,53 @@
       ${now ? `<div class="cr-now ${clash ? "clash" : ""}"><b>Last ${tk.posts} posts:</b> ${tk.bull} bullish, ${tk.bear} bearish, <span class="${now[1]}">${now[0]}</span>${clash ? ". The latest chatter is going against the week's mood." : "."}</div>` : ""}
     </div>`;
   }
-  function crowdTalk(c) {
-    const order = c.talk_order || Object.keys(c.talk || {}); if (!order.length) return "";
-    if (!crowdSym || !order.includes(crowdSym)) crowdSym = order[0];
-    const t = c.talk[crowdSym]; const tagged = t.bull + t.bear;
-    const tabs = order.map((s) => `<button type="button" class="${s === crowdSym ? "on" : ""}" data-crowd-sym="${esc(s)}">${esc(s)}</button>`).join("");
-    const bs = tagged ? Math.round((t.bull / tagged) * 100) : 0;
+  // the crowd on names outside the snapshot (the user's watchlist), fetched on demand and kept for 15 minutes
+  const crowdExtra = {}; const crowdBusy = new Set();
+  async function loadCrowdSym(sym) {
+    if (STATIC_MODE || crowdBusy.has(sym)) return;
+    const have = crowdExtra[sym]; if (have && Date.now() - have.at < 900000) return;
+    crowdBusy.add(sym);
+    try { const res = await api(`/api/crowd/${encodeURIComponent(sym)}`, { cache: "no-store" }); const j = res.ok ? await res.json() : { status: "error" };
+      crowdExtra[sym] = { at: Date.now(), ok: j.status === "ok" && !!j.talk, talk: j.talk, mood: j.mood };
+    } catch (e) { crowdExtra[sym] = { at: Date.now(), ok: false }; }
+    crowdBusy.delete(sym);
+    const el = $("[data-crowd-talk]"); if (el && crowd && crowdSym === sym) { const tmp = document.createElement("div"); tmp.innerHTML = crowdTalk(crowd); el.replaceWith(tmp.firstElementChild); }
+    if (currentView === "watch" && wlSel === sym) rerenderWatch();
+  }
+  const talkFor = (sym) => (crowd && crowd.talk && crowd.talk[sym]) || (crowdExtra[sym] && crowdExtra[sym].talk) || null;
+  const spanWords = (t) => { if (!t.oldest || !t.newest) return ""; const h = (Date.parse(t.newest) - Date.parse(t.oldest)) / 3600000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} minutes` : h < 48 ? `${Math.round(h)} hours` : `${Math.round(h / 24)} days`; };
+  function talkBody(t, sym) {
+    const tagged = t.bull + t.bear, bs = tagged ? Math.round((t.bull / tagged) * 100) : 0;
     const lean = !tagged ? "Nobody tagged a side" : bs >= 65 ? "Mostly bullish talk" : bs >= 55 ? "Leaning bullish" : bs <= 35 ? "Mostly bearish talk" : bs <= 45 ? "Leaning bearish" : "An even fight";
     const topics = (t.topics || []).map((x) => `<span class="cr-topic">${esc(x.label)}<i>${x.n}</i></span>`).join("");
     const also = (t.also || []).map((x) => `<span class="cr-also" data-ticker-page="${esc(String(x.symbol).replace(/\.X$/, "-USD"))}">$${esc(x.symbol)}</span>`).join("");
-    const q = (side) => (t.quotes[side] || []).map((m) => `<blockquote class="cr-q ${side === "bull" ? "up" : "down"}"><p>${esc(m.text)}</p><footer>${agoShort(m.at)}${m.id ? ` · <a href="https://stocktwits.com/message/${encodeURIComponent(m.id)}" target="_blank" rel="noopener">open</a>` : ""}</footer></blockquote>`).join("") || `<div class="cr-none">No clean ${side === "bull" ? "bullish" : "bearish"} post in this batch.</div>`;
-    return `<div class="cr-talk" data-crowd-talk>
-      <div class="cr-talk-h"><h4>What people are saying</h4><div class="pz-seg">${tabs}</div></div>
-      <div class="cr-sum"><b>${lean}</b> on ${esc(crowdSym)}: <span class="up">${t.bull} bullish</span> vs <span class="down">${t.bear} bearish</span> in the last ${t.posts} posts${t.untagged ? ` (${t.untagged} took no side)` : ""}, ${(() => { const a = agoShort(t.oldest); return a === "just now" ? "all in the last minute" : a ? `all from the last ${esc(a.replace(" ago", ""))}` : ""; })()}.</div>
+    const o = t.older || {}, n = t.newer || {};
+    const d = isNum(o.bull_share) && isNum(n.bull_share) ? n.bull_share - o.bull_share : null;
+    const shift = d == null ? "" : `<div class="cr-shift"><span class="cr-lbl">Shift</span><div class="cr-shift-bars">
+        <div><i>older ${Math.floor(t.posts / 2)} posts</i><span class="cr-mini"><b style="width:${o.bull_share}%"></b></span><em>${o.bull_share}% bullish</em></div>
+        <div><i>newer ${Math.ceil(t.posts / 2)} posts</i><span class="cr-mini"><b style="width:${n.bull_share}%"></b></span><em>${n.bull_share}% bullish</em></div></div>
+        <span class="cr-shift-w ${d >= 8 ? "up" : d <= -8 ? "down" : "flat"}">${d >= 8 ? "turning more bullish" : d <= -8 ? "turning more bearish" : "steady"}</span></div>`;
+    const q = (side) => (t.quotes[side] || []).map((m) => `<blockquote class="cr-q ${side === "bull" ? "up" : "down"}"><p>${esc(m.text)}</p><footer>${agoShort(m.at)}${m.id ? ` · <a href="https://stocktwits.com/message/${encodeURIComponent(m.id)}" target="_blank" rel="noopener">open</a>` : ""}</footer></blockquote>`).join("") || `<div class="cr-none">No clean ${side === "bull" ? "bullish" : "bearish"} post in this sample.</div>`;
+    return `<div class="cr-sum"><b>${lean}</b> on ${esc(sym)}: <span class="up">${t.bull} bullish</span> vs <span class="down">${t.bear} bearish</span> in the last <b>${t.posts} posts</b>${t.untagged ? ` (${t.untagged} took no side)` : ""}, covering the last ${spanWords(t) || "stretch"}.</div>
       <div class="cr-split" aria-hidden="true"><i class="up" style="width:${tagged ? bs : 50}%"></i><i class="down" style="width:${tagged ? 100 - bs : 50}%"></i></div>
+      ${shift}
       ${topics ? `<div class="cr-row"><span class="cr-lbl">Hot topics</span><div class="cr-topics">${topics}</div></div>` : ""}
       ${also ? `<div class="cr-row"><span class="cr-lbl">Also mentioned</span><div class="cr-topics">${also}</div></div>` : ""}
-      <div class="cr-quotes"><div><h5 class="up">The bull side</h5>${q("bull")}</div><div><h5 class="down">The bear side</h5>${q("bear")}</div></div>
-      <div class="pz-foot">Real posts from StockTwits, newest first. Usernames are hidden and posts with insults or slurs are left out. Opinions, not advice.</div>
+      <div class="cr-quotes"><div><h5 class="up">The bull side</h5>${q("bull")}</div><div><h5 class="down">The bear side</h5>${q("bear")}</div></div>`;
+  }
+  function crowdTalk(c) {
+    const order = c.talk_order || Object.keys(c.talk || {}); if (!order.length) return "";
+    const mine = activeList().filter((s) => !order.includes(s) && !/[-=^]/.test(s));
+    if (!crowdSym || (!order.includes(crowdSym) && !mine.includes(crowdSym))) crowdSym = order[0];
+    const tabs = order.map((s) => `<button type="button" class="${s === crowdSym ? "on" : ""}" data-crowd-sym="${esc(s)}">${esc(s)}</button>`).join("");
+    const pick = mine.length && !STATIC_MODE ? `<label class="cr-pick"><span>Your watchlist</span><select data-crowd-pick aria-label="See the crowd on one of your names"><option value="">pick a name</option>${mine.map((s) => `<option value="${esc(s)}" ${s === crowdSym ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label>` : "";
+    const t = talkFor(crowdSym); const ex = crowdExtra[crowdSym];
+    const body = t ? talkBody(t, crowdSym) : crowdBusy.has(crowdSym) || !ex ? `<div class="cr-loading">Reading the last 200 posts on ${esc(crowdSym)}. The first look at a name takes about half a minute.</div>` : `<div class="cr-none">No StockTwits posts to read on ${esc(crowdSym)} right now.</div>`;
+    if (!t && !ex && !crowdBusy.has(crowdSym)) setTimeout(() => loadCrowdSym(crowdSym), 0);
+    return `<div class="cr-talk" data-crowd-talk>
+      <div class="cr-talk-h"><h4>What people are saying</h4><div class="cr-talk-ctl"><div class="pz-seg">${tabs}</div>${pick}</div></div>
+      ${body}
+      <div class="pz-foot">Real posts from StockTwits, newest first, about 200 per name. Usernames are hidden and posts with insults or slurs are left out. Opinions, not advice.</div>
     </div>`;
   }
   function secCrowd(r) {
@@ -926,6 +1069,11 @@
       </div>
     </section>`;
   }
+  document.addEventListener("change", (e) => {
+    const p = e.target.closest && e.target.closest("[data-crowd-pick]"); if (!p || !p.value || !crowd) return;
+    crowdSym = p.value; const el = $("[data-crowd-talk]"); if (!el) return;
+    const tmp = document.createElement("div"); tmp.innerHTML = crowdTalk(crowd); el.replaceWith(tmp.firstElementChild);
+  });
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-crowd-sym]"); if (!b || !crowd) return;
     crowdSym = b.getAttribute("data-crowd-sym"); const el = $("[data-crowd-talk]"); if (!el) return;
@@ -2269,7 +2417,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
@@ -2310,7 +2458,7 @@
       ${explain("OneView reads the market three ways: the numbers (price, volume, levels), the model's read in plain words with its reasons, and the crowd (Reddit, StockTwits, the President's posts). Everything is information, not advice.")}
       ${sec("Start here", li([["Sign in.", "Enter your email, open the one-time link on the device you use. No password."], ["Watchlist.", "Add the names you follow (ticker or company name). The desk personalises around that list."], ["Every morning at 07:00 ET", "the briefing lands at the top of the Overview: the numbers and the reads on your names."]]))}
       ${sec("The Overview, top to bottom", li([["Briefings.", "Morning at 07:00: futures, oil, gold, bitcoin, 10- and 5-year yields, mega caps, the President's market-relevant posts, today's events, and for SPY and QQQ what we see on the 1-hour chart, the likeliest next 1 to 4 hours and the levels that decide it. Middle card: a direction read every 15 minutes of the session (Higher, Lower, Sideways into the close, with the reason). After the close at 16:30: what the session did and a scorecard of the day's reads."], ["Where the big money is moving.", "SPY, QQQ, DIA and IWM against their normal activity for the time of day, the largest companies trading unusually heavily, and the groups leading or lagging."], ["Voices moving the tape.", "The President's posts read once each, and where the Reddit crowd is piling in."], ["StockTwits crowd.", "The crowd's mood on SPY, QQQ and the largest names (0 to 100), how loud the chatter is, and what is trending."], ["Market mood and assessments.", "The overall tape, then one line per name on your list: swing read, today's read, the first reason, and LOW, MED or HIGH conviction. Never a percentage."], ["Small-cap runners.", "Smaller names trading far above normal or changing hands fast, with a sensible play."], ["Today's numbers in plain words.", "Futures, VIX, yields, the dollar, breadth, overseas markets, one sentence each."], ["News that can move the market.", "Every headline read once; only the ones that can move prices stay."]]))}
-      ${sec("The other sections", li([["Watchlist.", "One row per name with its price, a 30-day chart, the read and a setup score. Click a row for its full story on the right: the chart, the day, swing and long-term reads, the trade plan and the key numbers. Filter by bullish, neutral or bearish, sort by movers or best setup, and use the arrow keys to move through the list. The Day / Swing / Long term switch changes every read at once."], ["Scanner.", "Names trading far above normal on the 15-minute to 2-hour charts, plus thin low-float names that move violently."], ["Stocks.", "Every analysed name in one table, full breakdown on click."], ["Themes.", "The data-centre build-out by part of the stack, who leads and who could run next."], ["Filings & flow.", "Insiders, big holders and Congress, each source's delay stated, plus options flow."], ["Market context.", "1, 3, 6 and 12 months, the indexes weekly, rates and money flows."], ["Track record.", "Every verdict and every direction read scored against what the market did, day by day."]]))}
+      ${sec("The other sections", li([["Watchlist.", "One row per name with its price, a 30-day chart, the read and a setup score. Click a row for its full story on the right: the chart, the day, swing and long-term reads, the trade plan and the key numbers. Filter by bullish, neutral or bearish, sort by movers or best setup, and use the arrow keys to move through the list. The Day / Swing / Long term switch changes every read at once."], ["Scanner.", "Names trading far above normal on the 15-minute to 2-hour charts, plus thin low-float names that move violently."], ["Stocks.", "Every analysed name in one table, full breakdown on click."], ["Themes.", "The data-centre build-out by part of the stack, who leads and who could run next."], ["Filings & flow.", "Insiders, big holders and Congress, each source's delay stated, plus options flow."], ["Market context.", "1, 3, 6 and 12 months, the indexes weekly, rates and money flows."], ["Track record.", "Every verdict and every direction read scored against what the market did, day by day."], ["The crowd and the betting markets.", "On the Overview: about 200 StockTwits posts per name read into a bull/bear split, the shift and the hot topics, plus Polymarket and Kalshi odds on the Fed, the next S&P 500 and Nasdaq close, and your names. Every bet shows the money behind it; under $1,000 is marked thin."]]))}
       ${sec("What to focus on", li([["Day and intraday traders:", "the morning levels for SPY and QQQ, the Intraday direction card, the Scanner, Small-cap runners and Where the big money is moving. Trade the levels, not the words."], ["Swing traders:", "Assessments and the swing column on your cards (BUY, BUY THE DIP, WAIT FOR BREAKOUT, HOLD, AVOID with reasons), Filings & flow, and the after-close briefing."], ["Longer horizons:", "the long-term column, Themes, Market context, and the crowd mood as a contrarian check when it is extreme."]]))}
       ${sec("What sets it apart", li([["Plain words with reasons.", "Two to four reasons per read and a conviction word instead of a fake-precision percentage."], ["The right kind of call.", "Funds get a trend read, big companies a momentum read, everything else the model's stance."], ["Three feeds in one place.", "The numbers, the model, and the crowd."], ["A public scorecard.", "The desk logs every call with its price and grades itself after the close."], ["One price everywhere.", "Every panel reads from the same quote store, 15-minute delayed, time stamped."]]))}
       <div class="meta2">Information, not advice. Data is delayed and can be wrong. Reads are probabilities, not predictions. You decide what to trade and you carry the risk.</div>
@@ -2874,6 +3022,8 @@
     setInterval(() => { if (currentView === "desk") loadDesk(); }, 300000);
     setTimeout(pollDirection, 3000);
     setInterval(pollCrowd, 300000);
+    setInterval(pollOdds, 600000);
+    setTimeout(pollOdds, 4500);
     setTimeout(pollCrowd, 3500);
     setInterval(pollLiveScan, 60000);
     setTimeout(pollLiveScan, 2500);

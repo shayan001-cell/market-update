@@ -40,6 +40,12 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 ## What to focus on
 **Day and intraday traders.** The morning briefing's levels for SPY and QQQ, the Intraday direction card every 15 minutes, the Scanner, Small-cap runners, and the "Where the big money is moving" panel. Trade the levels, not the words.
 
+
+## The crowd and the betting markets (Overview, and inside each Watchlist name)
+
+- **The crowd (StockTwits).** Each score compares today's mood with that stock's normal: 50 is a normal day. OneView reads about **200 recent posts** per name for SPY, QQQ, IWM, DIA and the most-discussed names, shows the bull/bear split, how it moved between the older and newer half of the sample, the hot topics and a few clean posts from each side. Pick any watchlist name from the "Your watchlist" menu, or open it on the Watchlist page; the first look at a name takes about half a minute.
+- **The betting markets (Polymarket and Kalshi).** What people with real money on the line expect: the next Fed decision, recession odds, the chance the S&P 500 and the Nasdaq-100 close above today's level at the next close (with the market's middle guess), S&P 500 year-end targets, up-or-down odds for SPY, QQQ, IWM and DIA, and every watchlist name that has a market (next session up or down, month-end close, "will it hit", and other bets such as earnings beats). Every number shows the money traded; under $1,000 is marked **thin**. These are bets, not OneView forecasts, and most smaller names have no market at all.
+
 **Swing traders.** The Assessments panel and the swing read on your Watchlist (BUY, BUY THE DIP, WAIT FOR BREAKOUT, HOLD, AVOID, with reasons), Filings & flow for what informed money is doing, and the after-close briefing for how the day changed the picture.
 
 **Longer horizons.** The long-term read on your Watchlist, Themes, Market context, and the crowd mood as a contrarian check when it is extreme.

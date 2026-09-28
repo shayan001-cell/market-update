@@ -2443,3 +2443,70 @@ header.topbar .nav-tray .side-item:nth-child(1){--i:1}header.topbar .nav-tray .s
 @container (max-width: 700px){ .wl2 .wl-add kbd{display:none} .wl2 .wl-add input{padding-right:14px} .wd-read:not(.on) .wd-rp{display:none} .wd-read{flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px 10px} .wd-read .wd-rl{flex:1 0 100%} .wd-read .wd-rp{flex:1 0 100%} }
 .wl-colh,.wl-row{grid-template-columns:minmax(96px,1fr) 84px minmax(116px,auto) minmax(152px,1.1fr) 56px 28px;gap:10px}
 @container (max-width: 900px){ .wl-row{grid-template-columns:minmax(0,1fr) 72px auto 28px} }
+/* ======================= crowd: bigger sample, shift, watchlist picker ======================= */
+.cr-talk-ctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cr-pick{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.cr-pick select{height:34px;border-radius:10px;border:1px solid rgba(133,167,255,.35);background:rgba(36,91,255,.08);color:var(--text);font:600 12.5px var(--font);padding:0 26px 0 10px}
+.cr-loading{padding:14px 0;font-size:13px;color:var(--muted)}
+.cr-loading::after{content:"";display:inline-block;width:10px;height:10px;margin-left:8px;border-radius:50%;border:2px solid rgba(133,167,255,.4);border-top-color:#85A7FF;vertical-align:-1px;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.cr-shift{display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:10px;align-items:center;margin-bottom:10px}
+.cr-shift-bars{display:grid;gap:5px}
+.cr-shift-bars>div{display:grid;grid-template-columns:110px minmax(0,1fr) 92px;gap:8px;align-items:center;font-size:12px}
+.cr-shift-bars i{font-style:normal;color:var(--muted)} .cr-shift-bars em{font-style:normal;color:var(--text-2);text-align:right;font-variant-numeric:tabular-nums}
+.cr-mini{height:8px;border-radius:999px;background:rgba(255,143,155,.45);overflow:hidden} .cr-mini b{display:block;height:100%;background:var(--up);border-radius:999px 0 0 999px}
+.cr-shift-w{font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;background:color-mix(in srgb,currentColor 14%,transparent);white-space:nowrap}
+/* ======================= THE BETTING MARKETS ======================= */
+.odds{container-type:inline-size;margin:18px 0;padding:16px;border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01)),var(--surface);border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.odds .up{color:var(--up)} .odds .down{color:var(--down)} .odds .flat{color:var(--text-2)}
+.odds h3{margin:0} .odds h4{margin:0 0 10px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brand-text)}
+.od-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.od-col{display:grid;gap:12px;align-content:start}
+.od-card{padding:14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);min-width:0;display:flex;flex-direction:column}
+.od-h{display:flex;justify-content:space-between;gap:8px;align-items:baseline} .od-h b{font-size:13px;color:var(--text)} .od-h span{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.od-big{font-family:Sora,var(--font);font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1.05;margin:8px 0 2px;font-variant-numeric:tabular-nums}
+.od-small .od-big{font-size:26px}
+.od-p{margin:0 0 8px;font-size:12.5px;line-height:1.45;color:var(--text-2)} .od-p b{color:var(--text)}
+.od-foot{margin-top:auto;padding-top:6px;font-size:11.5px;color:var(--muted)} .od-foot a{color:var(--brand-text)}
+.od-money{font-variant-numeric:tabular-nums}
+.od-thin{display:inline-block;margin-left:6px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:999px;color:var(--warn);background:rgba(232,189,104,.14);border:1px solid rgba(232,189,104,.35)}
+.od-stack{display:flex;height:12px;border-radius:999px;overflow:hidden;gap:2px;margin:4px 0 8px} .od-stack i{display:block;height:100%;background:currentColor}
+.od-opts{list-style:none;margin:0 0 6px;padding:0;display:grid;gap:4px}
+.od-opts li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:12.5px;color:var(--text-2)} .od-opts b{color:var(--text);font-variant-numeric:tabular-nums}
+.od-dot{width:9px;height:9px;border-radius:50%;background:currentColor}
+.od-lad{display:block;width:100%;height:92px;margin:2px 0 4px;overflow:visible}
+.od-lad polyline{fill:none;stroke:#85A7FF;stroke-width:2;vector-effect:non-scaling-stroke}
+.od-lad .od-50{stroke:rgba(255,255,255,.15);stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
+.od-lad .od-now{stroke:var(--text);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.od-lad .od-mid{fill:#85A7FF;stroke:var(--surface);stroke-width:2}
+.od-lad text{font:600 10px var(--font);fill:var(--muted)}
+.od-targets{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.od-targets span{display:inline-flex;gap:6px;align-items:center;font-size:12px;font-weight:600;padding:5px 9px;border-radius:999px;background:color-mix(in srgb,currentColor 12%,transparent)} .od-targets b{color:var(--text);font-variant-numeric:tabular-nums}
+.od-funds,.od-wl{margin-top:14px;padding:14px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.07)}
+.od-fund-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.od-fund{display:grid;gap:6px;padding:10px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
+.od-fund b{font-size:14px;color:var(--text)} .od-fund span{font-size:13px;font-weight:700} .od-fund em{font-style:normal;font-size:11px;color:var(--muted)}
+.od-fund.none span{color:var(--muted);font-weight:500}
+.od-meter{height:8px;border-radius:999px;background:rgba(255,143,155,.45);overflow:hidden} .od-meter i{display:block;height:100%;background:var(--up)}
+.od-tablew{overflow-x:auto}
+.od-table{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.od-table th{text-align:left;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.08);white-space:nowrap}
+.od-table td{padding:9px 8px;border-bottom:1px solid rgba(255,255,255,.05);white-space:nowrap;color:var(--text-2)}
+.od-table td b{color:var(--text)} .od-table td span{font-weight:700} .od-table td i{display:block;font-style:normal;font-size:11px;color:var(--muted)}
+.od-table tbody tr{cursor:pointer;transition:background .3s} .od-table tbody tr:hover{background:rgba(255,255,255,.035)}
+.od-v{text-align:right}
+.od-none{margin-top:10px;font-size:12px;color:var(--muted)}
+@container (max-width: 980px){ .od-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@container (max-width: 560px){ .od-grid,.od-fund-grid{grid-template-columns:minmax(0,1fr)} .od-fund-grid{grid-template-columns:repeat(2,minmax(0,1fr))} .cr-shift{grid-template-columns:minmax(0,1fr)} .cr-shift-bars>div{grid-template-columns:96px minmax(0,1fr) 84px} }
+/* watchlist detail: crowd + betting markets */
+.wd-sec{margin-bottom:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)}
+.wd-ch{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)} .wd-ch b{font-size:13px} .wd-ch small{font-weight:500;color:var(--muted)}
+.wd-crowd .cr-split{margin:8px 0}
+.wd-cn{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--text-2);margin-bottom:8px}
+.wd-odds{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.wd-odds>div{padding:9px 10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);min-width:0}
+.wd-odds span{display:block;font-size:11px;color:var(--muted)} .wd-odds b{display:block;font-family:Sora,var(--font);font-size:20px;font-weight:700;margin:2px 0} .wd-odds em{display:block;font-style:normal;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wl2 .wd-sec .up{color:var(--up)} .wl2 .wd-sec .down{color:var(--down)}
+.od-card .od-h{flex-direction:column;align-items:flex-start;gap:2px} .od-card .od-h span{white-space:normal}
+.od-oth{white-space:normal !important;max-width:280px;line-height:1.35} .od-oth a{color:var(--text-2);text-decoration:none;border:0} .od-oth a:hover{color:var(--brand-text)} .od-oth b{margin-left:6px;color:var(--text)}
+.wd-odds .wd-oth{grid-column:1 / -1} .wd-oth span{white-space:normal} .wd-oth em a{color:var(--brand-text)}
