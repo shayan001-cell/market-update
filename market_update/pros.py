@@ -31,6 +31,8 @@ MIN_SCORED = 10
 MIN_HIT = 0.70
 TOP_N = 20
 CONSENSUS_H = 72
+MAX_AGE_DAYS = 365       # calls older than a year say little about skill today; ignored
+RESCAN_DAYS = 3          # an account already read is read again (for its new calls) after this many days
 WASH = 0.2               # percent
 DISCOVERY_POSTS = 90     # posts read per ticker to find the accounts (three pages)
 
@@ -119,6 +121,8 @@ def score_calls(calls: list[dict[str, Any]], closes: dict[str, list[tuple[str, f
             c["status"] = "no_price"; continue
         at = datetime.fromisoformat(c["at"])
         d = at.date().isoformat()
+        if d < series[0][0]:                       # older than the price history: never score it against a later price
+            c["status"] = "no_price"; continue
         after_close = at.hour >= 16 or at.weekday() >= 5
         idx = next((i for i, (day, _) in enumerate(series) if (day > d) or (day == d and not after_close)), None)
         if idx is None or idx + HORIZON >= len(series):

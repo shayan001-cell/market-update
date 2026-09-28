@@ -1997,22 +1997,54 @@ def _st_user_messages(user: str, sid: str | None, want: int = 150) -> list[dict[
     return msgs[:want]
 
 
+from zoneinfo import ZoneInfo as _ZI
+ET_ZONE = _ZI("America/New_York")
+_PROS_LEDGER = lambda: config.OUTPUT_DIR / "pros_ledger.json"   # noqa: E731
+
+
 def _pros_sync() -> dict[str, Any]:
+    """One run of the top-traders ledger. Each run reads ~30 accounts not read in the last few days (by likes
+    earned across the big tickers) plus the current qualifiers, merges their calls into a persistent ledger,
+    and re-scores every call in it. Calls too recent to judge are scored on a later run, so records grow over time."""
     from . import pros
     t0 = time.time()
+    try:
+        led = json.loads(_PROS_LEDGER().read_text())
+    except Exception:  # noqa: BLE001
+        led = {"users": {}}
+    users: dict[str, Any] = led.setdefault("users", {})
     sid = st_open()
     found = pros.discover(lambda sym: _st_messages(sym, sid, pros.DISCOVERY_POSTS), lambda name: bool(_ST_BLOCK.search(name or "")))
-    cands = found[:pros.CANDIDATES]
-    calls_by_user: dict[str, list[dict[str, Any]]] = {}
-    for u in cands:
-        calls_by_user[u["username"]] = pros.calls_from(_st_user_messages(u["username"], sid, pros.USER_POSTS))
-    syms = sorted({c["yf"] for cs in calls_by_user.values() for c in cs})
+    now = time.time()
+    fresh = [u for u in found if now - (users.get(u["username"], {}).get("read_at") or 0) > pros.RESCAN_DAYS * 86400]
+    prev_q = [n for n, u in users.items() if u.get("qualified") and now - (u.get("read_at") or 0) > 6 * 3600][:pros.TOP_N]
+    to_read = [(u["username"], u) for u in fresh[:pros.CANDIDATES]] + [(n, None) for n in prev_q if n not in {u["username"] for u in fresh[:pros.CANDIDATES]}]
+    cutoff = (datetime.now(ET_ZONE) - timedelta(days=pros.MAX_AGE_DAYS)).isoformat()
+    for name, meta in to_read:
+        rec = users.setdefault(name, {"username": name, "calls": {}, "likes": 0, "symbols": []})
+        if meta:
+            rec.update(id=meta.get("id"), name=meta.get("name"), likes=max(rec.get("likes") or 0, meta.get("likes") or 0),
+                       symbols=sorted(set(rec.get("symbols") or []) | set(meta.get("symbols") or [])))
+        for c in pros.calls_from(_st_user_messages(name, sid, pros.USER_POSTS)):
+            if c["at"] < cutoff:
+                continue
+            c["body"] = c["body"][:280]
+            rec["calls"][str(c["id"])] = {**rec["calls"].get(str(c["id"]), {}), **c}
+        rec["read_at"] = time.time()
+    # drop calls that aged out, then score everything in the ledger
+    for rec in users.values():
+        rec["calls"] = {k: c for k, c in rec.get("calls", {}).items() if c.get("at", "") >= cutoff}
+    syms = sorted({c["yf"] for rec in users.values() for c in rec["calls"].values()})
     closes: dict[str, list[tuple[str, float]]] = {}
-    if syms:
-        df = fetch.fetch_history(syms, period="1y")
-        for y in syms:
+    for i in range(0, len(syms), 150):
+        chunk = syms[i:i + 150]
+        try:
+            df = fetch.fetch_history(chunk, period="2y")
+        except Exception as e:  # noqa: BLE001
+            log.warning("top traders prices: %s", e); continue
+        for y in chunk:
             try:
-                col = df[(y, "Close")] if (y, "Close") in df.columns else (df["Close"] if len(syms) == 1 else None)
+                col = df[(y, "Close")] if (y, "Close") in df.columns else (df["Close"] if len(chunk) == 1 else None)
                 if col is None:
                     continue
                 col = col.dropna()
@@ -2020,28 +2052,38 @@ def _pros_sync() -> dict[str, Any]:
             except Exception:  # noqa: BLE001
                 continue
     summaries = []
-    for u in cands:
-        cs = pros.score_calls(calls_by_user[u["username"]], closes)
-        sm = pros.summarize(u, cs)
+    calls_by_user: dict[str, list[dict[str, Any]]] = {}
+    for name, rec in users.items():
+        cs = pros.score_calls(sorted([dict(c) for c in rec["calls"].values()], key=lambda c: c["at"]), closes)
+        calls_by_user[name] = cs
+        meta = {k: rec.get(k) for k in ("username", "id", "name", "likes")}
+        meta["symbols"] = rec.get("symbols") or []
+        sm = pros.summarize(meta, cs)
         sm["receipts"] = [{k: c.get(k) for k in ("sym", "side", "at", "ret", "hit", "entry_day", "exit_day", "id")} for c in cs if c.get("status") == "scored"][-6:]
         summaries.append(sm)
     qualified = sorted([x for x in summaries if x["scored"] >= pros.MIN_SCORED and (x["hit_rate"] or 0) >= pros.MIN_HIT], key=lambda x: (-x["hit_low"], -x["scored"]))[:pros.TOP_N]
-    near = sorted([x for x in summaries if x not in qualified and x["scored"] >= 6], key=lambda x: -x["hit_low"])[:10]
+    qset = {x["username"] for x in qualified}
+    for name, rec in users.items():
+        rec["qualified"] = name in qset
+    near = sorted([x for x in summaries if x["username"] not in qset and x["scored"] >= 6], key=lambda x: -x["hit_low"])[:10]
     cons = pros.consensus(qualified, calls_by_user)
     for row in cons["latest"]:
-        q = _st_clean_quote(row.pop("body", ""), row["sym"], [row["sym"]])
-        row["text"] = q
-    out = {"as_of": time.time(), "took_s": round(time.time() - t0), "discovered": len(found), "candidates": len(cands),
+        row["text"] = _st_clean_quote(row.pop("body", ""), row["sym"], [row["sym"]])
+    rated = [x for x in summaries if x["scored"] >= pros.MIN_SCORED]
+    out = {"as_of": time.time(), "took_s": round(time.time() - t0), "discovered": len(found), "candidates": len(users), "read_this_run": len(to_read),
+           "rated": len(rated), "median_hit": round(sorted(x["hit_rate"] for x in rated)[len(rated) // 2], 3) if rated else None,
            "calls": sum(len(v) for v in calls_by_user.values()), "scored": sum(x["scored"] for x in summaries),
            "qualified": qualified, "near": near, "consensus": cons,
-           "method": {"horizon_sessions": pros.HORIZON, "min_scored": pros.MIN_SCORED, "min_hit": pros.MIN_HIT, "wash_pct": pros.WASH,
-                      "symbols": pros.DISCOVERY_SYMBOLS, "posts_per_symbol": pros.DISCOVERY_POSTS, "posts_per_trader": pros.USER_POSTS}}
+           "method": {"horizon_sessions": pros.HORIZON, "min_scored": pros.MIN_SCORED, "min_hit": pros.MIN_HIT, "wash_pct": pros.WASH, "max_age_days": pros.MAX_AGE_DAYS,
+                      "symbols": pros.DISCOVERY_SYMBOLS, "posts_per_symbol": pros.DISCOVERY_POSTS, "posts_per_trader": pros.USER_POSTS, "per_run": pros.CANDIDATES}}
+    led["updated"] = time.time()
+    _PROS_LEDGER().write_text(json.dumps(led))
     fetch._cache_put("pros_snapshot", out)
     try:
         (config.OUTPUT_DIR / "pros.json").write_text(json.dumps(out, default=str))
     except Exception:  # noqa: BLE001
         pass
-    log.info("top traders: %d found, %d scored, %d qualify (%.0f s)", len(found), len(cands), len(qualified), time.time() - t0)
+    log.info("top traders: %d found, %d read, %d in ledger, %d rated, %d qualify (%.0f s)", len(found), len(to_read), len(users), len(rated), len(qualified), time.time() - t0)
     return out
 
 
@@ -2054,7 +2096,13 @@ async def pros_loop() -> None:
                 await asyncio.sleep(600); continue
             snap = state.get("pros") or fetch._cache_get("pros_snapshot", 20 * 3600)
             now = fetch.now_et(); slot = now.strftime("%Y-%m-%d") + ("am" if now.hour < 12 else "pm")
-            due = not snap or (now.hour in (6, 17) and (now.hour == 6 or now.minute >= 30) and state.get("pros_slot") != slot)
+            try:
+                led_n = len(json.loads(_PROS_LEDGER().read_text()).get("users", {}))
+            except Exception:  # noqa: BLE001
+                led_n = 0
+            last = (snap or {}).get("as_of", 0)
+            bootstrap = led_n < 300 and fetch.market_state() not in ("open",) and time.time() - last > 3 * 3600   # fill the ledger fast, never in market hours
+            due = not snap or bootstrap or (now.hour in (6, 17) and (now.hour == 6 or now.minute >= 30) and state.get("pros_slot") != slot)
             if snap and not state.get("pros"):
                 state["pros"] = snap
             if due and not state.get("pros_running"):
