@@ -8,10 +8,10 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 **Finding your way.** The top menu has five places: **Overview**, **Live** (Intraday, and Intraday view), **Watchlist**, **Markets** (Market context, Themes, Stocks, Scanner) and **Research** (Company map, Filings & flow, Track record). Markets and Research open a small panel with a one-line description of each page. The **?** button next to the bell opens this guide. Number keys still jump straight to a page. On a phone the menu becomes a tab bar and the panels open from the bottom.
 
 ## Start here (2 minutes)
-1. Open the desk and enter your email. A one-time link arrives; open it on the device you want to use. No password.
-2. Read and accept the "not financial advice" note once per sign-in.
+1. Open the desk, enter your email and press Continue. You land on the dashboard; no email is sent and there is no password. Pressing Continue is your agreement that OneView is information, not financial advice.
+2. Admin (site owner only): email-only sign-ins never get admin rights. On the server Mac run `.venv/bin/python scripts/admin_link.py` and open the printed link within 10 minutes.
 3. Add the names you follow to your Watchlist (type a ticker or a company name). Everything else on the desk personalises around that list.
-4. Every morning at 7:00 ET the briefing appears at the top of the Overview: the numbers and the reads on your names. Email is used only for sign-in links.
+4. Every morning at 7:00 ET the briefing appears at the top of the Overview: the numbers and the reads on your names. No email is sent.
 
 ## The Overview, top to bottom
 **Briefings (three cards).** Morning briefing at 7:00 ET: futures, oil, gold, bitcoin, the 10- and 5-year yields, the mega caps, the President's market-relevant posts, today's events, and for SPY and QQQ what we see on the 1-hour chart, the likeliest shape of the next 1 to 4 hours, and the levels that decide it. Intraday direction (middle card): every 15 minutes of the session, Higher, Lower or Sideways into the close, with the main reason, based on technicals plus the crowd's mood. After the close at 4:30 ET: what the session did, the biggest moves, and a scorecard of how the day's reads and the morning call fared.

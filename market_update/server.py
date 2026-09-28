@@ -1078,7 +1078,7 @@ def _send_link(email: str, link: str) -> bool:
 @app.get("/api/auth/mail-status")
 async def auth_mail_status() -> dict[str, Any]:
     """What the sign-in card shows: which transport sends the links and from whom (never the credentials)."""
-    return {**mail.status(), "instant_login": instant_login_on(), "instant_until": config.INSTANT_LOGIN_UNTIL}
+    return {**mail.status(), "instant_login": instant_login_on()}
 
 
 async def _issue_link(request: Request, email: str) -> dict[str, Any]:
@@ -1103,9 +1103,8 @@ async def _issue_link(request: Request, email: str) -> dict[str, Any]:
 
 
 def instant_login_on() -> bool:
-    if os.environ.get("MU_INSTANT_LOGIN", "1").strip() in ("0", "false", "off", "no"):
-        return False
-    return fetch.now_et().date().isoformat() <= config.INSTANT_LOGIN_UNTIL
+    """Email-only sign-in is the default: no mail is sent. MU_INSTANT_LOGIN=0 brings back the emailed link."""
+    return os.environ.get("MU_INSTANT_LOGIN", "1").strip() not in ("0", "false", "off", "no")
 
 
 def _client_ip(request: Request) -> str:
@@ -1124,14 +1123,19 @@ async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) ->
         raise HTTPException(status_code=400, detail="enter a valid email address")
     if not instant_login_on():
         return JSONResponse(await _issue_link(request, email))
-    # Email-only sign-in (temporary): no link is sent. Tracked, rate-limited per network address, never admin.
+    # Email-only sign-in: no link is sent. Tracked, rate-limited per network address, never admin. Pressing
+    # Continue is the agreement to the not-advice note printed under the button, so there is no second step.
     ip = _client_ip(request); now = time.time()
     hits = [h for h in _instant_hits.get(ip, []) if now - h < 3600]
     if len(hits) >= INSTANT_PER_IP_HOUR:
         raise HTTPException(status_code=429, detail="too many sign-ins from this network; try again in an hour")
     _instant_hits[ip] = hits + [now]
-    db.ensure_user(email)
+    u = db.ensure_user(email)
     db.touch_login(email)
+    if not u.get("name"):
+        db.set_name(email, email.split("@")[0])
+    if not u.get("accepted_disclaimer_at"):
+        db.accept_disclaimer(email)
     if not (db.profile(email) or {}).get("tickers"):
         db.set_watchlist(email, list(config.DEFAULT_WATCHLIST))
     ua = request.headers.get("user-agent", "")

@@ -2608,7 +2608,8 @@
     }
   }
   const discThisSession = () => { try { return sessionStorage.getItem("mu-disc-s") === "1"; } catch (e) { return false; } };
-  const gateNeeded = () => (STATIC_MODE ? true : (!user || !user.name || !discThisSession()));
+  // Signed in and agreed once (the Continue button records it) = straight to the dashboard, no second step.
+  const gateNeeded = () => (STATIC_MODE ? true : (!user || !((user.profile && user.profile.accepted_disclaimer_at) || discThisSession())));
   function disclaimerHtml() {
     const needName = !STATIC_MODE && !(user && user.name);
     return `<div class="ov-login disc-stage"><section class="ov-formpanel disc-panel-wrap"><div class="disc-logo-wrap">${brandLogo(190)}</div><div class="ov-form ov-form-wide disc-card" id="lg-card">
@@ -2636,7 +2637,7 @@
   function mailLine() {
     if (STATIC_MODE) return "";
     if (!mailStatus) return `<div class="mail-line muted">Checking the mail service…</div>`;
-    if (mailStatus.instant_login) return `<div class="mail-line ok">No email needed for now: enter your address and you go straight in.</div>`;
+    if (mailStatus.instant_login) return "";
     return mailStatus.configured ? `<div class="mail-line ok">Links are sent by <b>${esc(mailStatus.from_name)}</b>. Check your spam folder the first time.</div>`
       : `<div class="mail-line warn">No mail service is connected yet (${esc(mailStatus.problem || "")}). The site owner adds a sender and one transport to <code>.env</code>; until then the link appears here for local use.</div>`;
   }
@@ -2650,12 +2651,12 @@
       : `<div class="ov-form" id="login-core">
         <span class="lg-kicker">Sign in or create your desk</span>
         <h1>Welcome to OneView</h1>
-        <p>Enter your email and we send a one-time link. No password, no card.</p>
+        <p>Enter your email and you go straight to your dashboard. No password, no card, no email to wait for.</p>
         <form id="login-form" class="ov-fields" novalidate>
           <label for="login-email">Email address</label>
           <input type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email" inputmode="email" autofocus>
-          <button class="ov-primary lg-btn" type="submit" id="login-submit"><span>Send my sign-in link</span><i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></button>
-          <div class="ov-hint">No password needed.</div>
+          <button class="ov-primary lg-btn" type="submit" id="login-submit"><span>Continue</span><i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></button>
+          <div class="ov-hint">By continuing you agree that OneView is information, not financial advice, and that you trade at your own risk.</div>
         </form>
         <div id="login-status" class="gate-status" role="status" aria-live="polite">${signedOutNote === "idle" ? "You were signed out after 3 hours without activity. Sign in again to pick up where you left off." : signedOutNote ? "Thank you, see you back again." : ""}</div>
         ${mailLine()}
@@ -2744,8 +2745,9 @@
       });
     }
 
-    const instantCopy = () => { if (!mailStatus || !mailStatus.instant_login) return; const p = $("#login-core > p"); if (p) p.textContent = "Enter your email to sign in. No password, no link to wait for.";
-      const b = $("#login-submit span"); if (b) b.textContent = "Continue"; const h = $("#login-core .ov-hint"); if (h) h.textContent = "You go straight in."; };
+    const instantCopy = () => { if (!mailStatus || mailStatus.instant_login) return;           // emailed-link mode only (MU_INSTANT_LOGIN=0)
+      const p = $("#login-core > p"); if (p) p.textContent = "Enter your email and we send a one-time link. No password, no card.";
+      const b = $("#login-submit span"); if (b) b.textContent = "Send my sign-in link"; };
     if (!user && !STATIC_MODE && !mailStatus) api("/api/auth/mail-status").then((r) => r.json()).then((j) => { mailStatus = j; const m = $("#gate .mail-line"); if (m) m.outerHTML = mailLine(); instantCopy(); }).catch(() => {});
     else instantCopy();
   }
@@ -2756,20 +2758,24 @@
       const email = $("#login-email").value.trim().toLowerCase(), st = $("#login-status"); st.className = "gate-status"; signedOutNote = false;
       if (STATIC_MODE) return;
       const inp = $("#login-email"); if (!inp.checkValidity() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { st.className = "gate-status err"; st.textContent = "Enter a valid email address."; inp.focus(); return; }
-      const btn = $("#login-submit"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-      st.textContent = mailStatus && mailStatus.instant_login ? "Signing you in…" : "Sending your link…";
+      const linkMode = !!(mailStatus && !mailStatus.instant_login);
+      const btn = $("#login-submit"); if (btn) { btn.disabled = true; btn.textContent = linkMode ? "Sending…" : "Signing you in…"; }
+      st.textContent = linkMode ? "Sending your link…" : "";
       try {
         const res = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
         const j = await res.json();
-        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "The link could not be sent. Try again in a moment."; if (btn) { btn.disabled = false; btn.textContent = mailStatus && mailStatus.instant_login ? "Continue" : "Send sign-in link"; } inp.focus(); return; }
+        if (!res.ok) { st.className = "gate-status err"; st.textContent = j.detail || "The link could not be sent. Try again in a moment."; if (btn) { btn.disabled = false; btn.textContent = linkMode ? "Send sign-in link" : "Continue"; } inp.focus(); return; }
         if (j.status === "instant" && j.token) {                   // email-only sign-in (temporary): straight in, no link
           authToken = j.token; try { localStorage.setItem("mu-token", j.token); localStorage.setItem("mu-last-active", String(Date.now())); } catch (e2) {}
-          signedOutNote = false; byeDismissed = true; st.textContent = "Signing you in…";
-          await loadUser(); if (report) renderAll(); renderGate(); return;
+          signedOutNote = false; byeDismissed = true;
+          try { localStorage.setItem("mu-disc", "1"); sessionStorage.setItem("mu-disc-s", "1"); } catch (e2) {}
+          await loadUser(); if (report) ensureLists(report);
+          currentView = "home"; try { history.replaceState(null, "", location.pathname + location.search); } catch (e2) {}
+          leaveGate(() => { renderGate(); renderAll(); if (lists) refreshAdhoc(); scrollTo(0, 0); }); return;
         }
         const core = $("#login-core"); if (core) { core.innerHTML = sentHtml(email, j); startSentTimer(j.expires_in_s || 600);
           const rs = core.querySelector("[data-resend]"); if (rs) { rs.disabled = true; setTimeout(() => { rs.disabled = false; }, 60000); rs.addEventListener("click", async () => { rs.textContent = "sending…"; try { const r2 = await api("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) }); const j2 = await r2.json(); rs.textContent = r2.ok ? "sent again" : (j2.detail || "try later"); if (r2.ok) startSentTimer(j2.expires_in_s || 600); } catch (err) { rs.textContent = "try later"; } }); } }
-      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now. Try again in a moment."; const b2 = $("#login-submit"); if (b2) { b2.disabled = false; b2.textContent = "Send my sign-in link"; } }
+      } catch (err) { st.className = "gate-status err"; st.textContent = "The server is not reachable right now. Try again in a moment."; const b2 = $("#login-submit"); if (b2) { b2.disabled = false; b2.textContent = linkMode ? "Send my sign-in link" : "Continue"; } }
     });
     const go = $("#picks-go"); if (!go) return;
     const state = () => { const ok = $("#disc-ok").checked; const vals = [...new Set([...document.querySelectorAll("#picks .pick")].map((i) => i.value.trim().toUpperCase()).filter(Boolean))]; go.disabled = !(ok && vals.length >= 3); const st = $("#picks-status"); if (st && !st.classList.contains("err")) st.textContent = ok ? (vals.length >= 3 ? "" : `${3 - vals.length} more to go`) : "Tick the box above first"; return vals; };
