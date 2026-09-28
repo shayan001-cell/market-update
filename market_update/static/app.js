@@ -531,15 +531,163 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= WATCHLIST: one list to scan, one panel to understand =======================
+  let wlSel = null, wlSort = "mine", wlFilter = "all";
+  try { const j = JSON.parse(localStorage.getItem("mu-wl-ui") || "{}"); wlSort = j.sort || "mine"; wlFilter = j.filter || "all"; } catch (e) {}
+  const saveWlUi = () => { try { localStorage.setItem("mu-wl-ui", JSON.stringify({ sort: wlSort, filter: wlFilter })); } catch (e) {} };
+  const WL_SORTS = [["mine", "My order"], ["up", "Top gainers"], ["down", "Top losers"], ["score", "Best setup"], ["az", "A to Z"]];
+  const WL_FILTERS = [["all", "All"], ["up", "Bullish"], ["flat", "Neutral"], ["down", "Bearish"]];
+  const toneOf = (c) => (c === "up" || c === "up2" ? "up" : c === "down" ? "down" : c === "flat" ? "flat" : "none");
+  function wlItem(t, r) {
+    const s = stockFor(t), l = (r.lite || {})[t] || null;
+    const q = qp(t, s || l || {});
+    const v = s ? readFor(s) : l && ETF_KINDS.has(l.kind) ? verdictFor({ ...l, ticker: t }) : null;
+    const a = (s && s.ai) || {};
+    const score = !s ? null : horizon === "day" ? s.scores.day : horizon === "long" ? (a.long_term_quality ? a.long_term_quality.score / 3 : null) : s.scores.swing;
+    const chg = isNum(q.chg) && Math.abs(q.chg) < 0.05 ? 0 : q.chg;
+    return { t, s, l, q, v, chg, score, tone: v ? toneOf(v.cls) : "none", name: (s && s.name) || (l && l.name) || "", closes: s ? (s.ohlc || []).slice(-30).map((c) => c.c) : [] };
+  }
+  function wlItems(r) {
+    const all = activeList().map((t, i) => ({ ...wlItem(t, r), i }));
+    let rows = wlFilter === "all" ? all : all.filter((x) => x.tone === wlFilter);
+    const by = { mine: (a, b) => a.i - b.i, up: (a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9), down: (a, b) => (a.chg ?? 1e9) - (b.chg ?? 1e9), score: (a, b) => (b.score ?? -1) - (a.score ?? -1), az: (a, b) => a.t.localeCompare(b.t) }[wlSort] || ((a, b) => a.i - b.i);
+    rows = rows.slice().sort(by);
+    return { all, rows };
+  }
+  const WL_HZ = { day: "today's read", swing: "the swing read", long: "the long-term read" };
+  function wlSummary(all) {
+    const withChg = all.filter((x) => isNum(x.chg)); if (!withChg.length) return "";
+    const up = withChg.filter((x) => x.chg > 0).length, dn = withChg.filter((x) => x.chg < 0).length;
+    const avg = withChg.reduce((a, x) => a + x.chg, 0) / withChg.length;
+    const best = withChg.slice().sort((a, b) => b.chg - a.chg)[0], worst = withChg.slice().sort((a, b) => a.chg - b.chg)[0];
+    const cnt = { up: 0, flat: 0, down: 0, none: 0 }; all.forEach((x) => cnt[x.tone]++);
+    const tot = all.length || 1;
+    return `<div class="wl-sum">
+      <div class="ws-tile"><span>Up today</span><b>${up}<i>/${withChg.length}</i></b><em>${dn} down</em></div>
+      <div class="ws-tile"><span>Average move</span><b class="${cls(avg)}">${fpct(avg, 2)}</b><em>equal weight</em></div>
+      <div class="ws-tile" data-wl-sel="${esc(best.t)}" role="button" tabindex="0"><span>Best</span><b>${esc(best.t)} <small class="${cls(best.chg)}">${fpct(best.chg, 1)}</small></b><em>${esc(best.name || "")}</em></div>
+      <div class="ws-tile" data-wl-sel="${esc(worst.t)}" role="button" tabindex="0"><span>Worst</span><b>${esc(worst.t)} <small class="${cls(worst.chg)}">${fpct(worst.chg, 1)}</small></b><em>${esc(worst.name || "")}</em></div>
+      <div class="ws-tile ws-mix"><span>Reads · ${WL_HZ[horizon]}</span><div class="ws-bar"><i class="up" style="width:${(cnt.up / tot) * 100}%"></i><i class="flat" style="width:${(cnt.flat / tot) * 100}%"></i><i class="down" style="width:${(cnt.down / tot) * 100}%"></i><i class="none" style="width:${(cnt.none / tot) * 100}%"></i></div><em><b class="up">${cnt.up}</b> bullish · <b>${cnt.flat}</b> neutral · <b class="down">${cnt.down}</b> bearish${cnt.none ? ` · ${cnt.none} no read` : ""}</em></div>
+    </div>`;
+  }
+  function wlRow(x) {
+    const on = x.t === wlSel;
+    return `<li class="wl-row ${on ? "on" : ""} t-${x.tone}" data-wl-sel="${esc(x.t)}" role="option" aria-selected="${on}" tabindex="${on ? 0 : -1}">
+      <span class="wr-id"><b>${esc(x.t)}</b><i>${esc(x.name)}</i></span>
+      <span class="wr-spark">${x.closes.length > 1 ? areaSpark(x.closes, cls(x.closes[x.closes.length - 1] - x.closes[0]), "ws" + x.t.replace(/[^A-Za-z0-9]/g, "")) : `<span class="wr-nochart">${analyzing.has(x.t) ? "analysing" : "quote only"}</span>`}</span>
+      <span class="wr-px">${priceHtml(x.t, x.s || x.l || {})}</span>
+      <span class="wr-read">${x.v ? `<em class="wr-pill ${x.tone}">${esc(x.v.word)}</em>` : `<em class="wr-pill none">${analyzing.has(x.t) ? "Analysing" : "No read"}</em>`}</span>
+      <span class="wr-score" title="${isNum(x.score) ? `Setup score ${Math.round(x.score * 100)} of 100 for ${WL_HZ[horizon]}` : "No score yet"}">${isNum(x.score) ? `<i style="width:${Math.max(4, x.score * 100).toFixed(0)}%"></i>` : ""}</span>
+      <button type="button" class="wr-x" data-wl-remove="${esc(x.t)}" title="Remove ${esc(x.t)}" aria-label="Remove ${esc(x.t)}">×</button>
+    </li>`;
+  }
+  function wlReadTile(key, label, sub, word, plain, tone, conv) {
+    const on = horizon === key;
+    return `<button type="button" class="wd-read ${on ? "on" : ""} ${tone}" data-wl-hz="${key}" aria-pressed="${on}"><span class="wd-rl">${label}<i>${sub}</i></span><b>${esc(word || "No read")}</b>${conv ? convTag(conv) : ""}<span class="wd-rp">${esc(plain || "")}</span></button>`;
+  }
+  function wlDetail(x, r, id) {
+    if (!x) return `<div class="wd-empty">Pick a name on the left to see its full story.</div>`;
+    const s = x.s, l = x.l, t = (s && s.technicals) || (l && l.technicals) || {}, f = (s && s.fundamentals) || {}, a = (s && s.ai) || {};
+    const head = `<div class="wd-h"><div class="wd-id"><b>${esc(x.t)}</b><span>${esc(x.name)}${s && s.sector ? " · " + esc(s.sector) : ""}</span></div><div class="wd-px">${priceHtml(x.t, s || l || {})}</div></div>`;
+    const closes = s ? (s.ohlc || []).slice(-90).map((c) => c.c) : [];
+    const lo = closes.length ? Math.min(...closes) : null, hi = closes.length ? Math.max(...closes) : null;
+    const ch90 = closes.length > 1 ? (closes[closes.length - 1] / closes[0] - 1) * 100 : null;
+    const chart = closes.length > 1 ? `<div class="wd-chart"><div class="wd-ch-h"><span>3 months</span><b class="${cls(ch90)}">${fpct(ch90, 1)}</b><span class="wd-ch-r">low ${fnum(lo)} · high ${fnum(hi)}</span></div>${areaSpark(closes, cls(ch90), "wd" + id + x.t.replace(/[^A-Za-z0-9]/g, ""))}</div>` : "";
+    const pos = isNum(t.hi52) && isNum(t.lo52) && isNum(x.q.last) && t.hi52 > t.lo52 ? Math.max(0, Math.min(1, (x.q.last - t.lo52) / (t.hi52 - t.lo52))) : null;
+    const range52 = pos != null ? `<div class="wd-52"><span>52-week range</span><div class="wd-52bar"><i style="left:${(pos * 100).toFixed(1)}%"></i></div><div class="wd-52n"><span>${fnum(t.lo52)}</span><span>${isNum(t.pct_from_hi52) ? (t.pct_from_hi52 > -0.5 ? "at the high" : fpct(t.pct_from_hi52, 1) + " from the high") : ""}</span><span>${fnum(t.hi52)}</span></div></div>` : "";
+    if (!s) {
+      const busy = analyzing.has(x.t);
+      return `${head}${range52}<div class="wd-note">${busy ? "Reading the tape, the news, smart money and options now. This takes about 20 seconds." : analyzeError[x.t] ? `The last analysis failed: ${esc(analyzeError[x.t])}.` : "This name has a quote and basic technicals only. Run the full analysis to get the day, swing and long-term reads."}</div>
+        <div class="wd-stats">${[["Trend", t.trend || "–", { up: "up", down: "down" }[t.trend] || ""], ["RSI 14", fnum(t.rsi14, 0), ""], ["Moves a day", fpct(t.atr_pct, 1, false), ""], ["1 month", fpct(t.ret_1m, 1), cls(t.ret_1m)], ["3 months", fpct(t.ret_3m, 1), cls(t.ret_3m)], ["vs 20-day avg", fpct(t.dist_sma20_pct, 1), cls(t.dist_sma20_pct)]].map(([k, v, c]) => `<div><span>${k}</span><b class="${c}">${v}</b></div>`).join("")}</div>
+        <div class="wd-act">${STATIC_MODE ? "" : `<button type="button" class="btn" data-wl-analyze="${esc(x.t)}" ${busy ? "disabled" : ""}>${busy ? "Analysing…" : "Run full analysis"}</button>`}<a class="btn ghost" href="${tvLink(x.t)}" target="_blank" rel="noopener">Chart</a><button type="button" class="btn ghost" data-wl-remove="${esc(x.t)}">Remove</button></div>`;
+    }
+    const it = a.intraday ? ST.intraday[a.intraday.choice] : null, sv = verdictFor(s), ltv = a.long_term ? LT.stance[a.long_term.choice] : null;
+    const reads = `<div class="wd-reads">${wlReadTile("day", "Day", "today", it && it[0], it && it[1], it ? toneOf(it[2]) : "none", a.intraday && convOf(a.intraday.confidence))}${wlReadTile("swing", "Swing", "1 to 10 days", sv && sv.word, sv && sv.plain, sv ? toneOf(sv.cls) : "none", sv && sv.conviction)}${wlReadTile("long", "Long term", "3 to 12 months", ltv && ltv[0], ltv && ltv[1], ltv ? toneOf(ltv[2]) : "none", a.long_term && convOf(a.long_term.confidence))}</div>`;
+    const cur = readFor(s);
+    const why = cur && cur.why && cur.why.length ? `<div class="wd-why"><h5>Why · ${WL_HZ[horizon]}</h5><ul>${cur.why.slice(0, 4).map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : "";
+    const pl = plan(s);
+    let planHtml = "";
+    if (pl && pl.stop && isNum(pl.target)) {
+      const px = x.q.last, lo2 = Math.min(pl.stop, px, pl.target), hi2 = Math.max(pl.stop, px, pl.target), rg = hi2 - lo2 || 1, at = (v) => (((v - lo2) / rg) * 100).toFixed(1);
+      const longSide = pl.target > px;
+      planHtml = `<div class="wd-plan"><h5>If you trade it · ${longSide ? "long" : "short"} idea from the swing read</h5>
+        <div class="wd-pbar"><span class="risk" style="left:${Math.min(at(pl.stop), at(px))}%;width:${Math.abs(at(px) - at(pl.stop))}%"></span><span class="rew" style="left:${Math.min(at(px), at(pl.target))}%;width:${Math.abs(at(pl.target) - at(px))}%"></span>
+          <i class="stop" style="left:${at(pl.stop)}%"></i><i class="now" style="left:${at(px)}%"></i><i class="tgt" style="left:${at(pl.target)}%"></i></div>
+        <div class="wd-pn"><span class="down">Stop <b>${fnum(pl.stop)}</b></span><span>Now <b>${fnum(px)}</b></span><span class="up">Target <b>${fnum(pl.target)}</b></span><span class="wd-rr"><b>${pl.rr.toFixed(1)}×</b> reward for the risk</span></div></div>`;
+    } else if (pl && pl.text) planHtml = `<div class="wd-plan"><h5>If you trade it</h5><p class="wd-note">${esc(pl.text)}</p></div>`;
+    const ck = checklist(s, r);
+    const stats = horizon === "long"
+      ? [["3 months", fpct(t.ret_3m, 0), cls(t.ret_3m)], ["12 months", fpct(t.ret_12m, 0), cls(t.ret_12m)], ["P/E (forward)", fnum(f.forward_pe, 0), ""], ["Price / sales", fnum(f.ps, 1), ""], ["Revenue growth", isNum(f.rev_growth) ? fpct(f.rev_growth * 100, 0) : "–", cls(f.rev_growth)], ["Analysts", pretty(f.analyst) || "–", ""]]
+      : horizon === "day"
+      ? [["Moves a day", fpct(t.atr_pct, 1, false), ""], ["Volume vs normal", isNum(s.rel_volume) ? s.rel_volume.toFixed(1) + "×" : "–", s.rel_volume >= 1.5 ? "up" : ""], ["Yesterday's range", `${fnum(t.prev_low)}–${fnum(t.prev_high)}`, ""], ["Gap at the open", fpct(s.gap_pct, 1), cls(s.gap_pct)], ["RSI 14", fnum(t.rsi14, 0), t.rsi14 >= 70 ? "warn" : t.rsi14 <= 30 ? "warn" : ""], ["Day score", isNum(s.scores.day) ? Math.round(s.scores.day * 100) + "/100" : "–", ""]]
+      : [["5 days", fpct(t.ret_5d, 1), cls(t.ret_5d)], ["1 month", fpct(t.ret_1m, 1), cls(t.ret_1m)], ["vs 20-day avg", fpct(t.dist_sma20_pct, 1), cls(t.dist_sma20_pct)], ["RSI 14", fnum(t.rsi14, 0), t.rsi14 >= 70 || t.rsi14 <= 30 ? "warn" : ""], ["Setup", a.setup ? pretty(a.setup.choice) : "–", ""], ["Checklist", ck ? `${ck.passed}/${ck.total}` : "–", ck ? (ck.passed >= 8 ? "up" : ck.passed >= 6 ? "warn" : "down") : ""]];
+    const who = whoHtml(s);
+    return `${head}${chart}${range52}${reads}${why}${planHtml}
+      <div class="wd-stats">${stats.map(([k, v, c]) => `<div><span>${k}</span><b class="${c}">${esc(String(v))}</b></div>`).join("")}</div>
+      ${who ? `<div class="wd-who"><h5>Who is buying</h5>${who}</div>` : ""}
+      <div class="wd-act"><button type="button" class="btn" data-wl-open="${esc(x.t)}">Full analysis</button><button type="button" class="btn ghost" data-wl-page="${esc(x.t)}">Open page</button><a class="btn ghost" href="${tvLink(x.t)}" target="_blank" rel="noopener">Chart</a><button type="button" class="btn ghost wd-rm" data-wl-remove="${esc(x.t)}">Remove</button></div>`;
+  }
+  function wlBody(r) {
+    const { all, rows } = wlItems(r);
+    if (!all.length) return `<div class="wl-empty"><b>Your watchlist is empty</b><p>Type a ticker or company in the box above. Stocks, ETFs and crypto all work.</p><div class="wl-sugg">${["NVDA", "AAPL", "TSLA", "SPY", "AMD", "META"].map((t) => `<button type="button" data-wl-add="${t}">+ ${t}</button>`).join("")}</div></div>`;
+    if (!wlSel || !all.some((x) => x.t === wlSel)) wlSel = (rows[0] || all[0]).t;
+    const sel = all.find((x) => x.t === wlSel);
+    const fcount = (k) => (k === "all" ? all.length : all.filter((x) => x.tone === k).length);
+    const filters = WL_FILTERS.map(([k, lbl]) => `<button type="button" class="${k === wlFilter ? "on" : ""}" data-wl-filter="${k}">${lbl}<i>${fcount(k)}</i></button>`).join("");
+    const sorts = `<label class="wl-sortl">Sort <select data-wl-sort aria-label="Sort the list">${WL_SORTS.map(([k, lbl]) => `<option value="${k}" ${k === wlSort ? "selected" : ""}>${lbl}</option>`).join("")}</select></label>`;
+    const list = rows.map((x) => wlRow(x) + (x.t === wlSel ? `<li class="wl-inline" aria-hidden="false">${wlDetail(x, r, "m")}</li>` : "")).join("");
+    return `${wlSummary(all)}
+      <div class="wl-split">
+        <div class="wl-left">
+          <div class="wl-tools"><div class="pz-seg">${filters}</div>${sorts}</div>
+          <div class="wl-colh"><span>Name</span><span>30 days</span><span>Price</span><span>Read · ${esc(HORIZONS.find((h) => h[0] === horizon)[1])}</span><span>Setup</span><span></span></div>
+          <ul class="wl-list" role="listbox" aria-label="Watchlist">${list || `<li class="wl-none">Nothing matches this filter.</li>`}</ul>
+        </div>
+        <aside class="wl-detail" aria-live="polite">${wlDetail(sel, r, "d")}</aside>
+      </div>`;
+  }
   function secWatchPage(r) {
-    const tickers = activeList();
-    const cards = tickers.map((t) => { const s = stockFor(t); if (s) return perspectiveCard(s, r); const q = r.lite && r.lite[t]; return q ? liteCard(t, q, r) : pendingCard(t); });
-    return `<section class="watch-page">
-      ${watchStrip(r)}
-      ${explain("Every name you add is read three ways by the model: today's tape for a day trade, the next one to ten sessions for a swing, and the business plus the primary trend for the next three to twelve months. Verdicts are the model's stance from typed questions, not advice.")}
-      ${cards.length ? `<div class="pboard">${cards.join("")}</div>` : '<div class="empty">Your watchlist is empty. Add a ticker or company above; stocks, ETFs and crypto all work.</div>'}
+    const names = Object.keys(lists.lists);
+    const tabs = names.map((n) => `<button class="ltab ${n === lists.active ? "active" : ""}" data-list="${esc(n)}">${esc(n)}<span class="cnt">${lists.lists[n].length}</span></button>`).join("");
+    return `<section class="wl2">
+      <div class="wl-bar">
+        <div class="wl-lists">${tabs}<button class="ltab ghost" data-newlist title="Create another list">+ New list</button><span class="wl-lists-actions"><button class="lnk" data-renamelist>Rename</button><button class="lnk" data-deletelist>Delete</button></span></div>
+        <div class="wl-newbar" id="list-new" hidden><input class="wl-newinput" placeholder="Name the list, then press Enter" maxlength="30"><button class="lnk" data-newcancel>cancel</button></div>
+        <div class="wl-addrow"><div class="wl-add hud-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" placeholder="Add a ticker or company" autocomplete="off" spellcheck="false" aria-label="Add a ticker to your watchlist"><kbd>/</kbd><div id="search-results" class="search-results" hidden></div></div>
+          <span class="wl-saved">${activeList().length} ${activeList().length === 1 ? "name" : "names"} · ${user ? "saved to your account" : "kept in this browser"}</span></div>
+      </div>
+      <div class="wl2-body">${wlBody(r)}</div>
     </section>`;
   }
+  function rerenderWatch(focusSel) {
+    if (currentView !== "watch" || !report) return;
+    const b = $("#app .wl2-body"); if (!b) return;
+    const view = $("#app .view"); const y = view ? view.scrollTop : 0; const wy = window.scrollY;
+    b.innerHTML = wlBody(report);
+    if (view) view.scrollTop = y; window.scrollTo(0, wy);
+    if (focusSel) { const el = b.querySelector(".wl-row.on"); if (el) el.focus({ preventScroll: true }); }
+    if (matchMedia("(max-width: 900px)").matches && focusSel) { const il = b.querySelector(".wl-inline"); if (il) il.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+  }
+  document.addEventListener("click", (e) => {
+    const root = e.target.closest(".wl2"); if (!root) return;
+    const rm = e.target.closest("[data-wl-remove]"); if (rm) { e.stopPropagation(); const t = rm.getAttribute("data-wl-remove"); if (t === wlSel) wlSel = null; removeTicker(t); return; }
+    const op = e.target.closest("[data-wl-open]"); if (op) { openDetail(op.getAttribute("data-wl-open")); return; }
+    const pg = e.target.closest("[data-wl-page]"); if (pg) { openTicker(pg.getAttribute("data-wl-page")); return; }
+    const an = e.target.closest("[data-wl-analyze]"); if (an) { requestAnalysis(an.getAttribute("data-wl-analyze")); rerenderWatch(); return; }
+    const hz = e.target.closest("[data-wl-hz]"); if (hz) { setHorizon(hz.getAttribute("data-wl-hz")); return; }
+    const fl = e.target.closest("[data-wl-filter]"); if (fl) { wlFilter = fl.getAttribute("data-wl-filter"); saveWlUi(); rerenderWatch(); return; }
+    const add = e.target.closest("[data-wl-add]"); if (add) { addTicker(add.getAttribute("data-wl-add")); return; }
+    const sel = e.target.closest("[data-wl-sel]"); if (sel && !e.target.closest("a,.wl-inline")) { const t = sel.getAttribute("data-wl-sel"); if (t !== wlSel) { wlSel = t; rerenderWatch(true); } }
+  });
+  document.addEventListener("change", (e) => { const s = e.target.closest && e.target.closest("[data-wl-sort]"); if (s) { wlSort = s.value; saveWlUi(); rerenderWatch(); } });
+  document.addEventListener("keydown", (e) => {
+    const row = e.target.closest && e.target.closest(".wl-row"); if (!row) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); row.click(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault(); const rows = [...document.querySelectorAll("#app .wl-row")]; const i = rows.indexOf(row); const nx = rows[i + (e.key === "ArrowDown" ? 1 : -1)];
+      if (nx) { wlSel = nx.getAttribute("data-wl-sel"); rerenderWatch(true); }
+    }
+  });
   function watchStrip(r) {
     const tickers = activeList();
     const chips = tickers.map((t) => { const s = stockFor(t); const q = s || (r.lite || {})[t] || {}; const st = s && s.ai && s.ai.stance ? s.ai.stance.choice : null;
@@ -1376,6 +1524,7 @@
     ensureLists(report);
     const l = lists.lists[lists.active];
     if (!l.includes(t)) { l.push(t); saveLists(); }
+    wlSel = t; if (wlFilter !== "all") { wlFilter = "all"; saveWlUi(); }      // the new name is selected and visible straight away
     if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t);
     closeSearch(); if (currentView !== "home" && currentView !== "watch") switchView("watch"); else renderAll();
   }
@@ -2159,9 +2308,9 @@
     const li = (items) => `<ul class="gd-list">${items.map(([k, v]) => `<li><b>${k}</b> ${v}</li>`).join("")}</ul>`;
     return `<section class="guide"><h2>How to use OneView <span class="muted">what each part shows, what to focus on, and why it matters for day, intraday and swing traders</span></h2>
       ${explain("OneView reads the market three ways: the numbers (price, volume, levels), the model's read in plain words with its reasons, and the crowd (Reddit, StockTwits, the President's posts). Everything is information, not advice.")}
-      ${sec("Start here", li([["Sign in.", "Enter your email, open the one-time link on the device you use. No password."], ["Watchlist.", "Add the names you follow (ticker or company name). The desk personalises around that list."], ["Every morning at 07:00 ET", "you get a short email: the numbers, the reads on your names, one link back here."]]))}
+      ${sec("Start here", li([["Sign in.", "Enter your email, open the one-time link on the device you use. No password."], ["Watchlist.", "Add the names you follow (ticker or company name). The desk personalises around that list."], ["Every morning at 07:00 ET", "the briefing lands at the top of the Overview: the numbers and the reads on your names."]]))}
       ${sec("The Overview, top to bottom", li([["Briefings.", "Morning at 07:00: futures, oil, gold, bitcoin, 10- and 5-year yields, mega caps, the President's market-relevant posts, today's events, and for SPY and QQQ what we see on the 1-hour chart, the likeliest next 1 to 4 hours and the levels that decide it. Middle card: a direction read every 15 minutes of the session (Higher, Lower, Sideways into the close, with the reason). After the close at 16:30: what the session did and a scorecard of the day's reads."], ["Where the big money is moving.", "SPY, QQQ, DIA and IWM against their normal activity for the time of day, the largest companies trading unusually heavily, and the groups leading or lagging."], ["Voices moving the tape.", "The President's posts read once each, and where the Reddit crowd is piling in."], ["StockTwits crowd.", "The crowd's mood on SPY, QQQ and the largest names (0 to 100), how loud the chatter is, and what is trending."], ["Market mood and assessments.", "The overall tape, then one line per name on your list: swing read, today's read, the first reason, and LOW, MED or HIGH conviction. Never a percentage."], ["Small-cap runners.", "Smaller names trading far above normal or changing hands fast, with a sensible play."], ["Today's numbers in plain words.", "Futures, VIX, yields, the dollar, breadth, overseas markets, one sentence each."], ["News that can move the market.", "Every headline read once; only the ones that can move prices stay."]]))}
-      ${sec("The other sections", li([["Watchlist.", "Each name with day, swing and long-term columns. The Day / Swing / Long term switch brings your column to the front and re-sorts Stocks."], ["Scanner.", "Names trading far above normal on the 15-minute to 2-hour charts, plus thin low-float names that move violently."], ["Stocks.", "Every analysed name in one table, full breakdown on click."], ["Themes.", "The data-centre build-out by part of the stack, who leads and who could run next."], ["Filings & flow.", "Insiders, big holders and Congress, each source's delay stated, plus options flow."], ["Market context.", "1, 3, 6 and 12 months, the indexes weekly, rates and money flows."], ["Track record.", "Every verdict and every direction read scored against what the market did, day by day."]]))}
+      ${sec("The other sections", li([["Watchlist.", "One row per name with its price, a 30-day chart, the read and a setup score. Click a row for its full story on the right: the chart, the day, swing and long-term reads, the trade plan and the key numbers. Filter by bullish, neutral or bearish, sort by movers or best setup, and use the arrow keys to move through the list. The Day / Swing / Long term switch changes every read at once."], ["Scanner.", "Names trading far above normal on the 15-minute to 2-hour charts, plus thin low-float names that move violently."], ["Stocks.", "Every analysed name in one table, full breakdown on click."], ["Themes.", "The data-centre build-out by part of the stack, who leads and who could run next."], ["Filings & flow.", "Insiders, big holders and Congress, each source's delay stated, plus options flow."], ["Market context.", "1, 3, 6 and 12 months, the indexes weekly, rates and money flows."], ["Track record.", "Every verdict and every direction read scored against what the market did, day by day."]]))}
       ${sec("What to focus on", li([["Day and intraday traders:", "the morning levels for SPY and QQQ, the Intraday direction card, the Scanner, Small-cap runners and Where the big money is moving. Trade the levels, not the words."], ["Swing traders:", "Assessments and the swing column on your cards (BUY, BUY THE DIP, WAIT FOR BREAKOUT, HOLD, AVOID with reasons), Filings & flow, and the after-close briefing."], ["Longer horizons:", "the long-term column, Themes, Market context, and the crowd mood as a contrarian check when it is extreme."]]))}
       ${sec("What sets it apart", li([["Plain words with reasons.", "Two to four reasons per read and a conviction word instead of a fake-precision percentage."], ["The right kind of call.", "Funds get a trend read, big companies a momentum read, everything else the model's stance."], ["Three feeds in one place.", "The numbers, the model, and the crowd."], ["A public scorecard.", "The desk logs every call with its price and grades itself after the close."], ["One price everywhere.", "Every panel reads from the same quote store, 15-minute delayed, time stamped."]]))}
       <div class="meta2">Information, not advice. Data is delayed and can be wrong. Reads are probabilities, not predictions. You decide what to trade and you carry the risk.</div>

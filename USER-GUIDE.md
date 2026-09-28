@@ -8,7 +8,7 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 1. Open the desk and enter your email. A one-time link arrives; open it on the device you want to use. No password.
 2. Read and accept the "not financial advice" note once per sign-in.
 3. Add the names you follow to your Watchlist (type a ticker or a company name). Everything else on the desk personalises around that list.
-4. Every morning at 7:00 ET you get a short email: the numbers, the reads on your names, one link to the desk.
+4. Every morning at 7:00 ET the briefing appears at the top of the Overview: the numbers and the reads on your names. Email is used only for sign-in links.
 
 ## The Overview, top to bottom
 **Briefings (three cards).** Morning briefing at 7:00 ET: futures, oil, gold, bitcoin, the 10- and 5-year yields, the mega caps, the President's market-relevant posts, today's events, and for SPY and QQQ what we see on the 1-hour chart, the likeliest shape of the next 1 to 4 hours, and the levels that decide it. Intraday direction (middle card): every 15 minutes of the session, Higher, Lower or Sideways into the close, with the main reason, based on technicals plus the crowd's mood. After the close at 4:30 ET: what the session did, the biggest moves, and a scorecard of how the day's reads and the morning call fared.
@@ -28,7 +28,7 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 **News that can move the market.** Every headline is read once; only the ones that can move prices stay.
 
 ## The other sections
-- **Watchlist.** Each name as a card with three columns: day trade, swing, long term. The Day / Swing / Long term switch at the top brings the column you care about to the front and re-sorts the Stocks table.
+- **Watchlist.** One row per name: price, a 30-day chart, the read for your timeframe and a setup score, with a summary strip on top (how many are up, the best and worst, the mix of reads). Click a row, or move with the arrow keys, to open its detail panel: a 3-month chart, the 52-week range, the day, swing and long-term reads side by side, why, the trade plan drawn as stop / now / target, and the key numbers. Filter by bullish, neutral or bearish and sort by your order, gainers, losers, best setup or A to Z. On a phone the detail opens right under the row. The Day / Swing / Long term switch changes every read at once and re-sorts the Stocks table.
 - **Trading desk.** Every name scored three ways from −2 to +2: Trend (price against its 20-, 50- and 200-day lines), Momentum (RSI, MACD, TRIX) and one shared Macro score for the whole market. A fixed rulebook turns the scores into one read per name: fresh entry, quick bounce only, hold, wait, take profit, stay out. Tap "I'm flat / I hold it" to see the read from your side of the trade. Click a row for the reasons. Built on the open-source Agentic Trading Desk framework (MIT); OneView shows the read as information and never places orders.
 - **Scanner.** Names trading far above normal for the time of day on the 15-minute, 30-minute, 1-hour and 2-hour charts, with a read on each. "Thin stocks" lists low-float names that can move violently.
 - **Stocks.** Every analysed name in one table with the read for your chosen timeframe, and a full breakdown on click.
@@ -40,9 +40,9 @@ Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https:
 ## What to focus on
 **Day and intraday traders.** The morning briefing's levels for SPY and QQQ, the Intraday direction card every 15 minutes, the Scanner, Small-cap runners, and the "Where the big money is moving" panel. Trade the levels, not the words.
 
-**Swing traders.** The Assessments panel and the swing column on your Watchlist cards (BUY, BUY THE DIP, WAIT FOR BREAKOUT, HOLD, AVOID, with reasons), Filings & flow for what informed money is doing, and the after-close briefing for how the day changed the picture.
+**Swing traders.** The Assessments panel and the swing read on your Watchlist (BUY, BUY THE DIP, WAIT FOR BREAKOUT, HOLD, AVOID, with reasons), Filings & flow for what informed money is doing, and the after-close briefing for how the day changed the picture.
 
-**Longer horizons.** The long-term column on your Watchlist, Themes, Market context, and the crowd mood as a contrarian check when it is extreme.
+**Longer horizons.** The long-term read on your Watchlist, Themes, Market context, and the crowd mood as a contrarian check when it is extreme.
 
 ## What sets it apart
 - Reads in plain words with two to four reasons, and a conviction word instead of a fake-precision percentage.
