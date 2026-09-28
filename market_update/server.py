@@ -2295,18 +2295,26 @@ async def api_stocktwits(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", **snap}, headers={"Cache-Control": "no-store"})
 
 
+CROWD_FRESH_S = 60
+
+
 @app.get("/api/crowd/{sym}")
-async def api_crowd_sym(sym: str, request: Request) -> JSONResponse:
-    """The crowd on one ticker (a watchlist name): mood versus normal and the last ~200 posts, cached 15 minutes."""
+async def api_crowd_sym(sym: str, request: Request, fresh: int = 0) -> JSONResponse:
+    """The crowd on one ticker (a watchlist name): mood versus normal and the last ~200 posts, cached 15 minutes.
+    fresh=1 (the card's refresh button) reads StockTwits again now; one fresh read per ticker a minute, shared by everyone."""
     if not _session_email(request):
         raise HTTPException(status_code=401, detail="sign in first")
     sym = sym.upper().strip()[:12]
     snap = state.get("stocktwits") or {}
-    if sym in (snap.get("talk") or {}) and time.time() - snap.get("as_of", 0) < 1800:
-        return JSONResponse({"status": "ok", "mood": (snap.get("moods") or {}).get(sym), "talk": snap["talk"][sym], "as_of": snap.get("as_of")}, headers={"Cache-Control": "no-store"})
     cache = state.setdefault("crowd_one", {})
     hit = cache.get(sym)
-    if not hit or time.time() - hit.get("as_of", 0) > 900:
+    if fresh:
+        max_age = CROWD_FRESH_S
+    else:
+        if sym in (snap.get("talk") or {}) and time.time() - snap.get("as_of", 0) < 1800:
+            return JSONResponse({"status": "ok", "mood": (snap.get("moods") or {}).get(sym), "talk": snap["talk"][sym], "as_of": snap.get("as_of")}, headers={"Cache-Control": "no-store"})
+        max_age = 900
+    if not hit or time.time() - hit.get("as_of", 0) > max_age:
         if not _st_load().get("access_token"):
             return JSONResponse({"status": "not_connected"})
         def work() -> dict[str, Any]:
@@ -2318,6 +2326,10 @@ async def api_crowd_sym(sym: str, request: Request) -> JSONResponse:
             hit = await asyncio.to_thread(work); cache[sym] = hit
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"status": "error", "detail": str(e)[:120]}, status_code=502)
+        if sym in (snap.get("talk") or {}) and hit.get("talk"):          # keep the shared snapshot in step for everyone
+            snap["talk"][sym] = hit["talk"]
+            if hit.get("mood") and isinstance(snap.get("moods"), dict):
+                snap["moods"][sym] = {**(snap["moods"].get(sym) or {}), **{k: v for k, v in hit["mood"].items() if v is not None}}
     return JSONResponse({"status": "ok", **hit}, headers={"Cache-Control": "no-store"})
 
 

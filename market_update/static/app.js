@@ -1018,10 +1018,32 @@
       ${q.map((m) => `<blockquote class="hc-q ${t.quotes.bull.includes(m) ? "up" : "down"}">${esc(m.text.length > 120 ? m.text.slice(0, 117).replace(/\s+\S*$/, "") + "…" : m.text)}<span>${agoShort(m.at)}</span></blockquote>`).join("")}
     </div>`;
   }
+  // On-the-spot refresh for the card: reads the newest StockTwits posts for SPY and QQQ now (about 20-40 seconds).
+  let crowdRefreshing = false, crowdRefreshMsg = "";
+  const crowdRefreshBtn = () => STATIC_MODE ? "" : `<button type="button" class="pz-refresh${crowdRefreshing ? " spin" : ""}" data-crowd-refresh ${crowdRefreshing ? "disabled" : ""} title="Refresh now: read the newest posts" aria-label="Refresh what people are saying"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></button>`;
+  async function refreshCrowdNow() {
+    if (crowdRefreshing || STATIC_MODE) return;
+    crowdRefreshing = true; crowdRefreshMsg = "Reading the newest posts on SPY and QQQ…"; refreshPulse("crowd");
+    let ok = 0;
+    for (const sym of ["SPY", "QQQ"]) {
+      try { const res = await api(`/api/crowd/${sym}?fresh=1`, { cache: "no-store" }); const j = res.ok ? await res.json() : null;
+        if (j && j.status === "ok" && j.talk) { crowd = crowd || { status: "ok", talk: {}, moods: {} }; crowd.talk = crowd.talk || {}; crowd.moods = crowd.moods || {};
+          crowd.talk[sym] = j.talk; if (j.mood) crowd.moods[sym] = { ...(crowd.moods[sym] || {}), ...Object.fromEntries(Object.entries(j.mood).filter(([, v]) => v != null)) };
+          crowdExtra[sym] = { at: Date.now(), ok: true, talk: j.talk, mood: j.mood }; ok++; }
+      } catch (e) { /* keep what is on screen */ }
+      if (ok) refreshPulse("crowd");
+    }
+    crowdRefreshing = false;
+    crowdRefreshMsg = ok ? `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Could not reach StockTwits just now. What you see is the last read.";
+    refreshPulse("crowd");
+    setTimeout(() => { if (!crowdRefreshing) { crowdRefreshMsg = ""; } }, 60000);
+  }
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-crowd-refresh]"); if (!b) return; e.preventDefault(); refreshCrowdNow(); });
   function heroCrowd(r) {
-    if (!crowd || crowd.status !== "ok") return `<article class="pz pz-crowd" data-pz="crowd"><div class="pz-h"><span class="pz-eye">What people are saying</span></div><div class="cr-loading">Reading StockTwits…</div></article>`;
+    if (!crowd || crowd.status !== "ok") return `<article class="pz pz-crowd" data-pz="crowd"><div class="pz-h"><span class="pz-eye">What people are saying</span>${crowdRefreshBtn()}</div><div class="cr-loading">Reading StockTwits…</div></article>`;
     return `<article class="pz pz-crowd" data-pz="crowd">
-      <div class="pz-h"><span class="pz-eye">What people are saying</span><a class="pz-hint pz-jump" href="#crowd" data-jump=".crowd">StockTwits · all names ↓</a></div>
+      <div class="pz-h"><span class="pz-eye">What people are saying</span><span class="pz-hr"><a class="pz-hint pz-jump" href="#crowd" data-jump=".crowd">StockTwits · all names ↓</a>${crowdRefreshBtn()}</span></div>
+      ${crowdRefreshMsg ? `<div class="hc-upd" role="status">${esc(crowdRefreshMsg)}</div>` : ""}
       <div class="hc-grid">${heroCrowdCol("SPY", "S&P 500")}${heroCrowdCol("QQQ", "Nasdaq 100")}</div>
     </article>`;
   }
