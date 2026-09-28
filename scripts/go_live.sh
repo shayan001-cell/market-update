@@ -14,7 +14,7 @@ if ! curl -sf http://127.0.0.1:8000/healthz >/dev/null; then
 fi
 pkill -f "cloudflared tunnel --url http://localhost:8000" 2>/dev/null || true
 nohup cloudflared tunnel --url http://localhost:8000 --no-autoupdate > /tmp/mu-tunnel.log 2>&1 &
-for i in $(seq 1 30); do URL=$(grep -o "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/mu-tunnel.log | head -1 || true); [ -n "$URL" ] && break; sleep 1; done
+for i in $(seq 1 30); do URL=$(grep -a -o "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/mu-tunnel.log | head -1 || true); [ -n "$URL" ] && break; sleep 1; done
 [ -n "${URL:-}" ] || { echo "tunnel did not come up; see /tmp/mu-tunnel.log"; exit 1; }
 echo "$URL" > /tmp/mu-tunnel-url.txt
 echo "public app address: $URL"

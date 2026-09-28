@@ -22,8 +22,9 @@ elif tail -30 /tmp/mu-tunnel.log 2>/dev/null | grep -q "Tunnel not found"; then
   launchctl kickstart -k "gui/$UIDN/com.oneview.tunnel" 2>/dev/null || { pkill -f "cloudflared tunnel"; launchctl load ~/Library/LaunchAgents/com.oneview.tunnel.plist 2>/dev/null; }
   log "tunnel forgotten by Cloudflare: restarted"; sleep 15
 fi
-CUR=$(grep -o "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/mu-tunnel.log | tail -1 || true)
+CUR=$(grep -a -o "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/mu-tunnel.log | tail -1 || true)
 PUB=$(cat /tmp/mu-tunnel-url.txt 2>/dev/null || true)
+case "$CUR" in https://*.trycloudflare.com) ;; *) CUR="" ;; esac     # only ever publish a real tunnel address
 if [ -n "$CUR" ] && [ "$CUR" != "$PUB" ]; then
   echo "$CUR" > /tmp/mu-tunnel-url.txt
   REPO="${MU_REPO:-shayan001-cell/market-update}"
