@@ -2703,23 +2703,39 @@
     else if (cm && isNum(cm.score)) out.push({ k: "Crowd", s: Math.round(cm.score), v: `${Math.round(cm.score)}/100`, note: "StockTwits mood on SPY versus its normal (50 = normal). Extremes are a crowding warning, not a signal" });
     return out.filter((x) => isNum(x.s));
   }
+  // A segmented meter: five zones along an arc, the current zone lit, a marker riding the arc to the score.
+  const MOOD_ZONES = [[0, 25, "Fear", "#FF6B85"], [25, 45, "Nervous", "#F7A85A"], [45, 56, "Neutral", "#B9B9C4"], [56, 76, "Confident", "#8EDFA8"], [76, 100, "FOMO", "#3DDC97"]];
+  function moodMeter(score) {
+    const cx = 130, cy = 124, R = 100, W = 16;
+    const pt = (v, rad) => { const t = Math.PI * (1 - v / 100); return [cx + rad * Math.cos(t), cy - rad * Math.sin(t)]; };
+    const arc = (v1, v2, rad) => { const [x1, y1] = pt(v1, rad), [x2, y2] = pt(v2, rad); return `M${x1.toFixed(2)} ${y1.toFixed(2)} A${rad} ${rad} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`; };
+    const zone = MOOD_ZONES.find(([lo, hi]) => score >= lo && score < hi) || MOOD_ZONES[MOOD_ZONES.length - 1];
+    const gap = 0.9;
+    const segs = MOOD_ZONES.map(([lo, hi, name, col]) => { const on = zone[2] === name;
+      return `<path d="${arc(lo + (lo ? gap : 0), hi - (hi < 100 ? gap : 0), R)}" class="mm-seg ${on ? "on" : ""}" stroke="${col}"/>`; }).join("");
+    const ticks = [0, 25, 50, 75, 100].map((v) => { const [x1, y1] = pt(v, R - W / 2 - 6), [x2, y2] = pt(v, R - W / 2 - 11); return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" class="mm-tick"/>`; }).join("");
+    const labels = "";
+    const [kx, ky] = pt(0, R);                         // the marker starts at 0 and turns to the score
+    const deg = (score / 100) * 180;
+    return `<div class="mm" style="--mm:${zone[3]}">
+      <svg viewBox="16 12 228 124" role="img" aria-label="Market mood ${score} out of 100: ${zone[2]}">
+        <path d="${arc(0, 100, R)}" class="mm-track"/>
+        ${segs}${ticks}${labels}
+        <g class="mm-knob" style="--deg:${deg}deg;transform-origin:${cx}px ${cy}px">
+          <circle cx="${kx}" cy="${ky}" r="13" class="mm-knob-o"/><circle cx="${kx}" cy="${ky}" r="6" class="mm-knob-i"/>
+        </g>
+      </svg>
+      <div class="mm-read"><b>${score}</b><span>${zone[2]}</span><i>out of 100</i></div>
+      <div class="mm-scale">${MOOD_ZONES.map(([lo, hi, name, col]) => `<span class="${zone[2] === name ? "on" : ""}" style="--c:${col}"><i></i>${name}</span>`).join("")}</div>
+    </div>`;
+  }
   function pulseGauge(r) {
     const ins = pulseInputs(r); if (!ins.length) return "";
     const score = Math.round(ins.reduce((a, x) => a + x.s, 0) / ins.length); const [, , word, bc] = bandOf(score);
-    const ang = -90 + score * 1.8;
     const bars = ins.map((x) => { const b = bandOf(x.s); return `<li title="${esc(x.note)}"><span class="pg-k">${esc(x.k)}</span><span class="pg-bar"><i class="${b[3]}" style="width:${Math.max(4, x.s)}%"></i></span><span class="pg-v">${esc(x.v)}</span></li>`; }).join("");
     return `<article class="pz pz-gauge" data-pz="gauge">
       <div class="pz-h"><span class="pz-eye">Market mood</span><span class="pz-hint" title="The average of the bars below, each scored 0 (fear) to 100 (FOMO). Hover a bar to see what it measures. A mood, not a forecast.">what's this?</span></div>
-      <div class="pg-dial">
-        <svg viewBox="0 0 220 128" role="img" aria-label="Mood ${score} of 100: ${word}">
-          <defs><linearGradient id="pgGrad" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="var(--down)"/><stop offset=".45" stop-color="var(--warn)"/><stop offset="1" stop-color="var(--up)"/></linearGradient></defs>
-          <path d="M20 112 A90 90 0 0 1 200 112" class="pg-track"/>
-          <path d="M20 112 A90 90 0 0 1 200 112" class="pg-arc" pathLength="100" style="stroke-dasharray:${score} 100"/>
-          <g class="pg-needle" style="--a:${ang}deg"><line x1="110" y1="112" x2="110" y2="34"/><circle cx="110" cy="112" r="7"/></g>
-        </svg>
-        <div class="pg-read"><b class="pg-score">${score}</b><span class="pg-word ${bc}">${word}</span></div>
-        <div class="pg-ends"><span>Fear</span><span>FOMO</span></div>
-      </div>
+      ${moodMeter(score)}
       <ul class="pg-list">${bars}</ul>
     </article>`;
   }

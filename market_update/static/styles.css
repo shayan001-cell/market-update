@@ -2791,3 +2791,30 @@ header.topbar .topnav .side-item.active .cnt{background:rgba(26,12,3,.16)}
   header.topbar .topnav .side-item .side-label{position:static !important;width:auto !important;height:auto !important;clip:auto !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:11px}
   header.topbar .topnav .side-item .cnt,header.topbar .topnav .nv-chev{display:none}
 }
+/* ======================= Market mood: segmented meter ======================= */
+.mm{position:relative;max-width:320px;margin:4px auto 2px}
+.mm svg{display:block;width:100%;height:auto;overflow:visible}
+.mm-track{fill:none;stroke:rgba(255,255,255,.05);stroke-width:26;stroke-linecap:round}
+.mm-seg{fill:none;stroke-width:16;stroke-linecap:butt;opacity:.22;transition:opacity .6s var(--ease-spring)}
+.mm-seg.on{opacity:1;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--mm) 55%,transparent))}
+.mm-tick{stroke:rgba(255,255,255,.28);stroke-width:1.5;stroke-linecap:round}
+.mm-lab{font:700 9.5px var(--font);letter-spacing:.06em;text-transform:uppercase;fill:var(--muted)}
+.mm-lab.on{fill:var(--mm)}
+.mm-knob{transform:rotate(var(--deg))}
+.mm-knob-o{fill:var(--surface);stroke:var(--mm);stroke-width:4;filter:drop-shadow(0 4px 10px rgba(0,0,0,.6))}
+.mm-knob-i{fill:var(--mm)}
+@media (prefers-reduced-motion: no-preference){ .pz-gauge:not(.no-anim) .mm-knob{animation:mm-sweep 1.4s var(--ease-spring,cubic-bezier(.32,.72,0,1)) .25s both} @keyframes mm-sweep{from{transform:rotate(0deg)}to{transform:rotate(var(--deg))}} }
+.mm-read{position:absolute;left:0;right:0;bottom:6%;display:flex;flex-direction:column;align-items:center;pointer-events:none}
+.mm-read b{font-family:Sora,var(--font);font-size:46px;font-weight:800;line-height:1;letter-spacing:-.03em;color:var(--text);font-variant-numeric:tabular-nums}
+.mm-read span{font-family:Sora,var(--font);font-size:16px;font-weight:700;color:var(--mm);margin-top:2px}
+.mm-read i{font-style:normal;font-size:11px;color:var(--muted);margin-top:1px}
+.mm{max-width:360px;margin:6px auto 4px}
+.mm-read{bottom:44px}
+.mm-read b{font-size:52px}
+.mm-scale{display:flex;justify-content:space-between;gap:4px;margin-top:10px;padding:0 4px}
+.mm-scale span{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);opacity:.7;white-space:nowrap}
+.mm-scale i{width:8px;height:8px;border-radius:50%;background:var(--c)}
+.mm-scale span.on{color:var(--c);opacity:1}
+.mm-scale span.on i{box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 30%,transparent)}
+.mm-scale{flex-wrap:wrap;justify-content:center;gap:4px 12px;padding:0}
+.mm-scale span{font-size:10px;letter-spacing:.02em}
