@@ -2296,14 +2296,54 @@
   }
   let fitTimer = null;
   addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitNav, 120); });
+  // The menu: four places at the top (five for the admin), the rest one tap away in a labelled panel.
+  const NAV_ICON = {
+    markets: '<svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M5 15l4-4 3 3 6-7"/><path d="M15 7h3v3"/></svg>',
+    research: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/><path d="M8 11.5 10 9.5l1.5 1.5L13 9"/></svg>',
+    chev: '<svg class="nv-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>',
+  };
+  const MENU = [
+    { k: "home" }, { k: "watch" },
+    { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "The AI build-out, part by part"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"]] },
+    { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["record", "Every call scored against the market"]] },
+    { g: "admin", label: "Admin", admin: true, icon: ICONS.admin, items: [["desk", "Three scores per name and the big-cap scan"], ["check", "Every 15-minute read, scored"], ["admin", "Users, sessions and traffic"]] },
+  ];
+  let navOpen = null;
+  function navPop() {
+    let p = $("#nav-pop");
+    if (!p) { p = document.createElement("div"); p.id = "nav-pop"; p.className = "nav-pop"; p.hidden = true; p.setAttribute("role", "menu"); document.body.appendChild(p); }   // on the body: the blurred header would trap a fixed panel
+    return p;
+  }
+  function closeNavPop() { const p = $("#nav-pop"); if (p) p.hidden = true; document.querySelectorAll("#nav [data-grp]").forEach((b) => { b.setAttribute("aria-expanded", "false"); b.classList.remove("open"); }); navOpen = null; }
+  function openNavPop(g, btn) {
+    const m = MENU.find((x) => x.g === g); if (!m) return;
+    if (navOpen === g) { closeNavPop(); return; }
+    closeNavPop();
+    const p = navPop(); const label = (k) => (VIEWS.find((v) => v[0] === k) || [k, k, ""]);
+    p.innerHTML = `<div class="np-h">${esc(m.label)}</div>` + m.items.map(([k, d]) => { const [, l, n] = label(k);
+      return `<button type="button" class="np-it ${currentView === k ? "on" : ""}" data-view="${k}" role="menuitem"><span class="np-ic">${ICONS[k] || ""}</span><span class="np-tx"><b>${esc(l)}</b><i>${esc(d)}</i></span>${n ? `<kbd>${n}</kbd>` : ""}</button>`; }).join("");
+    const br = btn.getBoundingClientRect();
+    p.style.left = Math.max(8, Math.min(innerWidth - 348, br.left - 8)) + "px"; p.style.top = (br.bottom + 8) + "px";
+    p.hidden = false; btn.setAttribute("aria-expanded", "true"); btn.classList.add("open"); navOpen = g;
+    p.querySelectorAll(".np-it").forEach((it) => { it.onclick = () => { closeNavPop(); switchView(it.getAttribute("data-view")); }; });
+    const first = p.querySelector(".np-it.on") || p.querySelector(".np-it"); if (first) first.focus({ preventScroll: true });
+  }
+  addEventListener("click", (e) => { if (!navOpen) return; if (e.target.closest("#nav-pop") || e.target.closest("[data-grp]")) return; closeNavPop(); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && navOpen) closeNavPop(); });
+  addEventListener("resize", () => { if (navOpen) closeNavPop(); });
+  addEventListener("scroll", () => { if (navOpen && !matchMedia("(max-width: 700px)").matches) closeNavPop(); }, true);
   function renderNav() {
     const label = (k) => VIEWS.find((v) => v[0] === k);
     const isAdmin = user && user.role === "admin";
-    navTray().innerHTML = "";                  // the rail is rebuilt from scratch, so the tray must not keep the old buttons
-    $("#nav").innerHTML = NAV_GROUPS.filter(([g]) => g !== "Admin" || isAdmin).map(([g, keys]) => `<div class="side-group">${g}</div>` + keys.filter((k) => isAdmin || !ADMIN_VIEWS.includes(k)).map((k) => { const [, l, n] = label(k); const subs = SUBTABS[k];
-      return `<button class="side-item v-${k} ${currentView === k ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${currentView === k ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${Object.keys(lists.lists).length > 1 ? Object.keys(lists.lists).length + " lists" : activeList().length}</span>` : ""}</span><kbd>${n}</kbd></button>` +
-        (subs && currentView === k ? `<div class="side-sub">${subs.map(([sk, sl]) => `<button class="${subTab[k] === sk ? "active" : ""}" data-sub="${k}:${sk}">${sl}</button>`).join("")}</div>` : ""); }).join("")).join("")
-      + `<button class="side-item more" data-more hidden aria-haspopup="menu" aria-expanded="false" aria-label="More views"><span class="nav-ico">${MORE_ICON}</span><span class="side-label">More</span></button>`;
+    navTray().innerHTML = "";
+    closeNavPop();
+    $("#nav").innerHTML = MENU.filter((m) => !m.admin || isAdmin).map((m) => {
+      if (m.k) { const [k, l] = label(m.k); const on = currentView === k;
+        return `<button class="side-item v-${k} ${on ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${on ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${activeList().length}</span>` : ""}</span></button>`; }
+      const on = m.items.some(([k]) => k === currentView); const cur = on ? label(currentView)[1] : "";
+      return `<button class="side-item nv-grp ${on ? "active" : ""}" data-grp="${m.g}" aria-haspopup="menu" aria-expanded="false" title="${esc(m.label)}${cur ? ": " + esc(cur) : ""}" aria-label="${esc(m.label)}${cur ? ", now on " + esc(cur) : ""}"><span class="nav-ico">${m.icon}</span><span class="side-label">${esc(m.label)}${cur ? `<em class="nv-cur">${esc(cur)}</em>` : ""}</span>${NAV_ICON.chev}</button>`;
+    }).join("");
+    const gb = $("#guide-btn"); if (gb) { gb.onclick = () => switchView("guide"); gb.classList.toggle("on", currentView === "guide"); }
     fitNav();
     const sw = $("#side-watch"); if (sw) sw.innerHTML = sideWatch();
     const foot = $("#side-foot");
@@ -2329,7 +2369,8 @@
   }
   function wireNav() {                       // the menu re-renders on its own, so it binds its own handlers (assignment, never duplicates)
     const root = $("#side"); if (!root) return;
-    root.querySelectorAll(".side-item[data-view]").forEach((b) => { b.onclick = () => { closeTray(); switchView(b.getAttribute("data-view")); }; });
+    root.querySelectorAll("#nav .side-item[data-view]").forEach((b) => { b.onclick = () => { closeTray(); closeNavPop(); switchView(b.getAttribute("data-view")); }; });
+    root.querySelectorAll("#nav [data-grp]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openNavPop(b.getAttribute("data-grp"), b); }; });
     const more = root.querySelector("[data-more]"); if (more) more.onclick = (e) => { e.stopPropagation(); toggleTray(); };
     root.querySelectorAll("[data-sub]").forEach((b) => { b.onclick = () => { const [v, k] = b.getAttribute("data-sub").split(":"); subTab[v] = k; renderAll(); }; });
     root.querySelectorAll("[data-ticker-page]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openTicker(b.getAttribute("data-ticker-page")); }; });

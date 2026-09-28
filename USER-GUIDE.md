@@ -4,6 +4,9 @@ OneView is a market desk for day traders, intraday traders and swing traders. It
 
 Desk: https://shayan001-cell.github.io/market-update/  · WhatsApp group: https://chat.whatsapp.com/C4NROWURa0SI1hoegnfHOc?mode=gi_t
 
+
+**Finding your way.** The top menu has four places: **Overview**, **Watchlist**, **Markets** (Market context, Themes, Stocks, Scanner) and **Research** (Company map, Filings & flow, Track record). Markets and Research open a small panel with a one-line description of each page. The **?** button next to the bell opens this guide. Number keys still jump straight to a page. On a phone the menu becomes a tab bar and the panels open from the bottom.
+
 ## Start here (2 minutes)
 1. Open the desk and enter your email. A one-time link arrives; open it on the device you want to use. No password.
 2. Read and accept the "not financial advice" note once per sign-in.
