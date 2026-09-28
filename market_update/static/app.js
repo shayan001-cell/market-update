@@ -9,7 +9,8 @@
   const STATIC_MODE = !!EMBEDDED && !API;          // a static copy with an API behind it behaves like the app
   let authToken = null; try { authToken = localStorage.getItem("mu-token"); } catch (e) {}
   const mst = (location.hash.match(/[#&]st=([A-Za-z0-9_\-.]+)/) || [])[1];
-  if (mst) { authToken = mst; try { localStorage.setItem("mu-token", mst); } catch (e) {} try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
+  if (/[?&]signed_in=1/.test(location.search)) { try { localStorage.setItem("mu-last-active", String(Date.now())); } catch (e) {} }   // a fresh sign-in is fresh activity
+  if (mst) { authToken = mst; try { localStorage.setItem("mu-token", mst); localStorage.setItem("mu-last-active", String(Date.now())); } catch (e) {} try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
   // When the server stops answering (the tunnel address changed), re-read the address the site was built with.
   let apiRediscoveredAt = 0;
   async function rediscoverApi() {
@@ -35,8 +36,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -57,6 +58,8 @@
     scan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 3v9l6.5 4"/></svg>',
     stock: '<svg viewBox="0 0 24 24"><path d="M7 4v16M7 8h-2.5v7H7M12 3v18M12 6h-2.5v9H12M17 5v14M17 9h-2.5v6H17"/><path d="M7 8h2.5v7H7M12 6h2.5v9H12M17 9h2.5v6H17"/></svg>',
     map: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.6 7.2 9.6 10M17.4 7.2 14.4 10M6.6 16.8 9.6 14M17.4 16.8 14.4 14"/></svg>',
+    live: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>',
+    liveview: '<svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>',
     theme: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
     smart: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.1c0 2.9 6 1.6 6 4.6 0 1.4-1.4 2.3-3 2.3s-3-.9-3-2.3"/></svg>',
     guide: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>',
@@ -532,6 +535,87 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= LIVE: the session as it happens (09:00 to 16:00 ET) =======================
+  const LIVE_EVERY_MS = 15 * 60 * 1000, CLOSED_RELOAD_MS = 4 * 3600 * 1000, IDLE_LOGOUT_MS = 3 * 3600 * 1000;
+  const FEED_VIEWS = ["home", "live", "liveview"];
+  const onFeedView = () => FEED_VIEWS.includes(currentView);
+  function etParts() {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, weekday: "short", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+    return { h: +p.hour % 24, m: +p.minute, wd: p.weekday };
+  }
+  function inLiveWindow() { const t = etParts(); if (t.wd === "Sat" || t.wd === "Sun") return false; const mins = t.h * 60 + t.m; return mins >= 540 && mins < 960; }
+  let nextLiveAt = 0; const pageLoadedAt = Date.now();
+  async function liveTick() {
+    const el = document.querySelector("[data-live-next]");
+    if (inLiveWindow()) {
+      if (!nextLiveAt) nextLiveAt = Date.now() + LIVE_EVERY_MS;
+      const left = nextLiveAt - Date.now();
+      if (el) el.textContent = `next update in ${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}`;
+      if (left <= 0) {
+        nextLiveAt = Date.now() + LIVE_EVERY_MS;
+        if (!STATIC_MODE) { try { await Promise.all([poll(), pollDirection(), pollLiveScan && pollLiveScan(), pollCrowd(), pollNews && pollNews()]); } catch (e) {} }
+        if (["live", "liveview"].includes(currentView) && report) renderAll();
+      }
+    } else {
+      nextLiveAt = 0;
+      if (el) el.textContent = "the session runs 09:00 to 16:00 ET";
+      // outside the session the page reloads itself every 4 hours, unless someone is in the middle of using it
+      if (Date.now() - pageLoadedAt > CLOSED_RELOAD_MS && Date.now() - lastInteraction > 120000 && !document.querySelector("input:focus")) location.reload();
+    }
+  }
+  // idle sign-out: three hours with no click, key, scroll or touch in any OneView tab
+  const ACT_KEY = "mu-last-active"; let actWrite = 0;
+  const markActive = () => { const n = Date.now(); if (n - actWrite < 15000) return; actWrite = n; try { localStorage.setItem(ACT_KEY, String(n)); } catch (e) {} };
+  ["pointerdown", "keydown", "wheel", "touchstart", "scroll"].forEach((ev) => addEventListener(ev, markActive, { passive: true, capture: true }));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) idleCheck(); });
+  function lastActive() { let v = 0; try { v = +localStorage.getItem(ACT_KEY) || 0; } catch (e) {} return v || lastInteraction; }   // the stored time wins: a reopened tab must not count as fresh activity
+  let idleSignedOut = false;
+  async function idleCheck() {
+    if (!user || idleSignedOut) return;
+    if (Date.now() - lastActive() > IDLE_LOGOUT_MS) { idleSignedOut = true; await signOut(); signedOutNote = "idle"; renderGate(); idleSignedOut = false; }
+  }
+  function liveStatus(r) {
+    const ms = marketStateNow(); const win = inLiveWindow();
+    return ms === "open" ? ["LIVE", "on", "Regular session, 09:30 to 16:00 ET"] : win ? ["PRE-MARKET", "pre", "The regular session opens at 09:30 ET"] : ["CLOSED", "off", "Showing the last session. Live resumes at 09:00 ET on the next market day"];
+  }
+  function liveHead(r, title, sub) {
+    const [w, c, d] = liveStatus(r);
+    return `<div class="lv-head"><span class="lv-chip ${c}"><i></i>${w}</span><span class="lv-sub">${esc(d)} · <b data-live-next></b></span>
+      <h2>${title}</h2><p>${sub}</p>
+      <nav class="lv-tabs"><button type="button" class="${currentView === "live" ? "on" : ""}" data-lv="live">${ICONS.live}Intraday</button><button type="button" class="${currentView === "liveview" ? "on" : ""}" data-lv="liveview">${ICONS.liveview}Intraday view</button></nav></div>`;
+  }
+  function liveIdx(sym, f, x) {
+    const q = qp(sym, x || {}); const pos = isNum(f.range_pos) ? Math.round(f.range_pos * 100) : null;
+    return `<div class="lv-idx"><div class="lv-idx-h"><b>${sym}</b><span>${sym === "SPY" ? "S&amp;P 500" : "Nasdaq 100"}</span>${f.above_vwap == null ? "" : `<em class="${f.above_vwap ? "up" : "down"}">${f.above_vwap ? "above" : "below"} the day's average price</em>`}</div>
+      <div class="lv-px">${priceHtml(sym, x || {})}</div>
+      ${pos != null ? `<div class="lv-rng"><span>day's low</span><div><i style="left:${pos}%"></i></div><span>day's high</span></div><div class="lv-rng-t">${pos}% of the way from the day's low to its high</div>` : ""}
+      ${isNum((f.hourly || {}).rsi_1h) ? `<div class="lv-rsi">1-hour RSI <b>${fnum(f.hourly.rsi_1h, 0)}</b> · ${rsiWord(f.hourly.rsi_1h)}</div>` : ""}
+    </div>`;
+  }
+  function secLive(r) {
+    const d = direction; const L = d && d.latest; const f = (L && L.facts) || {};
+    const m = L ? DIR[L.expected] || ["No read", "flat"] : null;
+    const today = (d && d.today) || [];
+    const tl = today.map((x) => { const k = DIR[x.expected] ? DIR[x.expected][1] : "flat"; const t = new Date(x.ts * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
+      return `<li class="${k} ${x.hit === 1 ? "hit" : x.hit === 0 ? "miss" : ""}" title="${t} ET: ${esc(x.expected || "no read")}${x.hit == null ? "" : x.hit ? " · right" : " · wrong"}"><i>${x.expected === "higher" ? "▲" : x.expected === "lower" ? "▼" : "▬"}</i><span>${t}</span></li>`; }).join("");
+    const hits = today.filter((x) => x.hit === 1).length, scored = today.filter((x) => x.hit != null).length;
+    const read = L ? `<div class="lv-read"><span class="lv-at">${esc((L.at || "").slice(11, 16))} ET read</span><div class="lv-word ${m[1]}">${m[0]}</div>${convTag(L.confidence)}
+        ${L.driver && DIR_DRIVER[L.driver] ? `<p class="od-p">Why: ${esc(DIR_DRIVER[L.driver])}.</p>` : ""}${(f.sentiment || {}).stocktwits_spy && f.sentiment.stocktwits_spy.label ? `<p class="od-p">The crowd on SPY: ${esc(String(f.sentiment.stocktwits_spy.label).toLowerCase().replace(/_/g, " "))}.</p>` : ""}</div>`
+      : `<div class="lv-read"><div class="lv-word flat">No read yet</div><p class="od-p">${marketStateNow() === "open" ? "The first read of the session arrives within 15 minutes." : "Reads run every 15 minutes from 09:30 to 16:00 ET."}</p></div>`;
+    return `<section class="pulse lv">${liveHead(r, "The session, as it happens", "Every 15 minutes the desk reads SPY and QQQ and says which way the market is likelier to go into the close. The page updates itself every 15 minutes while the market is open.")}
+      <div class="pulse-grid">
+        <article class="pz lv-dir" data-live="dir"><div class="pz-h"><span class="pz-eye">The latest direction read</span><span class="pz-hint">into the close</span></div>${read}
+          <h5 class="cm-h5">Today's reads, every 15 minutes</h5><ol class="lv-tl">${tl || '<li class="none">No reads yet today.</li>'}</ol>
+          ${scored ? `<p class="od-p">${hits} of ${scored} scored reads right so far today.</p>` : ""}</article>
+        <article class="pz lv-mk" data-live="idx"><div class="pz-h"><span class="pz-eye">Where the market is</span><span class="pz-hint">live, 15-minute delayed quotes</span></div>${liveIdx("SPY", f.spy || {}, idxOf(r, "SPY"))}${liveIdx("QQQ", f.qqq || {}, idxOf(r, "QQQ"))}</article>
+        <article class="pz lv-run"><div class="pz-h"><span class="pz-eye">Moving right now</span><span class="pz-hint">small caps far above normal volume</span></div>${secRunners(r)}</article>
+      </div>
+      <div class="deep-h lv-next"><span>Want the full picture?</span><i>briefings, big money, the President's posts, the crowd and the betting markets</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
+    </section>`;
+  }
+  function secLiveViewHead(r) { return `<section class="pulse lv">${liveHead(r, "Intraday view", "The briefings, where the big money is moving, the President's market-relevant posts, what the crowd is saying, the top traders, the betting markets and today's runners, in one place.")}</section>`; }
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-lv]"); if (!b) return; switchView(b.getAttribute("data-lv")); });
+
   // ======================= US MARKET THEMES: ten themes, each split into its sectors =======================
   const TI = {
     ai: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
@@ -907,7 +991,7 @@
   async function pollPros() {
     if (STATIC_MODE) return;
     try { const res = await api("/api/pros", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") { prosSnap = prosSnap || j; return; } prosSnap = j;
-      if (currentView === "home" && report) { refreshPulse("pros"); refreshPulse("gauge"); const el = $(".pros"); const tmp = document.createElement("div"); tmp.innerHTML = secPros(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const a = $(".crowd") || $(".home-hero"); if (a) a.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
+      if (onFeedView() && report) { refreshPulse("pros"); refreshPulse("gauge"); const el = $(".pros"); const tmp = document.createElement("div"); tmp.innerHTML = secPros(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const a = $(".crowd") || $(".home-hero"); if (a) a.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
     } catch (e) { /* server restarting */ }
   }
   const leanWord = (share) => (!isNum(share) ? ["No read", "flat"] : share >= 65 ? ["Bullish", "up"] : share >= 55 ? ["Leaning bullish", "up"] : share <= 35 ? ["Bearish", "down"] : share <= 45 ? ["Leaning bearish", "down"] : ["Split", "flat"]);
@@ -1010,8 +1094,8 @@
   async function pollOdds() {
     if (STATIC_MODE) return;
     try { const res = await api("/api/odds", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") return; oddsSnap = j;
-      if (currentView === "home" && report) { const el = $(".odds"); const tmp = document.createElement("div"); tmp.innerHTML = secOdds(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const anchor = $(".crowd") || $(".home-hero"); if (anchor) anchor.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
-      if (currentView === "home" && report) refreshPulse("bets");
+      if (onFeedView() && report) { const el = $(".odds"); const tmp = document.createElement("div"); tmp.innerHTML = secOdds(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); } else if (tmp.firstElementChild) { const anchor = $(".crowd") || $(".home-hero"); if (anchor) anchor.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); }
+      if (onFeedView() && report) refreshPulse("bets");
       if (currentView === "watch") rerenderWatch();
     } catch (e) { /* server restarting */ }
   }
@@ -1338,7 +1422,7 @@
   let brief = null;                     // {date, briefs: {morning, midday, close}}
   async function pollBrief() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (currentView === "home" && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const pu = $(".view.home .pulse"), cm = $(".view.home .col-main"); if (pu) pu.insertAdjacentElement("afterend", tmp.firstElementChild); else if (cm) cm.prepend(tmp.firstElementChild); } refreshPulse("levels"); wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
+    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (onFeedView() && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const pu = $(".view.home .pulse"), cm = $(".view.home .col-main"); if (pu) pu.insertAdjacentElement("afterend", tmp.firstElementChild); else if (cm) cm.prepend(tmp.firstElementChild); } refreshPulse("levels"); wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
   }
   const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
   const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
@@ -1347,7 +1431,8 @@
   async function pollDirection() {
     if (STATIC_MODE) return;
     try { const res = await api("/api/direction", { cache: "no-store" }); if (!res.ok) return; direction = await res.json();
-      if (currentView === "home" && report) { const el = $('[data-brief-slot="direction"]'); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = directionCard(); el.replaceWith(tmp.firstElementChild); wireStocks(); } } } catch (e) { /* server restarting */ }
+      if (currentView === "live" && report) { const lv = $("#app .lv"); if (lv) { const tmp = document.createElement("div"); tmp.innerHTML = secLive(report); lv.replaceWith(tmp.firstElementChild); wireStocks(); } }
+      if (onFeedView() && report) { const el = $('[data-brief-slot="direction"]'); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = directionCard(); el.replaceWith(tmp.firstElementChild); wireStocks(); } } } catch (e) { /* server restarting */ }
   }
   const DIR = { higher: ["Higher into the close", "up"], lower: ["Lower into the close", "down"], sideways: ["Sideways into the close", "flat"] };
   const DIR_DRIVER = { trend_and_vwap: "price is on the same side of the day's average price as the 1-hour trend", level_break: "a level just gave way", level_hold: "a level held on the test", exhaustion: "the move is stretched and stalling", sentiment: "the crowd's mood is the deciding factor", no_edge: "nothing clear, so sideways is the honest read" };
@@ -1376,6 +1461,7 @@
     let want = /brief=1/.test(location.hash); try { if (sessionStorage.getItem("mu-open-brief") === "1") { want = true; } } catch (e) {}
     if (!want) return;
     try { sessionStorage.removeItem("mu-open-brief"); } catch (e) {}
+    if (currentView === "home") { try { sessionStorage.setItem("mu-open-brief", "1"); } catch (e) {} switchView("liveview"); return; }   // the briefings live in Live > Intraday view now
     const el = $(".briefs"); if (!el) return;
     briefOpen = "morning"; const d = el.querySelector('[data-brief-slot="morning"]'); if (d) d.classList.add("open");
     el.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -1437,7 +1523,7 @@
   async function pollCrowd() {
     if (STATIC_MODE) return;
     try { const res = await api("/api/stocktwits", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); crowd = j;
-      if (currentView === "home" && report) { refreshPulse("gauge"); refreshPulse("crowd"); const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
+      if (onFeedView() && report) { refreshPulse("gauge"); refreshPulse("crowd"); const el = $(".crowd"); const tmp = document.createElement("div"); tmp.innerHTML = secCrowd(report); if (el) { if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove(); } else if (tmp.firstElementChild) { const hero = $(".home-hero"); if (hero) hero.insertAdjacentElement("afterend", tmp.firstElementChild); } wireStocks(); } } catch (e) { /* server restarting */ }
   }
   const ST_LABEL = { BULLISH: ["Bullish", "up"], EXTREMELY_BULLISH: ["Extremely bullish", "up"], BEARISH: ["Bearish", "down"], EXTREMELY_BEARISH: ["Extremely bearish", "down"], NEUTRAL: ["Neutral", "flat"] };
   // ======================= THE CROWD (StockTwits): mood versus normal, and what people are saying =======================
@@ -2391,7 +2477,9 @@
     chev: '<svg class="nv-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>',
   };
   const MENU = [
-    { k: "home" }, { k: "watch" },
+    { k: "home" },
+    { g: "live", label: "Live", icon: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>', items: [["live", "The session as it happens: 15-minute reads, SPY and QQQ, runners"], ["liveview", "Briefings, big money, the President's posts, the crowd, the bets"]] },
+    { k: "watch" },
     { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"]] },
     { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["record", "Every call scored against the market"]] },
     { g: "admin", label: "Admin", admin: true, icon: ICONS.admin, items: [["desk", "Three scores per name and the big-cap scan"], ["check", "Every 15-minute read, scored"], ["admin", "Users, sessions and traffic"]] },
@@ -2429,7 +2517,8 @@
       if (m.k) { const [k, l] = label(m.k); const on = currentView === k;
         return `<button class="side-item v-${k} ${on ? "active" : ""}" data-view="${k}" title="${l}" aria-label="${l}" aria-current="${on ? "page" : "false"}"><span class="nav-ico">${ICONS[k]}</span><span class="side-label">${l}${k === "watch" && lists ? ` <span class="cnt">${activeList().length}</span>` : ""}</span></button>`; }
       const on = m.items.some(([k]) => k === currentView); const cur = on ? label(currentView)[1] : "";
-      return `<button class="side-item nv-grp ${on ? "active" : ""}" data-grp="${m.g}" aria-haspopup="menu" aria-expanded="false" title="${esc(m.label)}${cur ? ": " + esc(cur) : ""}" aria-label="${esc(m.label)}${cur ? ", now on " + esc(cur) : ""}"><span class="nav-ico">${m.icon}</span><span class="side-label">${esc(m.label)}${cur ? `<em class="nv-cur">${esc(cur)}</em>` : ""}</span>${NAV_ICON.chev}</button>`;
+      const liveDot = m.g === "live" && typeof inLiveWindow === "function" && inLiveWindow() ? '<i class="nv-live" aria-label="live"></i>' : "";
+      return `<button class="side-item nv-grp ${on ? "active" : ""} ${liveDot ? "is-live" : ""}" data-grp="${m.g}" aria-haspopup="menu" aria-expanded="false" title="${esc(m.label)}${cur ? ": " + esc(cur) : ""}" aria-label="${esc(m.label)}${cur ? ", now on " + esc(cur) : ""}"><span class="nav-ico">${m.icon}</span>${liveDot}<span class="side-label">${esc(m.label)}${cur ? `<em class="nv-cur">${esc(cur)}</em>` : ""}</span>${NAV_ICON.chev}</button>`;
     }).join("");
     const gb = $("#guide-btn"); if (gb) { gb.onclick = () => switchView("guide"); gb.classList.toggle("on", currentView === "guide"); }
     fitNav();
@@ -2567,7 +2656,7 @@
           <button class="ov-primary lg-btn" type="submit" id="login-submit"><span>Send my sign-in link</span><i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></button>
           <div class="ov-hint">No password needed.</div>
         </form>
-        <div id="login-status" class="gate-status" role="status" aria-live="polite">${signedOutNote ? "Thank you, see you back again." : ""}</div>
+        <div id="login-status" class="gate-status" role="status" aria-live="polite">${signedOutNote === "idle" ? "You were signed out after 3 hours without activity. Sign in again to pick up where you left off." : signedOutNote ? "Thank you, see you back again." : ""}</div>
         ${mailLine()}
         ${waJoin()}
       </div>`;
@@ -2624,8 +2713,12 @@
     const g = $("#gate"); if (!g) return;
     const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) setLabel(lb, `Sign out · ${(user.name || user.email.split("@")[0]).slice(0, 14)}`); }
     if (!gateNeeded()) { g.hidden = true; g.setAttribute("aria-hidden", "true"); g.innerHTML = ""; renderNav(); return; }
-    const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? loginHtml() : disclaimerHtml()));
+    const bye = !user && signedOutNote && !byeDismissed && !STATIC_MODE;
+    const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? (bye ? goodbyeHtml() : loginHtml()) : disclaimerHtml()));
     g.hidden = false; g.removeAttribute("aria-hidden"); g.innerHTML = html; positionGate();
+    const full = !user;                                    // sign-in and goodbye take the whole screen, above the site header
+    g.classList.toggle("gate-full", full); if (full) { g.style.setProperty("--gate-top", "0px"); g.style.setProperty("--gate-left", "0px"); }
+    const again = g.querySelector("[data-signin-again]"); if (again) again.addEventListener("click", () => { byeDismissed = true; signedOutNote = false; renderGate(); });
     wireGate(); startLoginFx();
     document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; if (gateNeeded()) renderGate(); else leaveGate(() => renderGate()); }));
     const decline = () => { try { sessionStorage.removeItem("mu-disc-s"); } catch (e) {} signOut(); };
@@ -2712,9 +2805,18 @@
     picks.forEach((t) => { if (!stockFor(t) && !STATIC_MODE) requestAnalysis(t); });
     renderGate(); if (currentView !== "home") currentView = "home"; renderAll();
   }
-  let signedOutNote = false;
+  let signedOutNote = false, byeName = "", byeDismissed = false;
+  function goodbyeHtml() {
+    const idle = signedOutNote === "idle";
+    return `<div class="ov-login login-stage lg2 lg-bye"><div class="lg-aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+      <section class="lg-bye-card" aria-live="polite">${brandLogo(180)}
+        <h1>${idle ? "Signed out for your safety" : `Goodbye${byeName ? ", " + esc(byeName) : ""}`}</h1>
+        <p>${idle ? "You were away for more than 3 hours, so OneView signed you out." : "You are signed out. Thanks for spending time with the markets today."}</p>
+        <button type="button" class="lg-link" data-signin-again>Sign in again <span aria-hidden="true">→</span></button>
+      </section></div>`;
+  }
   async function signOut() {
-    signedOutNote = true;
+    signedOutNote = true; byeDismissed = false; byeName = user ? (user.name || String(user.email || "").split("@")[0] || "") : "";
     if (STATIC_MODE) { try { localStorage.removeItem(USER_KEY); } catch (e) {} }
     else { try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {} }
     authToken = null; try { localStorage.removeItem("mu-token"); } catch (e) {}
@@ -2753,7 +2855,7 @@
     $("#footer").innerHTML = `<div class="foot">Prices: Yahoo Finance, 15-minute delayed · change is versus the prior close · report built ${r.generated_at.slice(11, 16)} ET${r.ai_enabled ? "" : " · model reads off this build"} · OneView is information, not advice.</div>`;
     mountCharts();
     wireStocks();
-    if (currentView === "home") jumpToBrief();
+    if (currentView === "home" || currentView === "liveview") jumpToBrief();
   }
 
   // ======================= THE PULSE: the market in ten seconds =======================
@@ -2950,7 +3052,7 @@
       <div class="pulse-head"><span class="pz-live ${r.market_state === "open" ? "on" : ""}"><i></i>${st} · updated ${esc(r.generated_at.slice(11, 16))} ET</span>
         <h2>The market in 10 seconds</h2><p>${pulseLine(r)}</p></div>
       <div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
-      <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners</i></div>
+      <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
     </section>`;
   }
   function refreshPulse(which) {
@@ -2965,7 +3067,9 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secPros(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}</div>${secToday(r)}</div>`;
+      case "live": return `<div class="view home live"><div class="col-main">${secLive(r)}</div>${secToday(r)}</div>`;
+      case "liveview": return `<div class="view home liveview"><div class="col-main">${secLiveViewHead(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secPros(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "map": setTimeout(() => { mountMap(); if (!mapData && !mapBusy && mapSym) loadMap(mapSym); }, 0); return `<div class="view one cm-view">${secMap()}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
@@ -3519,6 +3623,7 @@
     initTheme();
     addEventListener("keydown", (e) => { if (e.target && /input|textarea/i.test(e.target.tagName)) return; const gt = $("#gate"); if (gt && !gt.hidden) return; if (e.key === "/") { e.preventDefault(); const i = $("#search"); if (i) i.focus(); return; } const v = VIEWS.find((x) => x[2] === e.key); if (v) switchView(v[0]); });
     wireSearch(); initSide(); scheduleHourly(); setInterval(hourlyTick, 1000); hourlyTick();
+    setInterval(liveTick, 1000); setInterval(idleCheck, 60000);
     lastMarketState = marketStateNow(); setInterval(marketWatch, 5000); setInterval(liveCountdown, 1000);
     if (lastMarketState === "open") { const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit" }).formatToParts(new Date()); const m = parseInt((p.find((x) => x.type === "hour") || {}).value, 10) * 60 + parseInt((p.find((x) => x.type === "minute") || {}).value, 10); if (m - 570 < 3) setTimeout(() => flash("MARKET OPEN", "9:30 ET · regular session under way"), 800); }
     const lb = $("#logout-btn"); if (lb) lb.addEventListener("click", signOut);
@@ -3554,7 +3659,7 @@
       }, 120000);
       return;
     }
-    await loadUser();
+    await loadUser(); await idleCheck();
     try { report = await fetchReport(); (report.headlines || []).forEach((h) => newsSeen.add(h.id)); renderAll(); refreshAdhoc(); }
     catch (e) { console.error("render failed", e); $("#app").innerHTML = `<div class="loading">${report ? "Render error: " + esc(e && e.message) : "First build in progress… this page will fill in automatically."}</div>`; }
     renderGate(); disclaimerBanner();
