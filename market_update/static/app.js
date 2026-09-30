@@ -555,7 +555,7 @@
     const k = `${sym}|${tf}`; if (cleanBusy.has(k) || STATIC_MODE) return;
     const have = cleanCache[k]; if (have && !force && Date.now() - have.at < 300000) return;
     cleanBusy.add(k);
-    const soon = Date.now() - 280000;             // a failed read (signed out, server busy) is retried in about 20 seconds
+    const soon = Date.now() - 295000;             // a failed read (signed out, server busy) is retried in about 5 seconds
     try { const res = await api(`/api/oneview-clean/${encodeURIComponent(sym)}?tf=${tf}`, { cache: "no-store" }); const j = res.ok ? await res.json() : { status: "error" };
       cleanCache[k] = { at: j.status === "ok" || j.status === "no_data" ? Date.now() : soon, data: j }; }
     catch (e) { cleanCache[k] = { at: soon, data: { status: "error" } }; }
@@ -570,8 +570,16 @@
     try { const res = await api("/api/tv/setup", { cache: "no-store" }); if (res.ok) { tvSetup = await res.json(); refreshChartsPanel(); } } catch (e) {}
   }
   setInterval(() => { if (currentView === "charts") { pollTvSignals(); loadClean(chartSym, chartTf); if (chartMode === "ov" && ovData && Date.now() - ovData.at > 120000) loadOv(); } }, 30000);
-  function refreshChartsPanel() { const el = $("#chs-panel"); if (el) el.innerHTML = chartsPanel(); }
+  function refreshChartsPanel() { const el = $("#chs-panel"); if (el) el.innerHTML = chartsPanel(); fitCharts(); }
+  function fitCharts() {                 // the chart and the panel fill the window below the toolbar, no page scroll
+    const g = $(".chs-grid"); if (!g) return;
+    if (innerWidth <= 980) { g.style.height = ""; return; }
+    const v = $("#app .view"); const bottom = v ? Math.min(innerHeight, v.getBoundingClientRect().bottom) : innerHeight;
+    const top = g.getBoundingClientRect().top; g.style.height = Math.max(380, Math.floor(bottom - top - 10)) + "px";
+  }
+  addEventListener("resize", () => { if (currentView === "charts") fitCharts(); });
   function mountTv() {
+    fitCharts();
     if (chartMode === "ov") { mountOv(); return; }
     const el = $("#tvw"); if (!el || el.dataset.mounted === chartKey()) return;
     el.dataset.mounted = chartKey();
@@ -657,14 +665,13 @@
     if (!names.includes(chartSym)) names.unshift(chartSym);
     const chips = names.map((t) => `<button type="button" class="chs-chip ${t === chartSym ? "on" : ""}" data-ch-sym="${esc(t)}">${esc(t)}</button>`).join("");
     const tfs = CH_TFS.map(([k, l]) => `<button type="button" class="${k === chartTf ? "on" : ""}" data-ch-tf="${k}" aria-pressed="${k === chartTf}">${l}</button>`).join("");
+    const modeSeg = `<div class="pz-seg chs-mode" role="group" aria-label="Chart"><button type="button" class="${chartMode === "tv" ? "on" : ""}" data-ch-mode="tv" title="TradingView's live chart">TradingView</button><button type="button" class="${chartMode === "ov" ? "on" : ""}" data-ch-mode="ov" title="OneView's chart, with levels, gaps and support/resistance drawn">OneView · draw</button></div>`;
     return `<section class="chs">
-      <div class="chs-bar"><div class="chs-chips">${chips}<form class="chs-find" data-ch-find><input name="t" placeholder="Any ticker" maxlength="12" aria-label="Ticker" autocomplete="off"><button type="submit">Go</button></form></div><div class="pz-seg chs-tf" role="group" aria-label="Timeframe">${tfs}</div></div>
+      <div class="chs-bar">${modeSeg}<div class="chs-chips">${chips}</div><form class="chs-find" data-ch-find><input name="t" placeholder="Ticker" maxlength="12" aria-label="Any ticker" autocomplete="off"><button type="submit">Go</button></form><div class="pz-seg chs-tf" role="group" aria-label="Timeframe">${tfs}</div></div>
       <div class="chs-grid">
-        <div class="chs-left"><div class="pz-seg chs-mode" role="group" aria-label="Chart"><button type="button" class="${chartMode === "tv" ? "on" : ""}" data-ch-mode="tv">TradingView · live</button><button type="button" class="${chartMode === "ov" ? "on" : ""}" data-ch-mode="ov">OneView chart · with drawings</button></div>
-        <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">${chartMode === "ov" ? "Loading the OneView chart…" : "Loading the live TradingView chart…"}</div></div></div>
+        <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">${chartMode === "ov" ? "Loading the OneView chart…" : "Loading the live TradingView chart…"}</div></div>
         <aside class="chs-panel" id="chs-panel" aria-live="polite">${chartsPanel()}</aside>
       </div>
-      <p class="chs-foot">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names; the drawings are for the timeframe you picked." : "Chart and prices: TradingView, live. Change the name and timeframe with the buttons above so the chart and the signals move together. Levels, gaps and support/resistance are drawn on the OneView chart."} Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
     </section>`;
   }
   const agoTxt = (ms) => { if (!ms) return ""; const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
@@ -716,7 +723,8 @@
       ${d && isNum(d.location_pct) ? row("Price is", `${d.location_pct > 70 ? "expensive" : d.location_pct < 30 ? "cheap" : "in the middle"} (${Math.round(d.location_pct)}% of the range)`) : ""}
       ${evs.length ? `<div class="chp-sep"></div><div class="chp-ev"><span>Recent signals</span>${evs.map((e) => `<div><b class="${(EVN[e.ev] || ["", ""])[1]}">${(EVN[e.ev] || [e.ev])[0]}</b><em>${f(e.px)}</em><i>${agoTxt(e.at)}</i></div>`).join("")}</div>` : ""}
       ${!d && bk && bk.data && bk.data.status === "no_data" ? `<p class="muted">OneView has no ${CH_TF_NAME[chartTf]} data for ${esc(chartSym)}.</p>` : !d && bk && bk.data && bk.data.status !== "ok" ? `<p class="muted">Could not read the signals just now; trying again shortly.</p>` : ""}
-      ${setup}`;
+      ${setup}
+      <p class="chp-note">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names. Drawings are for the timeframe you picked." : "Chart: TradingView, live. Use the name and timeframe buttons above so the chart and the signals move together."} Signals: OneView Clean. Information, not advice.</p>`;
   }
   document.addEventListener("click", (e) => {
     const s = e.target.closest("[data-ch-sym]"); if (s) { chartSym = s.getAttribute("data-ch-sym"); renderAll(); return; }
