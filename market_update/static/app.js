@@ -544,7 +544,11 @@
   const cleanCache = {}, cleanBusy = new Set();
   const CH_TFS = [["15", "15m"], ["60", "1H"], ["240", "4H"], ["D", "Day"]];
   const CH_TF_NAME = { "15": "15m", "60": "1H", "240": "4H", D: "Day" };
-  const chartKey = () => `${chartSym}|${chartTf}`;
+  let chartMode = "tv"; try { chartMode = localStorage.getItem("mu-ch-mode") || "tv"; } catch (e) {}
+  const DRAWS = [["levels", "Key levels", "Yesterday's and last week's highs and lows"], ["sr", "Support & resistance", "Prices this timeframe turned at more than once"], ["fvg", "Fair value gaps", "Three-candle gaps price has not filled yet"], ["vi", "Volume imbalances", "Gaps between candle bodies not yet filled"], ["trade", "Signals & trade", "BUY/SELL marks, entry, stop and targets"]];
+  let draws = { levels: true, sr: true, fvg: true, vi: false, trade: true }; try { draws = { ...draws, ...JSON.parse(localStorage.getItem("mu-ch-draws") || "{}") }; } catch (e) {}
+  const saveDraws = () => { try { localStorage.setItem("mu-ch-draws", JSON.stringify(draws)); localStorage.setItem("mu-ch-mode", chartMode); } catch (e) {} };
+  const chartKey = () => `${chartSym}|${chartTf}|${chartMode}`;
   const tvSymbol = (s) => s === "^GSPC" ? "SP:SPX" : s === "^NDX" ? "NASDAQ:NDX" : s === "^VIX" ? "CBOE:VIX" : s === "^DJI" ? "DJ:DJI" : /-USD$/.test(s) ? "COINBASE:" + s.replace("-", "") : s.replace(/^\^/, "");
   async function loadClean(sym, tf, force) {
     const k = `${sym}|${tf}`; if (cleanBusy.has(k) || STATIC_MODE) return;
@@ -564,9 +568,10 @@
     if (STATIC_MODE || !(user && user.role === "admin") || tvSetup) return;
     try { const res = await api("/api/tv/setup", { cache: "no-store" }); if (res.ok) { tvSetup = await res.json(); refreshChartsPanel(); } } catch (e) {}
   }
-  setInterval(() => { if (currentView === "charts") { pollTvSignals(); loadClean(chartSym, chartTf); } }, 30000);
+  setInterval(() => { if (currentView === "charts") { pollTvSignals(); loadClean(chartSym, chartTf); if (chartMode === "ov" && ovData && Date.now() - ovData.at > 120000) loadOv(); } }, 30000);
   function refreshChartsPanel() { const el = $("#chs-panel"); if (el) el.innerHTML = chartsPanel(); }
   function mountTv() {
+    if (chartMode === "ov") { mountOv(); return; }
     const el = $("#tvw"); if (!el || el.dataset.mounted === chartKey()) return;
     el.dataset.mounted = chartKey();
     const make = () => { if (!$("#tvw")) return; el.innerHTML = '<div id="tvw-in" style="height:100%;width:100%"></div>';
@@ -579,6 +584,71 @@
     sc.addEventListener("load", make, { once: true });
     sc.addEventListener("error", () => { el.innerHTML = '<div class="cr-loading">The TradingView chart could not load (blocked or offline).</div>'; }, { once: true });
   }
+  // ---- the OneView chart: candles from OneView's data, with the drawings switched on in the panel
+  let ovChart = null, ovSeries = null, ovVol = null, ovBoxes = null, ovData = null, ovLines = [], ovRO = null;
+  class OvBoxes {                 // rectangles (gaps) drawn under the candles, from their first bar to the right edge
+    constructor() { this.boxes = []; this.chart = null; this.series = null; this.req = null; }
+    attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; }
+    detached() { this.chart = null; }
+    set(b) { this.boxes = b; if (this.req) this.req(); }
+    updateAllViews() {}
+    paneViews() { const self = this; return [{ zOrder: () => "bottom", renderer: () => ({ draw: (target) => {
+      if (!self.chart || !self.series) return;
+      target.useBitmapCoordinateSpace((sc) => { const ctx = sc.context, hr = sc.horizontalPixelRatio, vr = sc.verticalPixelRatio, ts = self.chart.timeScale(); const W = sc.bitmapSize.width;
+        for (const b of self.boxes) { const y1 = self.series.priceToCoordinate(b.top), y2 = self.series.priceToCoordinate(b.bottom); if (y1 == null || y2 == null) continue;
+          let x1 = ts.timeToCoordinate(b.from); x1 = x1 == null ? 0 : x1 * hr; const top = Math.min(y1, y2) * vr, hgt = Math.max(1, Math.abs(y2 - y1) * vr);
+          ctx.fillStyle = b.fill; ctx.fillRect(x1, top, W - x1, hgt); ctx.fillStyle = b.edge; ctx.fillRect(x1, top, W - x1, Math.max(1, vr));
+          if (hgt > 9 * vr) { ctx.font = `${Math.round(10 * vr)}px system-ui, sans-serif`; ctx.fillStyle = b.text; ctx.fillText(b.label, x1 + 4 * hr, top + 11 * vr); } } }); } }) }]; }
+  }
+  function mountOv() {
+    const el = $("#tvw"); if (!el || el.dataset.mounted === chartKey()) return;
+    el.dataset.mounted = chartKey();
+    try { if (ovRO) ovRO.disconnect(); if (ovChart) ovChart.remove(); } catch (e) {}
+    ovChart = null; ovData = null;
+    const LW = window.LightweightCharts; if (!LW) { el.innerHTML = '<div class="cr-loading">The chart library did not load.</div>'; return; }
+    el.innerHTML = '<div id="ovc" style="position:relative;width:100%;height:100%"></div><div class="ovc-note" id="ovc-note">Loading…</div>';
+    const box = $("#ovc");
+    ovChart = LW.createChart(box, { width: box.clientWidth, height: box.clientHeight, layout: { background: { color: "#0B0E14" }, textColor: "#9AA0AA", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(255,255,255,.035)" }, horzLines: { color: "rgba(255,255,255,.035)" } }, rightPriceScale: { borderColor: "rgba(255,255,255,.08)" },
+      timeScale: { borderColor: "rgba(255,255,255,.08)", timeVisible: chartTf !== "D", secondsVisible: false, rightOffset: 6 }, crosshair: { mode: 0 } });
+    ovSeries = ovChart.addCandlestickSeries({ upColor: "#2BD99F", downColor: "#FF5C7A", borderVisible: false, wickUpColor: "#2BD99F", wickDownColor: "#FF5C7A", priceLineColor: "#E8BD68" });
+    ovVol = ovChart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false });
+    ovChart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    ovBoxes = new OvBoxes(); ovSeries.attachPrimitive(ovBoxes);
+    ovRO = new ResizeObserver(() => { if (ovChart && box.clientWidth) ovChart.applyOptions({ width: box.clientWidth, height: box.clientHeight }); }); ovRO.observe(box);
+    loadOv(true);
+  }
+  async function loadOv(first) {
+    const key = chartKey(); if (STATIC_MODE) return;
+    try { const res = await api(`/api/oneview-chart/${encodeURIComponent(chartSym)}?tf=${chartTf}`, { cache: "no-store" }); const j = res.ok ? await res.json() : { status: "error" };
+      if (chartKey() !== key || !ovSeries) return;
+      const note = $("#ovc-note");
+      if (j.status !== "ok") { if (note) { note.textContent = j.status === "no_data" ? `No ${CH_TF_NAME[chartTf]} data for ${chartSym}.` : "Could not load the chart; trying again shortly."; note.hidden = false; } ovData = { at: Date.now() - 100000 }; return; }
+      ovData = { ...j, at: Date.now() };
+      ovSeries.setData(j.bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
+      ovVol.setData(j.bars.map((b) => ({ time: b.t, value: b.v, color: b.c >= b.o ? "rgba(43,217,159,.28)" : "rgba(255,92,122,.28)" })));
+      if (note) note.hidden = true;
+      if (first) ovChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, j.bars.length - 140), to: j.bars.length + 6 });
+      applyDraws();
+    } catch (e) { ovData = { at: Date.now() - 100000 }; }
+  }
+  function applyDraws() {
+    if (!ovSeries || !ovData || !ovData.bars) return;
+    ovLines.forEach((l) => { try { ovSeries.removePriceLine(l); } catch (e) {} }); ovLines = [];
+    const line = (price, color, title, style, width) => { if (!isNum(price)) return; ovLines.push(ovSeries.createPriceLine({ price, color, lineWidth: width || 1, lineStyle: style == null ? 2 : style, axisLabelVisible: true, title })); };
+    const d = ovData;
+    if (draws.levels) d.levels.forEach((lv) => line(lv.price, /high/i.test(lv.name) ? "rgba(255,92,122,.75)" : /low/i.test(lv.name) ? "rgba(43,217,159,.75)" : "rgba(154,160,170,.8)", lv.name, 1));
+    if (draws.sr) { (d.resistance || []).forEach((z) => line(z.price, "#FF7A2F", `Resistance · ${z.touches} touches`, 0, z.touches >= 4 ? 2 : 1)); (d.support || []).forEach((z) => line(z.price, "#5B8CFF", `Support · ${z.touches} touches`, 0, z.touches >= 4 ? 2 : 1)); }
+    const boxes = [];
+    if (draws.fvg) (d.fvg || []).forEach((g) => boxes.push({ ...g, fill: g.dir === "up" ? "rgba(43,217,159,.13)" : "rgba(255,92,122,.13)", edge: g.dir === "up" ? "rgba(43,217,159,.5)" : "rgba(255,92,122,.5)", text: g.dir === "up" ? "#2BD99F" : "#FF5C7A", label: g.dir === "up" ? "FVG · buyers" : "FVG · sellers" }));
+    if (draws.vi) (d.vi || []).forEach((g) => boxes.push({ ...g, fill: "rgba(192,140,255,.14)", edge: "rgba(192,140,255,.55)", text: "#C08CFF", label: g.dir === "up" ? "Volume imbalance · up" : "Volume imbalance · down" }));
+    ovBoxes.set(boxes);
+    const EVM = { buy: ["belowBar", "arrowUp", "#2BD99F", "BUY"], sell: ["aboveBar", "arrowDown", "#FF5C7A", "SELL"], target1: ["aboveBar", "circle", "#2BD99F", "T1 ✓"], target2: ["aboveBar", "circle", "#2BD99F", "T2 ✓"], exit: ["aboveBar", "square", "#9AA0AA", "EXIT"], stopped: ["belowBar", "square", "#FF5C7A", "STOP"] };
+    const marks = draws.trade ? (d.markers || []).filter((m) => EVM[m.event]).map((m) => { const x = EVM[m.event]; return { time: m.t, position: x[0], shape: x[1], color: x[2], text: x[3] }; }).sort((a, b) => a.time - b.time) : [];
+    ovSeries.setMarkers(marks);
+    const t = d.trade;
+    if (draws.trade && t && t.open) { line(t.entry, "rgba(232,236,244,.8)", `Entry (${t.side === "buy" ? "bought" : "sold"})`, 2); line(t.stop, "#FF5C7A", "Get out here", 0, 2); line(t.t1, "rgba(43,217,159,.9)", "Target 1" + (t.t1_hit ? " ✓" : ""), 1); line(t.t2, "rgba(43,217,159,.9)", "Target 2", 1); }
+  }
   function secCharts() {
     if (!chartSym) chartSym = activeList()[0] || "SPY";
     loadClean(chartSym, chartTf); pollTvSignals(); loadTvSetup();
@@ -589,10 +659,11 @@
     return `<section class="chs">
       <div class="chs-bar"><div class="chs-chips">${chips}<form class="chs-find" data-ch-find><input name="t" placeholder="Any ticker" maxlength="12" aria-label="Ticker" autocomplete="off"><button type="submit">Go</button></form></div><div class="pz-seg chs-tf" role="group" aria-label="Timeframe">${tfs}</div></div>
       <div class="chs-grid">
-        <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">Loading the live TradingView chart…</div></div>
+        <div class="chs-left"><div class="pz-seg chs-mode" role="group" aria-label="Chart"><button type="button" class="${chartMode === "tv" ? "on" : ""}" data-ch-mode="tv">TradingView · live</button><button type="button" class="${chartMode === "ov" ? "on" : ""}" data-ch-mode="ov">OneView chart · with drawings</button></div>
+        <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">${chartMode === "ov" ? "Loading the OneView chart…" : "Loading the live TradingView chart…"}</div></div></div>
         <aside class="chs-panel" id="chs-panel" aria-live="polite">${chartsPanel()}</aside>
       </div>
-      <p class="chs-foot">Chart and prices: TradingView, live. Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
+      <p class="chs-foot">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names; the drawings are for the timeframe you picked." : "Chart and prices: TradingView, live. To draw levels and gaps, switch to the OneView chart or use a draw button."} Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
     </section>`;
   }
   const agoTxt = (ms) => { if (!ms) return ""; const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
@@ -627,7 +698,9 @@
         <div class="chp-url"><input readonly value="${esc(tvSetup.url)}" aria-label="Webhook URL"><button type="button" data-copy-url>Copy</button></div>
         <p class="muted">The address holds a secret key: keep it to yourself. ${tvSetup.last ? `Last alert: ${esc(tvSetup.last.ticker)} ${esc(tvSetup.last.signal)} · ${agoTxt(tsMs(tvSetup.last.at))}.` : "No alert received yet."}</p>`
         : `<p class="muted">The permanent address is not set up yet, so the webhook URL is not ready.</p>`}</details>`;
+    const drawBtns = `<div class="chp-draw"><span>Draw on the chart (${CH_TF_NAME[chartTf]})</span><div>${DRAWS.map(([dk, dl, dt]) => `<button type="button" class="${chartMode === "ov" && draws[dk] ? "on" : ""}" data-draw="${dk}" aria-pressed="${chartMode === "ov" && !!draws[dk]}" title="${esc(dt)}"><i class="dw-${dk}"></i>${dl}</button>`).join("")}</div></div>`;
     return `<div class="chp-h"><b>${esc(chartSym)}</b><span>${CH_TF_NAME[chartTf]}</span><em class="chp-src ${src}">${src === "tv" ? "TradingView alert" : "OneView data"}</em></div>
+      ${drawBtns}
       <div class="chp-todo ${todoCls}">${esc(todo)}</div>
       ${row("Trade", t ? `${dir > 0 ? "Bought" : "Sold"} at ${f(t.entry)} · ${agoTxt(t.opened)}` : "none yet")}
       ${row("Get out if price hits", t && t.open ? f(t.stop) + (t.t1_hit ? " (at entry: no loss)" : "") : "–", t && t.open ? "down" : "")}
@@ -647,6 +720,10 @@
   document.addEventListener("click", (e) => {
     const s = e.target.closest("[data-ch-sym]"); if (s) { chartSym = s.getAttribute("data-ch-sym"); renderAll(); return; }
     const tf = e.target.closest("[data-ch-tf]"); if (tf) { chartTf = tf.getAttribute("data-ch-tf"); renderAll(); return; }
+    const md = e.target.closest("[data-ch-mode]"); if (md) { chartMode = md.getAttribute("data-ch-mode"); saveDraws(); renderAll(); return; }
+    const dw = e.target.closest("[data-draw]"); if (dw) { const dk = dw.getAttribute("data-draw");
+      if (chartMode !== "ov") { chartMode = "ov"; draws[dk] = true; saveDraws(); renderAll(); return; }   // drawings live on the OneView chart
+      draws[dk] = !draws[dk]; saveDraws(); applyDraws(); refreshChartsPanel(); return; }
     const cp = e.target.closest("[data-copy-url]"); if (cp) { const inp = cp.parentElement.querySelector("input"); try { navigator.clipboard.writeText(inp.value); cp.textContent = "Copied"; } catch (er) { inp.select(); } }
   });
   document.addEventListener("submit", (e) => { const fm = e.target.closest("[data-ch-find]"); if (!fm) return; e.preventDefault(); const v = (fm.querySelector("input").value || "").trim().toUpperCase().replace(/[^A-Z0-9.^=-]/g, ""); if (v) { chartSym = v; renderAll(); } });

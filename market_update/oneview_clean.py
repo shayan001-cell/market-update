@@ -40,7 +40,20 @@ TF = {
 _cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
 
+_bar_cache: dict[tuple[str, str], tuple[float, pd.DataFrame | None]] = {}
+
+
 def _bars(sym: str, tf: str) -> pd.DataFrame | None:
+    """Bars for one symbol and timeframe, kept 2 minutes so the chart and the panel share one download."""
+    hit = _bar_cache.get((sym, tf))
+    if hit and time.time() - hit[0] < 120:
+        return hit[1]
+    f = _bars_fetch(sym, tf)
+    _bar_cache[(sym, tf)] = (time.time(), f)
+    return f
+
+
+def _bars_fetch(sym: str, tf: str) -> pd.DataFrame | None:
     interval, period, rule, _ = TF[tf]
     df = fetch.download([sym], period=period, interval=interval, auto_adjust=False, progress=False, threads=False)
     f = fetch.frame_for(df, sym) if df is not None and not df.empty else None
@@ -292,4 +305,118 @@ def evaluate(sym: str, tf: str = "60") -> dict[str, Any]:
         "events": events[-12:],
     }
     _cache[(sym, tf)] = (time.time(), out)
+    return out
+
+
+# ---------------------------------------------------------------- the OneView chart: candles and what to draw on them
+SHOW_BARS = 400
+
+
+def _chart_secs(index: pd.DatetimeIndex) -> list[int]:
+    """Bar times as the chart library wants them: seconds, shifted so the axis reads New York wall time."""
+    idx = index.tz_convert("America/New_York").tz_localize(None) if index.tz is not None else index
+    return [int(x) for x in (idx - pd.Timestamp("1970-01-01")) // pd.Timedelta("1s")]
+
+
+def chart_data(sym: str, tf: str = "60") -> dict[str, Any]:
+    sym, tf = sym.upper(), tf if tf in TF else "60"
+    f = _bars(sym, tf)
+    if f is None:
+        return {"status": "no_data", "symbol": sym, "tf": tf}
+    secs = _chart_secs(f.index)
+    iso_to_sec = {t.isoformat(): s for t, s in zip(f.index, secs)}
+    o, h, l, c, v = (f[k].to_numpy(float) for k in ("Open", "High", "Low", "Close", "Volume"))
+    n = len(c)
+    start = max(0, n - SHOW_BARS)
+    atr = _atr(h, l, c, 14)
+    px = float(c[-1])
+    r = lambda x: round(float(x), 4)  # noqa: E731
+
+    # key levels: yesterday and last week (intraday), last week and last month (daily and up)
+    levels: list[dict[str, Any]] = []
+    if tf in ("15", "60", "240"):
+        day = pd.Index(f.index.tz_convert("America/New_York").normalize() if f.index.tz is not None else f.index.normalize())
+        dd = f.groupby(day).agg({"High": "max", "Low": "min", "Close": "last"})
+        if len(dd) >= 2:
+            levels += [{"price": r(dd["High"].iloc[-2]), "name": "Yesterday's high"}, {"price": r(dd["Low"].iloc[-2]), "name": "Yesterday's low"},
+                       {"price": r(dd["Close"].iloc[-2]), "name": "Yesterday's close"}]
+        wk = f.groupby(day.to_period("W")).agg({"High": "max", "Low": "min"}) if len(day) else None
+        if wk is not None and len(wk) >= 2:
+            levels += [{"price": r(wk["High"].iloc[-2]), "name": "Last week's high"}, {"price": r(wk["Low"].iloc[-2]), "name": "Last week's low"}]
+    else:
+        per = f.index.to_period("M") if tf == "D" else f.index.to_period("Y")
+        mm = f.groupby(per).agg({"High": "max", "Low": "min"})
+        if len(mm) >= 2:
+            lab = "month" if tf == "D" else "year"
+            levels += [{"price": r(mm["High"].iloc[-2]), "name": f"Last {lab}'s high"}, {"price": r(mm["Low"].iloc[-2]), "name": f"Last {lab}'s low"}]
+
+    # fair value gaps: a three-candle gap, kept until price trades back through it
+    fvg: list[dict[str, Any]] = []
+    for i in range(max(2, start - 200), n):
+        a = atr[i] if not np.isnan(atr[i]) else 0
+        if l[i] > h[i - 2] and (l[i] - h[i - 2]) >= a * 0.1 and c[i - 1] > h[i - 2]:
+            fvg.append({"dir": "up", "top": l[i], "bottom": h[i - 2], "from": i - 2})
+        if h[i] < l[i - 2] and (l[i - 2] - h[i]) >= a * 0.1 and c[i - 1] < l[i - 2]:
+            fvg.append({"dir": "down", "top": l[i - 2], "bottom": h[i], "from": i - 2})
+    fvg = _unfilled(fvg, h, l, n)
+
+    # volume imbalances: two candles whose wicks overlap but whose bodies leave a gap
+    vi: list[dict[str, Any]] = []
+    for i in range(max(1, start - 200), n):
+        b_lo, b_hi = min(o[i], c[i]), max(o[i], c[i])
+        p_lo, p_hi = min(o[i - 1], c[i - 1]), max(o[i - 1], c[i - 1])
+        if b_lo > p_hi and l[i] <= h[i - 1] and c[i] > o[i]:
+            vi.append({"dir": "up", "top": b_lo, "bottom": p_hi, "from": i - 1})
+        if b_hi < p_lo and h[i] >= l[i - 1] and c[i] < o[i]:
+            vi.append({"dir": "down", "top": p_lo, "bottom": b_hi, "from": i - 1})
+    vi = _unfilled(vi, h, l, n)
+
+    # support and resistance on this timeframe: swing points that price turned at more than once
+    piv: list[float] = []
+    ph, pl = _pivots(h, 5, True), _pivots(l, 5, False)
+    for i in range(start, n):
+        if not np.isnan(ph[i]):
+            piv.append(float(ph[i]))
+        if not np.isnan(pl[i]):
+            piv.append(float(pl[i]))
+    tol = float(np.nanmean(atr[start:])) * 0.35 if n > start else 0
+    clusters: list[list[float]] = []
+    for p in sorted(piv):
+        if clusters and p - clusters[-1][-1] <= tol:
+            clusters[-1].append(p)
+        else:
+            clusters.append([p])
+    zones = [{"price": r(np.mean(cl)), "touches": len(cl)} for cl in clusters if len(cl) >= 2]
+    res = sorted([z for z in zones if z["price"] > px], key=lambda z: z["price"])[:3]
+    sup = sorted([z for z in zones if z["price"] < px], key=lambda z: -z["price"])[:3]
+
+    ev = evaluate(sym, tf)
+    markers = [{"t": iso_to_sec.get(e["at"]), "event": e["event"], "price": e["price"]} for e in (ev.get("events") or []) if iso_to_sec.get(e["at"]) is not None]
+    box = lambda b, kind: {"dir": b["dir"], "top": r(b["top"]), "bottom": r(b["bottom"]), "from": secs[max(b["from"], start)], "kind": kind}  # noqa: E731
+    return {
+        "status": "ok", "symbol": sym, "tf": tf, "price": r(px),
+        "bars": [{"t": secs[i], "o": r(o[i]), "h": r(h[i]), "l": r(l[i]), "c": r(c[i]), "v": float(v[i]) if not np.isnan(v[i]) else 0.0} for i in range(start, n)],
+        "levels": levels, "fvg": [box(b, "fvg") for b in fvg[-8:]], "vi": [box(b, "vi") for b in vi[-8:]],
+        "resistance": res, "support": sup, "markers": markers, "trade": ev.get("trade"),
+    }
+
+
+def _unfilled(gaps: list[dict[str, Any]], h: np.ndarray, l: np.ndarray, n: int) -> list[dict[str, Any]]:
+    """Keep gaps that price has not traded all the way through since they formed; shrink the part already filled."""
+    out = []
+    for g in gaps:
+        top, bot, alive = g["top"], g["bottom"], True
+        for j in range(g["from"] + 3, n):
+            if g["dir"] == "up":
+                if l[j] <= bot:
+                    alive = False
+                    break
+                top = min(top, l[j])
+            else:
+                if h[j] >= top:
+                    alive = False
+                    break
+                bot = max(bot, h[j])
+        if alive and top > bot:
+            out.append({**g, "top": top, "bottom": bot})
     return out

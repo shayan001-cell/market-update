@@ -2462,6 +2462,22 @@ async def api_oneview_clean(sym: str, request: Request, tf: str = "60") -> JSONR
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/oneview-chart/{sym}")
+async def api_oneview_chart(sym: str, request: Request, tf: str = "60") -> JSONResponse:
+    """Candles plus what the Charts page can draw on them: key levels, fair value gaps, volume imbalances,
+    support and resistance, and the OneView Clean signals and trade."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    from . import oneview_clean
+    sym = re.sub(r"[^A-Z0-9.^=-]", "", sym.upper())[:12]
+    try:
+        out = await asyncio.to_thread(oneview_clean.chart_data, sym, tf)
+    except Exception as e:  # noqa: BLE001
+        log.warning("oneview chart %s %s: %s", sym, tf, e)
+        return JSONResponse({"status": "error", "symbol": sym}, status_code=502)
+    return JSONResponse(out, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/stocktwits/status")
 async def st_status(request: Request) -> dict[str, Any]:
     _require_admin(request)
