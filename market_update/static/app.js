@@ -548,7 +548,8 @@
   const DRAWS = [["levels", "Key levels", "Yesterday's and last week's highs and lows"], ["sr", "Support & resistance", "Prices this timeframe turned at more than once"], ["fvg", "Fair value gaps", "Three-candle gaps price has not filled yet"], ["vi", "Volume imbalances", "Gaps between candle bodies not yet filled"], ["trade", "Signals & trade", "BUY/SELL marks, entry, stop and targets"]];
   let draws = { levels: true, sr: true, fvg: true, vi: false, trade: true }; try { draws = { ...draws, ...JSON.parse(localStorage.getItem("mu-ch-draws") || "{}") }; } catch (e) {}
   const saveDraws = () => { try { localStorage.setItem("mu-ch-draws", JSON.stringify(draws)); localStorage.setItem("mu-ch-mode", chartMode); } catch (e) {} };
-  const chartKey = () => `${chartSym}|${chartTf}|${chartMode}`;
+  const chartKey = () => `${chartSym}|${chartTf}|${chartMode}`;     // what the left side shows
+  const dataKey = () => `${chartSym}|${chartTf}`;                    // what the panel's signals are for
   const tvSymbol = (s) => s === "^GSPC" ? "SP:SPX" : s === "^NDX" ? "NASDAQ:NDX" : s === "^VIX" ? "CBOE:VIX" : s === "^DJI" ? "DJ:DJI" : /-USD$/.test(s) ? "COINBASE:" + s.replace("-", "") : s.replace(/^\^/, "");
   async function loadClean(sym, tf, force) {
     const k = `${sym}|${tf}`; if (cleanBusy.has(k) || STATIC_MODE) return;
@@ -558,7 +559,7 @@
     try { const res = await api(`/api/oneview-clean/${encodeURIComponent(sym)}?tf=${tf}`, { cache: "no-store" }); const j = res.ok ? await res.json() : { status: "error" };
       cleanCache[k] = { at: j.status === "ok" || j.status === "no_data" ? Date.now() : soon, data: j }; }
     catch (e) { cleanCache[k] = { at: soon, data: { status: "error" } }; }
-    cleanBusy.delete(k); if (currentView === "charts" && chartKey() === k) refreshChartsPanel();
+    cleanBusy.delete(k); if (currentView === "charts" && dataKey() === k) refreshChartsPanel();
   }
   async function pollTvSignals() {
     if (STATIC_MODE || currentView !== "charts") return;
@@ -576,7 +577,7 @@
     el.dataset.mounted = chartKey();
     const make = () => { if (!$("#tvw")) return; el.innerHTML = '<div id="tvw-in" style="height:100%;width:100%"></div>';
       try { new window.TradingView.widget({ container_id: "tvw-in", symbol: tvSymbol(chartSym), interval: chartTf, timezone: "America/New_York", theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
-        style: "1", locale: "en", autosize: true, allow_symbol_change: false, withdateranges: true, hide_side_toolbar: false, save_image: false, details: false, calendar: false }); }
+        style: "1", locale: "en", autosize: true, allow_symbol_change: false, withdateranges: true, hide_side_toolbar: false, hide_top_toolbar: true, save_image: false, details: false, calendar: false }); }
       catch (e) { el.innerHTML = '<div class="cr-loading">The TradingView chart could not load here.</div>'; } };
     if (window.TradingView && window.TradingView.widget) { make(); return; }
     let sc = document.getElementById("tvjs");
@@ -663,13 +664,13 @@
         <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">${chartMode === "ov" ? "Loading the OneView chart…" : "Loading the live TradingView chart…"}</div></div></div>
         <aside class="chs-panel" id="chs-panel" aria-live="polite">${chartsPanel()}</aside>
       </div>
-      <p class="chs-foot">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names; the drawings are for the timeframe you picked." : "Chart and prices: TradingView, live. To draw levels and gaps, switch to the OneView chart or use a draw button."} Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
+      <p class="chs-foot">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names; the drawings are for the timeframe you picked." : "Chart and prices: TradingView, live. Change the name and timeframe with the buttons above so the chart and the signals move together. To draw levels and gaps, use a draw button."} Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
     </section>`;
   }
   const agoTxt = (ms) => { if (!ms) return ""; const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
   const tsMs = (x) => (x == null ? null : typeof x === "number" ? (x < 1e12 ? x * 1000 : x) : Date.parse(x));
   function chartsPanel() {
-    const k = chartKey(); const bk = cleanCache[k]; const d = bk && bk.data && bk.data.status === "ok" ? bk.data : null;
+    const k = dataKey(); const bk = cleanCache[k]; const d = bk && bk.data && bk.data.status === "ok" ? bk.data : null;
     const tvName = chartSym.replace(/^\^/, "").replace("-USD", "USD");
     const tvT = tvSig && (tvSig.trades || []).find((t) => t.ticker === tvName && String(t.tf) === chartTf);
     const src = tvT ? "tv" : "ov";
