@@ -664,7 +664,7 @@
         <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">${chartMode === "ov" ? "Loading the OneView chart…" : "Loading the live TradingView chart…"}</div></div></div>
         <aside class="chs-panel" id="chs-panel" aria-live="polite">${chartsPanel()}</aside>
       </div>
-      <p class="chs-foot">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names; the drawings are for the timeframe you picked." : "Chart and prices: TradingView, live. Change the name and timeframe with the buttons above so the chart and the signals move together. To draw levels and gaps, use a draw button."} Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
+      <p class="chs-foot">${chartMode === "ov" ? "OneView chart: Yahoo prices, up to 15 minutes delayed on some names; the drawings are for the timeframe you picked." : "Chart and prices: TradingView, live. Change the name and timeframe with the buttons above so the chart and the signals move together. Levels, gaps and support/resistance are drawn on the OneView chart."} Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
     </section>`;
   }
   const agoTxt = (ms) => { if (!ms) return ""; const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
@@ -699,7 +699,7 @@
         <div class="chp-url"><input readonly value="${esc(tvSetup.url)}" aria-label="Webhook URL"><button type="button" data-copy-url>Copy</button></div>
         <p class="muted">The address holds a secret key: keep it to yourself. ${tvSetup.last ? `Last alert: ${esc(tvSetup.last.ticker)} ${esc(tvSetup.last.signal)} · ${agoTxt(tsMs(tvSetup.last.at))}.` : "No alert received yet."}</p>`
         : `<p class="muted">The permanent address is not set up yet, so the webhook URL is not ready.</p>`}</details>`;
-    const drawBtns = `<div class="chp-draw"><span>Draw on the chart (${CH_TF_NAME[chartTf]})</span><div>${DRAWS.map(([dk, dl, dt]) => `<button type="button" class="${chartMode === "ov" && draws[dk] ? "on" : ""}" data-draw="${dk}" aria-pressed="${chartMode === "ov" && !!draws[dk]}" title="${esc(dt)}"><i class="dw-${dk}"></i>${dl}</button>`).join("")}</div></div>`;
+    const drawBtns = chartMode !== "ov" ? "" : `<div class="chp-draw"><span>Draw on the chart (${CH_TF_NAME[chartTf]})</span><div>${DRAWS.map(([dk, dl, dt]) => `<button type="button" class="${draws[dk] ? "on" : ""}" data-draw="${dk}" aria-pressed="${!!draws[dk]}" title="${esc(dt)}"><i class="dw-${dk}"></i>${dl}</button>`).join("")}</div></div>`;
     return `<div class="chp-h"><b>${esc(chartSym)}</b><span>${CH_TF_NAME[chartTf]}</span><em class="chp-src ${src}">${src === "tv" ? "TradingView alert" : "OneView data"}</em></div>
       ${drawBtns}
       <div class="chp-todo ${todoCls}">${esc(todo)}</div>
@@ -722,8 +722,7 @@
     const s = e.target.closest("[data-ch-sym]"); if (s) { chartSym = s.getAttribute("data-ch-sym"); renderAll(); return; }
     const tf = e.target.closest("[data-ch-tf]"); if (tf) { chartTf = tf.getAttribute("data-ch-tf"); renderAll(); return; }
     const md = e.target.closest("[data-ch-mode]"); if (md) { chartMode = md.getAttribute("data-ch-mode"); saveDraws(); renderAll(); return; }
-    const dw = e.target.closest("[data-draw]"); if (dw) { const dk = dw.getAttribute("data-draw");
-      if (chartMode !== "ov") { chartMode = "ov"; draws[dk] = true; saveDraws(); renderAll(); return; }   // drawings live on the OneView chart
+    const dw = e.target.closest("[data-draw]"); if (dw && chartMode === "ov") { const dk = dw.getAttribute("data-draw");   // drawings belong to the OneView chart only
       draws[dk] = !draws[dk]; saveDraws(); applyDraws(); refreshChartsPanel(); return; }
     const cp = e.target.closest("[data-copy-url]"); if (cp) { const inp = cp.parentElement.querySelector("input"); try { navigator.clipboard.writeText(inp.value); cp.textContent = "Copied"; } catch (er) { inp.select(); } }
   });
