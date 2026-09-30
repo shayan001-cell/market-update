@@ -2333,6 +2333,135 @@ async def api_crowd_sym(sym: str, request: Request, fresh: int = 0) -> JSONRespo
     return JSONResponse({"status": "ok", **hit}, headers={"Cache-Control": "no-store"})
 
 
+# ---------------------------------------------------------------- TradingView: OneView Clean alerts and the Charts page
+# TradingView runs pine/oneview_clean.pine on its own live data and posts each BUY, SELL, T1, T2, EXIT and STOP here
+# (an alert on "Any alert() function call" with this webhook URL). TradingView does not sign webhooks, so the URL
+# carries a secret key; the calls are also logged with their network address and checked against TradingView's
+# published webhook addresses (a mismatch is logged, and refused when MU_TV_STRICT_IP=1).
+TV_SIGNALS_PATH = DATA_DIR / "tv_signals.json"
+TV_KEY_PATH = DATA_DIR / "tv_webhook.key"
+TV_BASE_PATH = DATA_DIR / "tv_webhook_base.txt"
+TV_IPS = {"52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7"}
+TV_EVENTS = {"buy", "sell", "target1", "target2", "exit", "stopped"}
+_tv_lock = asyncio.Lock()
+
+
+def _tv_key() -> str:
+    env = os.environ.get("MU_TV_WEBHOOK_KEY", "").strip()
+    if env:
+        return env
+    if TV_KEY_PATH.exists():
+        return TV_KEY_PATH.read_text().strip()
+    import secrets as _s
+    k = _s.token_urlsafe(24)
+    TV_KEY_PATH.write_text(k)
+    os.chmod(TV_KEY_PATH, 0o600)
+    return k
+
+
+def _tv_load() -> dict[str, Any]:
+    try:
+        return json.loads(TV_SIGNALS_PATH.read_text())
+    except Exception:  # noqa: BLE001
+        return {"trades": {}, "events": [], "received": 0, "rejected": 0}
+
+
+def _tv_apply(st: dict[str, Any], ev: dict[str, Any]) -> None:
+    """One alert -> the trade it belongs to. Same rules as the Pine script: T1 moves the stop to entry."""
+    key = f"{ev['ticker']}|{ev['tf']}"
+    t = st["trades"].get(key)
+    kind = ev["signal"]
+    now = ev["at"]
+    if kind in ("buy", "sell"):
+        st["trades"][key] = {"ticker": ev["ticker"], "tf": ev["tf"], "side": kind, "entry": ev.get("price"), "stop": ev.get("stop"),
+                             "t1": ev.get("t1"), "t2": ev.get("t2"), "t1_hit": False, "open": True, "result": "", "score": ev.get("score"),
+                             "opened_at": now, "updated_at": now, "last_price": ev.get("price"), "exit": None}
+        return
+    if not t:
+        return
+    t["updated_at"], t["last_price"] = now, ev.get("price")
+    if kind == "target1":
+        t["t1_hit"], t["stop"] = True, t.get("entry")
+    elif kind == "target2":
+        t.update(open=False, result="Target 2 reached, trade done", exit=t.get("t2"))
+    elif kind == "stopped":
+        t.update(open=False, result="Stopped out", exit=t.get("stop"))
+    elif kind == "exit":
+        t.update(open=False, result="Closed at entry after target 1" if t.get("t1_hit") else "Exited: the trend turned", exit=ev.get("price"))
+
+
+@app.post("/api/tv/webhook")
+async def tv_webhook(request: Request, key: str = "") -> JSONResponse:
+    import secrets as _s
+    ip = _client_ip(request)
+    if not key or not _s.compare_digest(key, _tv_key()):
+        log.warning("tv webhook: bad key from %s", ip)
+        raise HTTPException(status_code=403, detail="bad key")
+    if ip not in TV_IPS:
+        log.warning("tv webhook from %s, not a TradingView webhook address", ip)
+        if os.environ.get("MU_TV_STRICT_IP", "0") in ("1", "true", "yes"):
+            raise HTTPException(status_code=403, detail="not a TradingView address")
+    raw = (await request.body())[:4000]
+    try:
+        p = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="the alert message must be the JSON the OneView script sends")
+    if not isinstance(p, dict):
+        raise HTTPException(status_code=400, detail="the alert message must be the JSON the OneView script sends")
+    sig = str(p.get("signal", "")).lower()
+    ticker = re.sub(r"[^A-Z0-9.!:_-]", "", str(p.get("ticker", "")).upper())[:24]
+    if sig not in TV_EVENTS or not ticker:
+        raise HTTPException(status_code=400, detail="unknown signal")
+    num = lambda k: float(p[k]) if isinstance(p.get(k), (int, float)) or (isinstance(p.get(k), str) and re.fullmatch(r"-?\d+(\.\d+)?", p.get(k) or "")) else None  # noqa: E731
+    ev = {"at": time.time(), "ticker": ticker, "tf": str(p.get("tf", ""))[:8], "signal": sig, "price": num("price"), "stop": num("stop"),
+          "t1": num("t1"), "t2": num("t2"), "score": int(p["score"]) if isinstance(p.get("score"), (int, float)) else None, "ip": ip}
+    async with _tv_lock:
+        st = _tv_load()
+        st["events"] = (st.get("events") or [])[-499:] + [ev]
+        st["received"] = int(st.get("received") or 0) + 1
+        _tv_apply(st, ev)
+        TV_SIGNALS_PATH.write_text(json.dumps(st))
+    log.info("tv webhook: %s %s %s at %s", ticker, ev["tf"], sig, ev["price"])
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/tv/signals")
+async def tv_signals(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    st = _tv_load()
+    trades = sorted(st.get("trades", {}).values(), key=lambda t: t.get("updated_at") or 0, reverse=True)
+    ev = [{k: v for k, v in e.items() if k != "ip"} for e in (st.get("events") or [])[-60:]][::-1]
+    return JSONResponse({"trades": trades, "events": ev, "received": st.get("received", 0)}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/tv/setup")
+async def tv_setup(request: Request) -> JSONResponse:
+    """Admin only: the webhook URL to paste into TradingView alerts (it holds the secret key)."""
+    _require_admin(request)
+    base = TV_BASE_PATH.read_text().strip() if TV_BASE_PATH.exists() else os.environ.get("MU_WEBHOOK_BASE", "").strip()
+    st = _tv_load()
+    last = (st.get("events") or [None])[-1]
+    return JSONResponse({"url": f"{base.rstrip('/')}/api/tv/webhook?key={_tv_key()}" if base else None, "base": base or None,
+                         "received": st.get("received", 0), "last": {k: v for k, v in last.items() if k != "ip"} if last else None},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/oneview-clean/{sym}")
+async def api_oneview_clean(sym: str, request: Request, tf: str = "60") -> JSONResponse:
+    """OneView Clean on OneView's own data, for names without a TradingView alert."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    from . import oneview_clean
+    sym = re.sub(r"[^A-Z0-9.^=-]", "", sym.upper())[:12]
+    try:
+        out = await asyncio.to_thread(oneview_clean.evaluate, sym, tf)
+    except Exception as e:  # noqa: BLE001
+        log.warning("oneview clean %s %s: %s", sym, tf, e)
+        return JSONResponse({"status": "error", "symbol": sym}, status_code=502)
+    return JSONResponse(out, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/stocktwits/status")
 async def st_status(request: Request) -> dict[str, Any]:
     _require_admin(request)

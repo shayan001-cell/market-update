@@ -36,8 +36,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["charts", "Charts", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", charts: "Live · Charts", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -59,6 +59,7 @@
     stock: '<svg viewBox="0 0 24 24"><path d="M7 4v16M7 8h-2.5v7H7M12 3v18M12 6h-2.5v9H12M17 5v14M17 9h-2.5v6H17"/><path d="M7 8h2.5v7H7M12 6h2.5v9H12M17 9h2.5v6H17"/></svg>',
     map: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.6 7.2 9.6 10M17.4 7.2 14.4 10M6.6 16.8 9.6 14M17.4 16.8 14.4 14"/></svg>',
     live: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>',
+    charts: '<svg viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15v-4M12 15V7M16 15v-6"/><path d="M7 11h2M11 7h2M15 9h2"/></svg>',
     liveview: '<svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>',
     theme: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
     smart: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.2c0-1.4-1.3-2.2-3-2.2s-3 .8-3 2.1c0 2.9 6 1.6 6 4.6 0 1.4-1.4 2.3-3 2.3s-3-.9-3-2.3"/></svg>',
@@ -535,6 +536,121 @@
       <div class="pfoot">${whoHtml(s) ? `<div class="pwho">${whoHtml(s)}</div>` : ""}<div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
   }
+  // ======================= CHARTS: the live TradingView chart with the OneView Clean panel =======================
+  // The chart is TradingView's own widget (its live data). The panel is OneView Clean: from the TradingView alert when
+  // one is set up for this name and timeframe (the same script, on TradingView's data), otherwise from OneView's own
+  // data (the same logic on Yahoo bars). The panel says which.
+  let chartSym = null, chartTf = "60", tvSig = null, tvSetup = null;
+  const cleanCache = {}, cleanBusy = new Set();
+  const CH_TFS = [["15", "15m"], ["60", "1H"], ["240", "4H"], ["D", "Day"]];
+  const CH_TF_NAME = { "15": "15m", "60": "1H", "240": "4H", D: "Day" };
+  const chartKey = () => `${chartSym}|${chartTf}`;
+  const tvSymbol = (s) => s === "^GSPC" ? "SP:SPX" : s === "^NDX" ? "NASDAQ:NDX" : s === "^VIX" ? "CBOE:VIX" : s === "^DJI" ? "DJ:DJI" : /-USD$/.test(s) ? "COINBASE:" + s.replace("-", "") : s.replace(/^\^/, "");
+  async function loadClean(sym, tf, force) {
+    const k = `${sym}|${tf}`; if (cleanBusy.has(k) || STATIC_MODE) return;
+    const have = cleanCache[k]; if (have && !force && Date.now() - have.at < 300000) return;
+    cleanBusy.add(k);
+    const soon = Date.now() - 280000;             // a failed read (signed out, server busy) is retried in about 20 seconds
+    try { const res = await api(`/api/oneview-clean/${encodeURIComponent(sym)}?tf=${tf}`, { cache: "no-store" }); const j = res.ok ? await res.json() : { status: "error" };
+      cleanCache[k] = { at: j.status === "ok" || j.status === "no_data" ? Date.now() : soon, data: j }; }
+    catch (e) { cleanCache[k] = { at: soon, data: { status: "error" } }; }
+    cleanBusy.delete(k); if (currentView === "charts" && chartKey() === k) refreshChartsPanel();
+  }
+  async function pollTvSignals() {
+    if (STATIC_MODE || currentView !== "charts") return;
+    try { const res = await api("/api/tv/signals", { cache: "no-store" }); if (res.ok) { tvSig = await res.json(); refreshChartsPanel(); } } catch (e) {}
+  }
+  async function loadTvSetup() {
+    if (STATIC_MODE || !(user && user.role === "admin") || tvSetup) return;
+    try { const res = await api("/api/tv/setup", { cache: "no-store" }); if (res.ok) { tvSetup = await res.json(); refreshChartsPanel(); } } catch (e) {}
+  }
+  setInterval(() => { if (currentView === "charts") { pollTvSignals(); loadClean(chartSym, chartTf); } }, 30000);
+  function refreshChartsPanel() { const el = $("#chs-panel"); if (el) el.innerHTML = chartsPanel(); }
+  function mountTv() {
+    const el = $("#tvw"); if (!el || el.dataset.mounted === chartKey()) return;
+    el.dataset.mounted = chartKey();
+    const make = () => { if (!$("#tvw")) return; el.innerHTML = '<div id="tvw-in" style="height:100%;width:100%"></div>';
+      try { new window.TradingView.widget({ container_id: "tvw-in", symbol: tvSymbol(chartSym), interval: chartTf, timezone: "America/New_York", theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
+        style: "1", locale: "en", autosize: true, allow_symbol_change: false, withdateranges: true, hide_side_toolbar: false, save_image: false, details: false, calendar: false }); }
+      catch (e) { el.innerHTML = '<div class="cr-loading">The TradingView chart could not load here.</div>'; } };
+    if (window.TradingView && window.TradingView.widget) { make(); return; }
+    let sc = document.getElementById("tvjs");
+    if (!sc) { sc = document.createElement("script"); sc.id = "tvjs"; sc.src = "https://s3.tradingview.com/tv.js"; sc.async = true; document.head.appendChild(sc); }
+    sc.addEventListener("load", make, { once: true });
+    sc.addEventListener("error", () => { el.innerHTML = '<div class="cr-loading">The TradingView chart could not load (blocked or offline).</div>'; }, { once: true });
+  }
+  function secCharts() {
+    if (!chartSym) chartSym = activeList()[0] || "SPY";
+    loadClean(chartSym, chartTf); pollTvSignals(); loadTvSetup();
+    const names = [...new Set(["SPY", "QQQ", ...activeList()])].slice(0, 16);
+    if (!names.includes(chartSym)) names.unshift(chartSym);
+    const chips = names.map((t) => `<button type="button" class="chs-chip ${t === chartSym ? "on" : ""}" data-ch-sym="${esc(t)}">${esc(t)}</button>`).join("");
+    const tfs = CH_TFS.map(([k, l]) => `<button type="button" class="${k === chartTf ? "on" : ""}" data-ch-tf="${k}" aria-pressed="${k === chartTf}">${l}</button>`).join("");
+    return `<section class="chs">
+      <div class="chs-bar"><div class="chs-chips">${chips}<form class="chs-find" data-ch-find><input name="t" placeholder="Any ticker" maxlength="12" aria-label="Ticker" autocomplete="off"><button type="submit">Go</button></form></div><div class="pz-seg chs-tf" role="group" aria-label="Timeframe">${tfs}</div></div>
+      <div class="chs-grid">
+        <div class="chs-chart" id="tvw" data-key="${esc(chartKey())}"><div class="cr-loading">Loading the live TradingView chart…</div></div>
+        <aside class="chs-panel" id="chs-panel" aria-live="polite">${chartsPanel()}</aside>
+      </div>
+      <p class="chs-foot">Chart and prices: TradingView, live. Signals: OneView Clean. They come from a TradingView alert when one is set up for this name, otherwise from OneView's own data. Information, not advice.</p>
+    </section>`;
+  }
+  const agoTxt = (ms) => { if (!ms) return ""; const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  const tsMs = (x) => (x == null ? null : typeof x === "number" ? (x < 1e12 ? x * 1000 : x) : Date.parse(x));
+  function chartsPanel() {
+    const k = chartKey(); const bk = cleanCache[k]; const d = bk && bk.data && bk.data.status === "ok" ? bk.data : null;
+    const tvName = chartSym.replace(/^\^/, "").replace("-USD", "USD");
+    const tvT = tvSig && (tvSig.trades || []).find((t) => t.ticker === tvName && String(t.tf) === chartTf);
+    const src = tvT ? "tv" : "ov";
+    const t = tvT ? { side: tvT.side, entry: tvT.entry, stop: tvT.stop, t1: tvT.t1, t2: tvT.t2, t1_hit: tvT.t1_hit, open: tvT.open, result: tvT.result, score: tvT.score, opened: tsMs(tvT.opened_at), closed: tvT.open ? null : tsMs(tvT.updated_at), exit: tvT.exit }
+      : d && d.trade ? { ...d.trade, opened: tsMs(d.trade.opened_at), closed: tsMs(d.trade.closed_at) } : null;
+    const q = qp(chartSym, stockFor(chartSym) || idxOf(report, chartSym) || {}); const px = isNum(q.last) ? q.last : d ? d.price : null;
+    const dir = t ? (t.side === "buy" ? 1 : -1) : 0;
+    const pnl = t && isNum(t.entry) ? (((t.open ? px : (isNum(t.exit) ? t.exit : px)) - t.entry) / t.entry) * 100 * dir : null;
+    const recent = t && !t.open && t.closed && Date.now() - t.closed < 4 * 3600000;
+    const todo = t && t.open ? (t.t1_hit ? "HOLD · target 1 hit, stop moved to entry" : dir > 0 ? "HOLD the buy" : "HOLD the sell") : recent ? String(t.result || "Trade closed").toUpperCase() : "WAIT · no trade right now";
+    const todoCls = t && t.open ? (dir > 0 ? "up" : "down") : recent && /Stopped/.test(t.result) ? "down" : "flat";
+    const f = (x) => (isNum(x) ? fnum(x, x < 10 ? 3 : 2) : "–");
+    const row = (kk, v, c) => `<div class="chp-r"><span>${kk}</span><b class="${c || ""}">${v}</b></div>`;
+    const up = d ? d.bias >= 0 : true; const ck = d && d.checks ? d.checks[up ? "buy" : "sell"] : null;
+    const bw = !d ? "Reading…" : d.bias >= 3 ? "Buyers in control" : d.bias >= 1 ? "Leaning up" : d.bias <= -3 ? "Sellers in control" : d.bias <= -1 ? "Leaning down" : "No clear side";
+    const evs = (tvT ? (tvSig.events || []).filter((e) => e.ticker === tvName && String(e.tf) === chartTf).slice(0, 5).map((e) => ({ ev: e.signal, px: e.price, at: tsMs(e.at) }))
+      : d ? (d.events || []).slice(-5).reverse().map((e) => ({ ev: e.event, px: e.price, at: tsMs(e.at) })) : []);
+    const EVN = { buy: ["BUY", "up"], sell: ["SELL", "down"], target1: ["T1 ✓", "up"], target2: ["T2 ✓ done", "up"], exit: ["EXIT", "flat"], stopped: ["STOP", "down"] };
+    const admin = user && user.role === "admin";
+    const setup = !admin ? "" : `<details class="chp-setup"${tvSig && tvSig.received ? "" : " open"}><summary>Connect TradingView alerts${tvSig && tvSig.received ? ` · ${tvSig.received} received` : ""}</summary>
+      ${tvSetup && tvSetup.url ? `<ol>
+        <li>On TradingView, open this name's chart with <b>OneView Clean</b> on it, on the timeframe you want.</li>
+        <li>Click <b>Alert</b> (the clock icon). Condition: <b>OneView Clean</b> → <b>Any alert() function call</b>.</li>
+        <li>Notifications tab: tick <b>Webhook URL</b> and paste the address below. Name it, then Create.</li>
+        <li>Repeat per name and timeframe (your plan allows 100 alerts).</li></ol>
+        <div class="chp-url"><input readonly value="${esc(tvSetup.url)}" aria-label="Webhook URL"><button type="button" data-copy-url>Copy</button></div>
+        <p class="muted">The address holds a secret key: keep it to yourself. ${tvSetup.last ? `Last alert: ${esc(tvSetup.last.ticker)} ${esc(tvSetup.last.signal)} · ${agoTxt(tsMs(tvSetup.last.at))}.` : "No alert received yet."}</p>`
+        : `<p class="muted">The permanent address is not set up yet, so the webhook URL is not ready.</p>`}</details>`;
+    return `<div class="chp-h"><b>${esc(chartSym)}</b><span>${CH_TF_NAME[chartTf]}</span><em class="chp-src ${src}">${src === "tv" ? "TradingView alert" : "OneView data"}</em></div>
+      <div class="chp-todo ${todoCls}">${esc(todo)}</div>
+      ${row("Trade", t ? `${dir > 0 ? "Bought" : "Sold"} at ${f(t.entry)} · ${agoTxt(t.opened)}` : "none yet")}
+      ${row("Get out if price hits", t && t.open ? f(t.stop) + (t.t1_hit ? " (at entry: no loss)" : "") : "–", t && t.open ? "down" : "")}
+      ${row("Targets", t ? `1st ${f(t.t1)}${t.t1_hit ? " ✓" : ""} · 2nd ${f(t.t2)}${/Target 2/.test(t.result || "") ? " ✓" : ""}` : "–", "up")}
+      ${row(t && t.open ? "Profit / loss" : "Last trade", isNum(pnl) ? `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%${t.open ? " so far" : " · " + esc(t.result || "")}` : "–", isNum(pnl) ? (pnl >= 0 ? "up" : "down") : "")}
+      <div class="chp-sep"></div>
+      ${row("Market", d ? `${bw} · ${Math.max(d.score_buy, d.score_sell)} of 5 agree` : "Reading…", d ? (d.bias > 0 ? "up" : d.bias < 0 ? "down" : "") : "")}
+      ${d && d.htf_up != null ? row("Bigger trend", d.htf_up ? "▲ up" : "▼ down", d.htf_up ? "up" : "down") : ""}
+      ${ck ? `<div class="chp-checks"><span>Checks ${up ? "for a buy" : "for a sell"}</span>${Object.entries(ck).map(([n, ok]) => `<i class="${ok ? "ok" : "no"}">${ok ? "✓" : "✗"} ${esc(n)}</i>`).join("")}</div>` : ""}
+      ${d && d.ceiling ? row("Ceiling above", `${f(d.ceiling.price)} · ${esc(d.ceiling.name)}`, "down") : ""}
+      ${d && d.floor ? row("Floor below", `${f(d.floor.price)} · ${esc(d.floor.name)}`, "up") : ""}
+      ${d && isNum(d.location_pct) ? row("Price is", `${d.location_pct > 70 ? "expensive" : d.location_pct < 30 ? "cheap" : "in the middle"} (${Math.round(d.location_pct)}% of the range)`) : ""}
+      ${evs.length ? `<div class="chp-sep"></div><div class="chp-ev"><span>Recent signals</span>${evs.map((e) => `<div><b class="${(EVN[e.ev] || ["", ""])[1]}">${(EVN[e.ev] || [e.ev])[0]}</b><em>${f(e.px)}</em><i>${agoTxt(e.at)}</i></div>`).join("")}</div>` : ""}
+      ${!d && bk && bk.data && bk.data.status === "no_data" ? `<p class="muted">OneView has no ${CH_TF_NAME[chartTf]} data for ${esc(chartSym)}.</p>` : !d && bk && bk.data && bk.data.status !== "ok" ? `<p class="muted">Could not read the signals just now; trying again shortly.</p>` : ""}
+      ${setup}`;
+  }
+  document.addEventListener("click", (e) => {
+    const s = e.target.closest("[data-ch-sym]"); if (s) { chartSym = s.getAttribute("data-ch-sym"); renderAll(); return; }
+    const tf = e.target.closest("[data-ch-tf]"); if (tf) { chartTf = tf.getAttribute("data-ch-tf"); renderAll(); return; }
+    const cp = e.target.closest("[data-copy-url]"); if (cp) { const inp = cp.parentElement.querySelector("input"); try { navigator.clipboard.writeText(inp.value); cp.textContent = "Copied"; } catch (er) { inp.select(); } }
+  });
+  document.addEventListener("submit", (e) => { const fm = e.target.closest("[data-ch-find]"); if (!fm) return; e.preventDefault(); const v = (fm.querySelector("input").value || "").trim().toUpperCase().replace(/[^A-Z0-9.^=-]/g, ""); if (v) { chartSym = v; renderAll(); } });
+
   // ======================= LIVE: the session as it happens (09:00 to 16:00 ET) =======================
   const LIVE_EVERY_MS = 15 * 60 * 1000, CLOSED_RELOAD_MS = 4 * 3600 * 1000, IDLE_LOGOUT_MS = 3 * 3600 * 1000;
   const FEED_VIEWS = ["home", "live", "liveview"];
@@ -2501,7 +2617,7 @@
   };
   const MENU = [
     { k: "home" },
-    { g: "live", label: "Live", icon: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>', items: [["live", "The session as it happens: 15-minute reads, SPY and QQQ, runners"], ["liveview", "Briefings, big money, the President's posts, the crowd, the bets"]] },
+    { g: "live", label: "Live", icon: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>', items: [["charts", "Live TradingView chart with OneView signals: what to do, stop, targets"], ["live", "The session as it happens: 15-minute reads, SPY and QQQ, runners"], ["liveview", "Briefings, big money, the President's posts, the crowd, the bets"]] },
     { k: "watch" },
     { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"]] },
     { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["record", "Every call scored against the market"]] },
@@ -2866,6 +2982,7 @@
   let lastRenderedView = null;
   function renderAll() {
     const r = report;
+    if (currentView === "charts" && lastRenderedView === "charts" && $("#tvw") && $("#tvw").dataset.key === chartKey()) { renderNav(); refreshChartsPanel(); return; }   // keep the live chart; refresh the panel only
     // same view re-render: do not jump to the top. Whatever scrolls (window, main, or a wrapper) keeps its place.
     const scrollers = []; for (let el = $("#app"); el; el = el.parentElement) { if (el.scrollTop > 0) scrollers.push([el, el.scrollTop]); }
     const viewEl = $("#app .view");   // the view pane is the real scroller and is rebuilt on every render
@@ -2892,6 +3009,7 @@
     const st = r.ai_stats;
     $("#footer").innerHTML = `<div class="foot">Prices: Yahoo Finance, 15-minute delayed · change is versus the prior close · report built ${r.generated_at.slice(11, 16)} ET${r.ai_enabled ? "" : " · model reads off this build"} · OneView is information, not advice.</div>`;
     mountCharts();
+    if (currentView === "charts") mountTv();
     wireStocks();
     if (currentView === "home" || currentView === "liveview") jumpToBrief();
   }
@@ -3146,6 +3264,7 @@
       case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}</div>${secToday(r)}</div>`;
       case "live": return `<div class="view home live"><div class="col-main">${secLive(r)}</div>${secToday(r)}</div>`;
       case "liveview": return `<div class="view home liveview"><div class="col-main">${secLiveViewHead(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secPros(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
+      case "charts": return `<div class="view one chs-view">${secCharts()}</div>`;
       case "map": setTimeout(() => { mountMap(); if (!mapData && !mapBusy && mapSym) loadMap(mapSym); }, 0); return `<div class="view one cm-view">${secMap()}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
