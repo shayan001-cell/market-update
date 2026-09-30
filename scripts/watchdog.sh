@@ -13,6 +13,18 @@ if ! curl -sf -m 5 http://127.0.0.1:8000/healthz >/dev/null; then
   log "server not answering: launchd agent started"; sleep 10
 fi
 [ -n "${MU_PUBLIC_API:-}" ] && exit 0
+# The permanent address (Tailscale Funnel) wins whenever it answers; the Cloudflare quick tunnel is the fallback.
+REPO="${MU_REPO:-shayan001-cell/market-update}"
+FUNNEL=$(cat output/tv_webhook_base.txt 2>/dev/null || true)
+if [ -n "$FUNNEL" ] && curl -sf -m 10 "$FUNNEL/healthz" >/dev/null; then
+  if [ "$FUNNEL" != "$(cat /tmp/mu-tunnel-url.txt 2>/dev/null || true)" ]; then
+    echo "$FUNNEL" > /tmp/mu-tunnel-url.txt
+    gh variable set MU_API_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1
+    log "permanent address $FUNNEL answering: published, page rebuild started"
+  fi
+  exit 0
+fi
+[ -n "$FUNNEL" ] && log "permanent address $FUNNEL not answering: falling back to the Cloudflare tunnel"
 if ! pgrep -f "cloudflared tunnel" >/dev/null; then
   : > /tmp/mu-tunnel.log
   launchctl load ~/Library/LaunchAgents/com.oneview.tunnel.plist 2>/dev/null; launchctl kickstart -k "gui/$UIDN/com.oneview.tunnel" 2>/dev/null
@@ -27,7 +39,6 @@ PUB=$(cat /tmp/mu-tunnel-url.txt 2>/dev/null || true)
 case "$CUR" in https://*.trycloudflare.com) ;; *) CUR="" ;; esac     # only ever publish a real tunnel address
 if [ -n "$CUR" ] && [ "$CUR" != "$PUB" ]; then
   echo "$CUR" > /tmp/mu-tunnel-url.txt
-  REPO="${MU_REPO:-shayan001-cell/market-update}"
   gh variable set MU_API_URL --body "$CUR" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$CUR" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1
   log "tunnel address changed to $CUR: published, page rebuild started"
 fi
