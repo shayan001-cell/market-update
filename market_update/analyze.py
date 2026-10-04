@@ -992,7 +992,7 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         "session_label": session.strftime("%A, %B %d, %Y"),
         "market_state": mstate,
         "ai_enabled": use_ai and (judge.calls > 0 or judge.rule_answers > 0),
-        "ai_source": judge.source,
+        "ai_source": judge.source(),
         "ai_stats": {"calls": judge.calls, "failures": judge.failures, "rule_answers": judge.rule_answers, "last_error": judge.last_error,
                      "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens, "provider": judge.provider, "model": judge.model},
         "regime": regime,
@@ -1092,7 +1092,7 @@ async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool =
     s["verdict"] = _verdict(s)
     s["analyzed_at"] = datetime.now(tz=config.ET).isoformat()
     s["ai_stats"] = {"calls": judge.calls, "failures": judge.failures, "rule_answers": judge.rule_answers}
-    s["ai_source"] = judge.source
+    s["ai_source"] = judge.source()
     return _clean(s)
 
 

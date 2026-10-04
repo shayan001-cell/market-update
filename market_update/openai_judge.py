@@ -25,6 +25,10 @@ from .claude_judge import SYSTEM, describe, to_answers, tool_schema
 PRESETS = {   # provider -> (base_url, key env, default model)
     "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY", "deepseek-flash"),
 }
+# Extra request fields per provider. These reads are quick classifications, so DeepSeek's thinking step is off:
+# it only adds output tokens (cost) and long arguments that get cut off. MU_OPENAI_EXTRA_BODY (JSON) overrides.
+EXTRA_BODY = {"deepseek": {"thinking": {"type": "disabled"}}}
+MAX_TOKENS = int(os.environ.get("MU_OPENAI_MAX_TOKENS", "4096"))
 
 
 def settings() -> tuple[str, str, str]:
@@ -36,12 +40,18 @@ def settings() -> tuple[str, str, str]:
 
 
 def _json_from_text(text: str) -> dict[str, Any]:
+    """Lenient parse: code fences, prose around the object, trailing commas. {} when nothing usable."""
     text = re.sub(r"^```(?:json)?|```$", "", (text or "").strip(), flags=re.M).strip()
-    try:
-        return json.loads(text)
-    except ValueError:
-        m = re.search(r"\{.*\}", text, flags=re.S)
-        return json.loads(m.group(0)) if m else {}
+    m = re.search(r"\{.*\}", text, flags=re.S)
+    for cand in (text, m.group(0) if m else "", re.sub(r",\s*([}\]])", r"\1", m.group(0)) if m else ""):
+        if not cand:
+            continue
+        try:
+            v = json.loads(cand)
+            return v if isinstance(v, dict) else {}
+        except ValueError:
+            continue
+    return {}
 
 
 class OpenAICompatClient:
@@ -54,6 +64,20 @@ class OpenAICompatClient:
         self.client = openai.AsyncOpenAI(base_url=self.base_url, api_key=key, max_retries=2, timeout=90)
         self._prep: dict[int, tuple[str, dict[str, Any]]] = {}
         self.tools_ok = True                   # flips to False once a host shows it ignores tools
+        extra = os.environ.get("MU_OPENAI_EXTRA_BODY")
+        self.extra = json.loads(extra) if extra else EXTRA_BODY.get(config.AI_PROVIDER)
+
+    async def _create(self, **kw: Any) -> Any:
+        """chat.completions.create with the provider's extra fields; drops them once if the host rejects them."""
+        extra = self.extra                       # local copy: concurrent calls may clear self.extra meanwhile
+        if extra:
+            try:
+                return await self.client.chat.completions.create(extra_body=extra, **kw)
+            except self._openai.BadRequestError as e:
+                if not any(k in str(e).lower() for k in extra):
+                    raise
+                self.extra = None                # this host does not know the field: never send it again
+        return await self.client.chat.completions.create(**kw)
 
     def _prepared(self, questions: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         k = id(questions)
@@ -71,13 +95,13 @@ class OpenAICompatClient:
         raw: dict[str, Any] = {}
         if self.tools_ok:
             try:
-                r = await self.client.chat.completions.create(
-                    model=self.model, messages=msgs, tools=[tool], max_tokens=config.CLAUDE_MAX_TOKENS,
+                r = await self._create(
+                    model=self.model, messages=msgs, tools=[tool], max_tokens=MAX_TOKENS,
                     tool_choice={"type": "function", "function": {"name": "answer"}})
                 tin, tout = self._usage(r)
                 calls = r.choices[0].message.tool_calls or []
                 if calls:
-                    raw = json.loads(calls[0].function.arguments or "{}")
+                    raw = _json_from_text(calls[0].function.arguments or "")   # cut-off or malformed -> {} -> JSON retry below
                 else:
                     raw = _json_from_text(r.choices[0].message.content or "")
             except self._openai.BadRequestError as e:
@@ -86,8 +110,8 @@ class OpenAICompatClient:
                 self.tools_ok = False         # this host or model has no function calling: JSON from here on
         if not raw:
             schema = json.dumps(tool["function"]["parameters"]["properties"], ensure_ascii=False)
-            r = await self.client.chat.completions.create(
-                model=self.model, max_tokens=config.CLAUDE_MAX_TOKENS,
+            r = await self._create(
+                model=self.model, max_tokens=MAX_TOKENS,
                 messages=msgs + [{"role": "user", "content": "Reply with only one JSON object, no prose, in this shape (one entry per question):\n" + schema}])
             a, b = self._usage(r)
             tin, tout = tin + a, tout + b
