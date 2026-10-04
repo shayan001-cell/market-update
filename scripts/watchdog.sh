@@ -15,9 +15,10 @@ fi
 # One-shot requests dropped into output/ (gitignored) by an admin or an assistant working on the folder:
 #   output/.restart-server        restart the server (e.g. after a new key in .env); the file is removed
 #   output/.gh-secret-NAME        set repository secret NAME to the file's contents, then delete the file
+RESTARTED=""
 if [ -f output/.restart-server ]; then
   rm -f output/.restart-server
-  launchctl kickstart -k "gui/$UIDN/com.oneview.server" 2>/dev/null && log "restart requested: server restarted"
+  launchctl kickstart -k "gui/$UIDN/com.oneview.server" 2>/dev/null && log "restart requested: server restarted" && RESTARTED=1
 fi
 for f in output/.gh-secret-*; do
   [ -f "$f" ] || continue
@@ -35,6 +36,12 @@ if [ -n "$FUNNEL" ] && curl -sf -m 10 "$FUNNEL/healthz" >/dev/null; then
     gh variable set MU_API_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1
     log "permanent address $FUNNEL answering: published, page rebuild started"
   fi
+  exit 0
+fi
+# The permanent address only fails here because the server behind it is down (just restarted, still starting):
+# then there is nothing to switch to. Fall back to the Cloudflare tunnel only when the server itself answers.
+if [ -n "$RESTARTED" ] || ! curl -sf -m 5 http://127.0.0.1:8000/healthz >/dev/null; then
+  [ -n "$FUNNEL" ] && log "permanent address not answering while the server starts: address left as is"
   exit 0
 fi
 [ -n "$FUNNEL" ] && log "permanent address $FUNNEL not answering: falling back to the Cloudflare tunnel"
