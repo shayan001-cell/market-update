@@ -54,6 +54,26 @@ def _json_from_text(text: str) -> dict[str, Any]:
     return {}
 
 
+_DEBUG_LEFT = 12     # per process: a few samples of replies that could not be fully read, for tuning
+
+
+def _debug_sample(questions: dict[str, Any], raw: Any, ans: dict[str, Any]) -> None:
+    """Append a short sample to output/ai_debug.jsonl (gitignored) so unreadable reply layouts can be fixed."""
+    global _DEBUG_LEFT
+    if _DEBUG_LEFT <= 0:
+        return
+    _DEBUG_LEFT -= 1
+    try:
+        missing = [k for k in questions if k not in ans]
+        rec = {"provider": config.AI_PROVIDER, "missing": missing, "raw": json.dumps(raw, default=str)[:1500]}
+        path = config.OUTPUT_DIR / "ai_debug.jsonl" if hasattr(config, "OUTPUT_DIR") else None
+        if path:
+            with open(path, "a") as f:
+                f.write(json.dumps(rec) + "\n")
+    except Exception:  # noqa: BLE001 - debugging must never break a build
+        pass
+
+
 class OpenAICompatClient:
     def __init__(self) -> None:
         import openai
@@ -117,6 +137,8 @@ class OpenAICompatClient:
             tin, tout = tin + a, tout + b
             raw = _json_from_text(r.choices[0].message.content or "")
         ans = to_answers(questions, raw)
+        if len(ans) < len(questions):
+            _debug_sample(questions, raw, ans)
         for v in ans.values():
             v["engine"] = config.AI_PROVIDER
         return ans, tin, tout

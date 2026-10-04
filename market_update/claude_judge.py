@@ -89,11 +89,52 @@ def _norm(probs: dict[str, Any], keys: list[str]) -> dict[str, float]:
     return {k: round(v / tot, 4) for k, v in vals.items()}
 
 
+def _shape(q: Any, a: Any) -> Any:
+    """Accept the layouts models actually return: {"probabilities": {...}} (asked for), the bare {option: p}
+    map, a list of probabilities in level order, a bare number for a yes/no question, or {"p": x}."""
+    t = _qtype(q)
+    if t == "noul":
+        if isinstance(a, (int, float)) and not isinstance(a, bool):
+            return {"p_true": a}
+        if isinstance(a, dict):
+            for key in ("p_true", "p", "probability", "true"):
+                if isinstance(a.get(key), (int, float)):
+                    return {"p_true": a[key]}
+            pr = a.get("probabilities")
+            if isinstance(pr, dict) and isinstance(pr.get("true"), (int, float)):
+                return {"p_true": pr["true"]}
+        return None
+    keys = _options(q) if t == "choice" else [str(i) for i in range(len(getattr(q, "criteria", None) or []))]
+    if isinstance(a, dict) and isinstance(a.get("probabilities"), list):
+        a = a["probabilities"]
+    if isinstance(a, list) and len(a) == len(keys):
+        return {"probabilities": dict(zip(keys, a))}
+    if isinstance(a, dict) and isinstance(a.get("probabilities"), dict):
+        pr = {str(kk): v for kk, v in a["probabilities"].items()}
+        return {"probabilities": pr} if set(pr) & set(keys) else None
+    if isinstance(a, dict):
+        pr = {str(kk): v for kk, v in a.items() if isinstance(v, (int, float))}
+        if set(pr) & set(keys):
+            return {"probabilities": pr}
+        # a single pick ({"choice": "x"} / "x") with no spread: treat as a confident but not certain answer
+        pick = a.get("choice") or a.get("answer")
+        if isinstance(pick, (str, int)) and str(pick) in keys:
+            return {"probabilities": {kk: (0.8 if kk == str(pick) else 0.2 / max(1, len(keys) - 1)) for kk in keys}}
+    if isinstance(a, (str, int)) and str(a) in keys:
+        return {"probabilities": {kk: (0.8 if kk == str(a) else 0.2 / max(1, len(keys) - 1)) for kk in keys}}
+    return None
+
+
 def to_answers(questions: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
     """Tool input -> TypeSafe-shaped answers. A question the model skipped is simply absent (rules fill it)."""
     out: dict[str, Any] = {}
+    if isinstance(raw, dict) and not (set(raw) & set(questions)):
+        for wrap in ("answers", "answer", "questions", "results"):          # {"answers": {...}} wrappers
+            if isinstance(raw.get(wrap), dict) and set(raw[wrap]) & set(questions):
+                raw = raw[wrap]
+                break
     for k, q in questions.items():
-        a = raw.get(k)
+        a = _shape(q, raw.get(k)) if isinstance(raw, dict) else None
         if not isinstance(a, dict):
             continue
         t = _qtype(q)
