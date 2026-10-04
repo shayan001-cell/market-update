@@ -39,11 +39,36 @@ def settings() -> tuple[str, str, str]:
     return base, key, model
 
 
+def _close_brackets(text: str) -> str:
+    """Append the closing } / ] a reply left off (DeepSeek sometimes drops the last one or two)."""
+    stack, in_str, esc = [], False, False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    return text + ('"' if in_str else "") + "".join(reversed(stack))
+
+
 def _json_from_text(text: str) -> dict[str, Any]:
-    """Lenient parse: code fences, prose around the object, trailing commas. {} when nothing usable."""
+    """Lenient parse: code fences, prose around the object, trailing commas, missing closing brackets.
+    {} when nothing usable."""
     text = re.sub(r"^```(?:json)?|```$", "", (text or "").strip(), flags=re.M).strip()
     m = re.search(r"\{.*\}", text, flags=re.S)
-    for cand in (text, m.group(0) if m else "", re.sub(r",\s*([}\]])", r"\1", m.group(0)) if m else ""):
+    start = text.find("{")
+    tail = _close_brackets(text[start:]) if start >= 0 else ""
+    for cand in (text, m.group(0) if m else "", re.sub(r",\s*([}\]])", r"\1", m.group(0)) if m else "",
+                 tail, re.sub(r",\s*([}\]])", r"\1", tail)):
         if not cand:
             continue
         try:
