@@ -43,20 +43,28 @@ def _answers_to_dict(resp: Any) -> dict[str, Any]:
 
 
 class Judge:
-    """TypeSafe first; when the model service fails (no credits, outage, timeout) the same
-    question is answered by plain rules (`rules.py`) so the page never goes blank. Rule
-    answers are marked `rules: True` and never claim more than MED conviction."""
+    """The model first (Claude or TypeSafe, see config.AI_PROVIDER); when the model service fails (no credits,
+    outage, timeout, daily cap reached) the same question is answered by plain rules (`rules.py`) so the page
+    never goes blank. Rule answers are marked `rules: True` and never claim more than MED conviction."""
     # Once the API says "no credits" we stop hammering it for a while (seconds).
     CREDITS_BACKOFF_S = 900
     _credits_out_until: float = 0.0
+    # Spending guard shared by every Judge in this process: model calls made on the current UTC day.
+    _day: str = ""
+    _day_calls: int = 0
+    _clients: dict[str, Any] = {}            # one shared model client per provider per process
 
     def __init__(self, enabled: bool = True, rules_fallback: bool = True):
         self.enabled = enabled
         self.rules_fallback = rules_fallback
+        self.provider = config.AI_PROVIDER
+        self.model = config.CLAUDE_MODEL if self.provider == "claude" else config.TYPESAFE_MODEL if self.provider == "typesafe" else ""
+        if self.provider in ("deepseek", "openai"):
+            from .openai_judge import settings
+            self.model = settings()[2]
         self.calls = self.failures = self.rule_answers = self.input_tokens = self.output_tokens = 0
         self.last_error: str | None = None
 
-    @property
     def source(self) -> str:
         if self.calls and not self.rule_answers:
             return "model"
@@ -75,13 +83,97 @@ class Judge:
             out[i] = a
         return out
 
+    @classmethod
+    def _take_budget(cls) -> bool:
+        """One model call's worth of the daily cap; False once the cap is spent."""
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        if cls._day != today:
+            cls._day, cls._day_calls = today, 0
+        if config.AI_MAX_CALLS_PER_DAY and cls._day_calls >= config.AI_MAX_CALLS_PER_DAY:
+            return False
+        cls._day_calls += 1
+        return True
+
+    def _no_credits(self, msg: str) -> None:
+        Judge._credits_out_until = time.time() + Judge.CREDITS_BACKOFF_S
+        self.last_error = f"{self._name()} credits exhausted: {msg[:160]}"
+
+    def _name(self) -> str:
+        return {"claude": "Claude", "typesafe": "TypeSafe", "deepseek": "DeepSeek"}.get(self.provider, f"model ({self.model})")
+
     async def run_many(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None]:
         if not self.enabled or not states:
             return [None] * len(states)
+        name = self._name()
         if time.time() < Judge._credits_out_until:
             self.failures += len(states)
-            self.last_error = "TypeSafe credits exhausted (backing off)"
+            self.last_error = f"{name} credits exhausted (backing off)"
             return self._fallback(states, questions)
+        answers = await (self._run_typesafe(states, questions) if self.provider == "typesafe" else self._run_hosted(states, questions))
+        if answers is None:
+            return self._fallback(states, questions)
+        missing = [i for i, a in enumerate(answers) if a is None]
+        if missing:
+            filled = self._fallback(states, questions, missing)
+            for i in missing:
+                answers[i] = filled[i]
+        return answers
+
+    def _partial(self, a: dict[str, Any], questions: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+        """Questions the model skipped get the rule answer, so a card is never half empty."""
+        if len(a) == len(questions) or not self.rules_fallback:
+            return a
+        r = R.answer(questions, state) or {}
+        for k in questions:
+            if k not in a and k in r:
+                a[k] = r[k]
+        return a
+
+    async def _run_hosted(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None] | None:
+        """Claude, DeepSeek or any OpenAI-compatible host: same questions, same answer shape."""
+        try:
+            if self.provider not in Judge._clients:
+                if self.provider == "claude":
+                    from .claude_judge import ClaudeClient
+                    Judge._clients[self.provider] = ClaudeClient()
+                else:
+                    from .openai_judge import OpenAICompatClient
+                    Judge._clients[self.provider] = OpenAICompatClient()
+        except Exception as e:  # noqa: BLE001 - missing package or key: rules answer
+            self.failures += len(states)
+            self.last_error = f"{self._name()} unavailable: {str(e)[:180]}"
+            log.error("%s unavailable, answering by rules: %s", self._name(), e)
+            return None
+        cl = Judge._clients[self.provider]
+        sem = asyncio.Semaphore(config.CLAUDE_CONCURRENCY)
+
+        async def one(state: dict[str, Any]) -> dict[str, Any] | None:
+            async with sem:
+                if time.time() < Judge._credits_out_until:
+                    self.failures += 1
+                    return None
+                if not Judge._take_budget():
+                    self.failures += 1
+                    self.last_error = f"daily model cap reached ({config.AI_MAX_CALLS_PER_DAY} calls, MU_AI_MAX_CALLS_PER_DAY)"
+                    return None
+                try:
+                    a, tin, tout = await cl.ask(state, questions)
+                except Exception as e:  # noqa: BLE001 - every API failure falls back to rules
+                    self.failures += 1
+                    msg = str(e)
+                    self.last_error = msg[:200]
+                    if cl.is_billing_error(e):
+                        self._no_credits(msg)
+                    log.warning("%s call failed: %s", self._name(), msg[:200])
+                    return None
+                self.calls += 1
+                self.input_tokens += tin
+                self.output_tokens += tout
+                return self._partial(a, questions, state) if a else None
+
+        return list(await asyncio.gather(*(one(s) for s in states)))
+
+    async def _run_typesafe(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None] | None:
         sem = asyncio.Semaphore(config.TYPESAFE_CONCURRENCY)
         try:
             client_cm = AsyncTypeSafeClient(model=config.TYPESAFE_MODEL)
@@ -89,7 +181,7 @@ class Judge:
             self.failures += len(states)
             self.last_error = str(e)[:200]
             log.error("TypeSafe unavailable, answering by rules: %s", e)
-            return self._fallback(states, questions)
+            return None
         async with client_cm as client:
             async def one(state: dict[str, Any]) -> dict[str, Any] | None:
                 async with sem:
@@ -103,7 +195,7 @@ class Judge:
                         msg = str(e)
                         self.last_error = msg[:200]
                         if "402" in msg or "credits" in msg.lower():
-                            Judge._credits_out_until = time.time() + Judge.CREDITS_BACKOFF_S
+                            self._no_credits(msg)
                         log.warning("TypeSafe call failed: %s", msg[:200])
                         return None
                     self.calls += 1
@@ -112,13 +204,7 @@ class Judge:
                         self.input_tokens += int(getattr(u, "input_tokens", 0) or 0)
                         self.output_tokens += int(getattr(u, "output_tokens", 0) or 0)
                     return _answers_to_dict(resp)
-            answers = list(await asyncio.gather(*(one(s) for s in states)))
-        missing = [i for i, a in enumerate(answers) if a is None]
-        if missing:
-            filled = self._fallback(states, questions, missing)
-            for i in missing:
-                answers[i] = filled[i]
-        return answers
+            return list(await asyncio.gather(*(one(s) for s in states)))
 
     async def run_one(self, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any] | None:
         return (await self.run_many([state], questions))[0]
@@ -908,7 +994,7 @@ async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dic
         "ai_enabled": use_ai and (judge.calls > 0 or judge.rule_answers > 0),
         "ai_source": judge.source,
         "ai_stats": {"calls": judge.calls, "failures": judge.failures, "rule_answers": judge.rule_answers, "last_error": judge.last_error,
-                     "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens},
+                     "input_tokens": judge.input_tokens, "output_tokens": judge.output_tokens, "provider": judge.provider, "model": judge.model},
         "regime": regime,
         "macro": macro,
         "world": world,

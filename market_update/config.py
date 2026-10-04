@@ -162,6 +162,19 @@ NEWS_PER_STOCK = 8
 TYPESAFE_CONCURRENCY = 8
 TYPESAFE_MODEL = "jev-latest"
 
+# Which model answers the questions in judgments.py: "claude" or "typesafe". Unset: Claude when an
+# ANTHROPIC_API_KEY is present, TypeSafe otherwise. Either way the rules in rules.py answer when the model can't.
+# Also "deepseek" (DEEPSEEK_API_KEY) or "openai" for any OpenAI-compatible host (Bedrock, Azure, Vertex, OpenRouter,
+# Groq...; see openai_judge.py). Unset: the first of these whose key is present, else TypeSafe.
+AI_PROVIDER = (os.environ.get("MU_AI_PROVIDER") or ("deepseek" if os.environ.get("DEEPSEEK_API_KEY") else "claude" if os.environ.get("ANTHROPIC_API_KEY")
+               else "openai" if os.environ.get("MU_OPENAI_API_KEY") else "typesafe")).strip().lower()
+CLAUDE_MODEL = os.environ.get("MU_CLAUDE_MODEL") or "claude-haiku-4-5-20251001"   # fast and cheap; claude-sonnet-5 reads deeper
+CLAUDE_MAX_TOKENS = int(os.environ.get("MU_CLAUDE_MAX_TOKENS", "2048"))
+CLAUDE_CONCURRENCY = int(os.environ.get("MU_CLAUDE_CONCURRENCY", "6"))
+# Spending guard: model calls allowed per UTC day in one process (the server, or one GitHub build).
+# Past it, answers come from the rules until midnight UTC. 0 = no cap.
+AI_MAX_CALLS_PER_DAY = int(os.environ.get("MU_AI_MAX_CALLS_PER_DAY", "4000"))
+
 # Server scheduling (seconds). Overridable with env vars.
 REFRESH_COOLDOWN_S = int(os.environ.get("MU_REFRESH_COOLDOWN", "120"))
 INTERVAL_MARKET_S = int(os.environ.get("MU_INTERVAL_MARKET", "600"))    # pre-market and regular session

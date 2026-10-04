@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     p = argparse.ArgumentParser(prog="market-update", description="Market dashboard for day and swing traders.")
-    p.add_argument("--no-ai", action="store_true", help="skip TypeSafe judgments (data only)")
+    p.add_argument("--no-ai", action="store_true", help="skip model judgments (data only)")
     p.add_argument("--open", action="store_true", help="open the dashboard in a browser when done")
     p.add_argument("--max-cards", type=int, default=None, help=f"stock cards to analyse (default {config.MAX_STOCK_CARDS})")
     p.add_argument("--out", default=str(config.OUTPUT_DIR), help="output directory")
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
               f"day {s['scores']['day']:.2f} swing {s['scores']['swing']:.2f}  "
               f"{(a.get('bias') or {}).get('choice','-'):8} {(a.get('setup') or {}).get('choice','-'):22} {' '.join(s['tags'])}")
     st = r["ai_stats"]
-    print(f"TypeSafe: {st['calls']} calls, {st['failures']} failed, {st['input_tokens']} in / {st['output_tokens']} out tokens   ({r['elapsed_s']}s)")
+    print(f"{st.get('provider', 'typesafe').capitalize()} ({st.get('model', '')}): {st['calls']} calls, {st['failures']} failed, {st['input_tokens']} in / {st['output_tokens']} out tokens   ({r['elapsed_s']}s)")
     print(f"Wrote {html_path}")
     if args.open:
         webbrowser.open(html_path.as_uri())
