@@ -52,13 +52,16 @@ class Judge:
     # Spending guard shared by every Judge in this process: model calls made on the current UTC day.
     _day: str = ""
     _day_calls: int = 0
-    _claude: Any = None                      # one shared Claude client per process
+    _clients: dict[str, Any] = {}            # one shared model client per provider per process
 
     def __init__(self, enabled: bool = True, rules_fallback: bool = True):
         self.enabled = enabled
         self.rules_fallback = rules_fallback
         self.provider = config.AI_PROVIDER
-        self.model = config.CLAUDE_MODEL if self.provider == "claude" else config.TYPESAFE_MODEL
+        self.model = config.CLAUDE_MODEL if self.provider == "claude" else config.TYPESAFE_MODEL if self.provider == "typesafe" else ""
+        if self.provider in ("deepseek", "openai"):
+            from .openai_judge import settings
+            self.model = settings()[2]
         self.calls = self.failures = self.rule_answers = self.input_tokens = self.output_tokens = 0
         self.last_error: str | None = None
 
@@ -93,17 +96,20 @@ class Judge:
 
     def _no_credits(self, msg: str) -> None:
         Judge._credits_out_until = time.time() + Judge.CREDITS_BACKOFF_S
-        self.last_error = f"{'Claude' if self.provider == 'claude' else 'TypeSafe'} credits exhausted: {msg[:160]}"
+        self.last_error = f"{self._name()} credits exhausted: {msg[:160]}"
+
+    def _name(self) -> str:
+        return {"claude": "Claude", "typesafe": "TypeSafe", "deepseek": "DeepSeek"}.get(self.provider, f"model ({self.model})")
 
     async def run_many(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None]:
         if not self.enabled or not states:
             return [None] * len(states)
-        name = "Claude" if self.provider == "claude" else "TypeSafe"
+        name = self._name()
         if time.time() < Judge._credits_out_until:
             self.failures += len(states)
             self.last_error = f"{name} credits exhausted (backing off)"
             return self._fallback(states, questions)
-        answers = await (self._run_claude(states, questions) if self.provider == "claude" else self._run_typesafe(states, questions))
+        answers = await (self._run_typesafe(states, questions) if self.provider == "typesafe" else self._run_hosted(states, questions))
         if answers is None:
             return self._fallback(states, questions)
         missing = [i for i, a in enumerate(answers) if a is None]
@@ -123,17 +129,22 @@ class Judge:
                 a[k] = r[k]
         return a
 
-    async def _run_claude(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None] | None:
-        from .claude_judge import ClaudeClient
+    async def _run_hosted(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None] | None:
+        """Claude, DeepSeek or any OpenAI-compatible host: same questions, same answer shape."""
         try:
-            if Judge._claude is None:
-                Judge._claude = ClaudeClient()
+            if self.provider not in Judge._clients:
+                if self.provider == "claude":
+                    from .claude_judge import ClaudeClient
+                    Judge._clients[self.provider] = ClaudeClient()
+                else:
+                    from .openai_judge import OpenAICompatClient
+                    Judge._clients[self.provider] = OpenAICompatClient()
         except Exception as e:  # noqa: BLE001 - missing package or key: rules answer
             self.failures += len(states)
-            self.last_error = f"Claude unavailable: {str(e)[:180]}"
-            log.error("Claude unavailable, answering by rules: %s", e)
+            self.last_error = f"{self._name()} unavailable: {str(e)[:180]}"
+            log.error("%s unavailable, answering by rules: %s", self._name(), e)
             return None
-        cl = Judge._claude
+        cl = Judge._clients[self.provider]
         sem = asyncio.Semaphore(config.CLAUDE_CONCURRENCY)
 
         async def one(state: dict[str, Any]) -> dict[str, Any] | None:
@@ -153,7 +164,7 @@ class Judge:
                     self.last_error = msg[:200]
                     if cl.is_billing_error(e):
                         self._no_credits(msg)
-                    log.warning("Claude call failed: %s", msg[:200])
+                    log.warning("%s call failed: %s", self._name(), msg[:200])
                     return None
                 self.calls += 1
                 self.input_tokens += tin

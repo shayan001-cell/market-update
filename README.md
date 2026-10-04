@@ -378,3 +378,12 @@ and returns the exact answer shape TypeSafe returns, so nothing else changes. Tu
 `MU_CLAUDE_MODEL` picks the model (default Claude Haiku 4.5) and `MU_AI_MAX_CALLS_PER_DAY` caps spending; past
 the cap, or when the account runs out of credit, the rules in `rules.py` answer as before. The report's
 `ai_stats` shows which provider and model answered.
+
+### DeepSeek, Qwen, Kimi or GLM instead
+
+`market_update/openai_judge.py` asks the same questions through any OpenAI-compatible API. Set `DEEPSEEK_API_KEY`
+to use DeepSeek directly (the cheapest option), or set `MU_AI_PROVIDER=openai` with `MU_OPENAI_BASE_URL`,
+`MU_OPENAI_API_KEY` and `MU_OPENAI_MODEL` for a host such as AWS Bedrock, Azure AI Foundry, Google Vertex,
+OpenRouter or Groq. Hosts or models without function calling are asked for plain JSON instead. The same
+spending cap and rules fallback apply. When several keys are present the order is DeepSeek, Claude, other host,
+TypeSafe; `MU_AI_PROVIDER` overrides it.
