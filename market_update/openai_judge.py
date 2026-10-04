@@ -141,9 +141,11 @@ class OpenAICompatClient:
                     + ", ".join(missing) + ". Each value has this shape:\n" + schema)}])
             a, b = self._usage(r)
             tin, tout = tin + a, tout + b
-            more = to_answers({k: questions[k] for k in missing}, _json_from_text(r.choices[0].message.content or ""))
+            text = r.choices[0].message.content or ""
+            more = to_answers({k: questions[k] for k in missing}, _json_from_text(text))
             ans.update(more)
-            raw = {"first": raw, "retry_missing": missing}
+            raw = {"first": raw, "retry_missing": missing, "retry_reply": text[:700],
+                   "finish": getattr(r.choices[0], "finish_reason", None)}
         if len(ans) < len(questions):
             _debug_sample(questions, raw, ans)
         for v in ans.values():
