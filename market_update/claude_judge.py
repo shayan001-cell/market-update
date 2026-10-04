@@ -125,9 +125,19 @@ def _shape(q: Any, a: Any) -> Any:
     return None
 
 
+def _unschema(x: Any) -> Any:
+    """Strip JSON-schema wrappers a model sometimes echoes around its values: {"type": "object", "properties": {...}}."""
+    if isinstance(x, dict):
+        if isinstance(x.get("properties"), dict) and set(x) <= {"type", "properties", "required", "description"}:
+            return _unschema(x["properties"])
+        return {k: _unschema(v) for k, v in x.items()}
+    return x
+
+
 def to_answers(questions: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
     """Tool input -> TypeSafe-shaped answers. A question the model skipped is simply absent (rules fill it)."""
     out: dict[str, Any] = {}
+    raw = _unschema(raw)
     if isinstance(raw, dict) and not (set(raw) & set(questions)):
         for wrap in ("answers", "answer", "questions", "results", "probabilities"):   # {"answers": {...}} wrappers
             if isinstance(raw.get(wrap), dict) and set(raw[wrap]) & set(questions):
