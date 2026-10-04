@@ -12,6 +12,19 @@ if ! curl -sf -m 5 http://127.0.0.1:8000/healthz >/dev/null; then
   launchctl load ~/Library/LaunchAgents/com.oneview.server.plist 2>/dev/null; launchctl kickstart -k "gui/$UIDN/com.oneview.server" 2>/dev/null
   log "server not answering: launchd agent started"; sleep 10
 fi
+# One-shot requests dropped into output/ (gitignored) by an admin or an assistant working on the folder:
+#   output/.restart-server        restart the server (e.g. after a new key in .env); the file is removed
+#   output/.gh-secret-NAME        set repository secret NAME to the file's contents, then delete the file
+if [ -f output/.restart-server ]; then
+  rm -f output/.restart-server
+  launchctl kickstart -k "gui/$UIDN/com.oneview.server" 2>/dev/null && log "restart requested: server restarted"
+fi
+for f in output/.gh-secret-*; do
+  [ -f "$f" ] || continue
+  name="${f##*/.gh-secret-}"
+  if gh secret set "$name" --repo "${MU_REPO:-shayan001-cell/market-update}" < "$f" >/dev/null 2>&1; then log "secret $name set on GitHub"; else log "secret $name: gh secret set failed"; fi
+  rm -f "$f"
+done
 [ -n "${MU_PUBLIC_API:-}" ] && exit 0
 # The permanent address (Tailscale Funnel) wins whenever it answers; the Cloudflare quick tunnel is the fallback.
 REPO="${MU_REPO:-shayan001-cell/market-update}"
