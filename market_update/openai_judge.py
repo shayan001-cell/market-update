@@ -128,15 +128,22 @@ class OpenAICompatClient:
                 if "tool" not in str(e).lower():
                     raise
                 self.tools_ok = False         # this host or model has no function calling: JSON from here on
-        if not raw:
-            schema = json.dumps(tool["function"]["parameters"]["properties"], ensure_ascii=False)
+        ans = to_answers(questions, raw) if raw else {}
+        missing = [k for k in questions if k not in ans]
+        if missing:
+            # nothing usable, or some questions skipped: ask once more, in plain JSON, for just those
+            props = tool["function"]["parameters"]["properties"]
+            schema = json.dumps({k: props[k] for k in missing}, ensure_ascii=False)
             r = await self._create(
                 model=self.model, max_tokens=MAX_TOKENS,
-                messages=msgs + [{"role": "user", "content": "Reply with only one JSON object, no prose, in this shape (one entry per question):\n" + schema}])
+                messages=msgs + [{"role": "user", "content": (
+                    "Reply with only one JSON object, no prose. Its keys are exactly these question names: "
+                    + ", ".join(missing) + ". Each value has this shape:\n" + schema)}])
             a, b = self._usage(r)
             tin, tout = tin + a, tout + b
-            raw = _json_from_text(r.choices[0].message.content or "")
-        ans = to_answers(questions, raw)
+            more = to_answers({k: questions[k] for k in missing}, _json_from_text(r.choices[0].message.content or ""))
+            ans.update(more)
+            raw = {"first": raw, "retry_missing": missing}
         if len(ans) < len(questions):
             _debug_sample(questions, raw, ans)
         for v in ans.values():

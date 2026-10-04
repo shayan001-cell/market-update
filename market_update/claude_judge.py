@@ -129,10 +129,16 @@ def to_answers(questions: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]
     """Tool input -> TypeSafe-shaped answers. A question the model skipped is simply absent (rules fill it)."""
     out: dict[str, Any] = {}
     if isinstance(raw, dict) and not (set(raw) & set(questions)):
-        for wrap in ("answers", "answer", "questions", "results"):          # {"answers": {...}} wrappers
+        for wrap in ("answers", "answer", "questions", "results", "probabilities"):   # {"answers": {...}} wrappers
             if isinstance(raw.get(wrap), dict) and set(raw[wrap]) & set(questions):
                 raw = raw[wrap]
                 break
+        else:
+            # no question names at all: an option map that fits exactly one question belongs to it
+            inner = raw.get("probabilities") if isinstance(raw.get("probabilities"), dict) else raw
+            fits = [k for k, q in questions.items() if _qtype(q) == "choice" and set(map(str, inner)) and set(map(str, inner)) <= set(_options(q))]
+            if len(fits) == 1:
+                raw = {fits[0]: {"probabilities": inner}}
     for k, q in questions.items():
         a = _shape(q, raw.get(k)) if isinstance(raw, dict) else None
         if not isinstance(a, dict):
