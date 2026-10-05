@@ -49,7 +49,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi import Request, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, fetch, mail
+from . import ai_budget, config, db, fetch, mail
 from . import judgments as J
 from . import scanner
 from .analyze import _clean, _scan_slim, analyze_ticker, build_report
@@ -109,7 +109,6 @@ def _interval() -> int:
 
 
 AI_REPORT_PATH = DATA_DIR / "report_ai.json"      # the last build whose model reads succeeded
-AI_INTERVAL_S = int(os.environ.get("MU_AI_INTERVAL", "1800"))   # re-judge at most this often; prices still refresh every build
 
 
 def _run_build_sync(use_ai: bool) -> dict[str, Any]:
@@ -157,7 +156,9 @@ async def do_build(reason: str) -> bool:
         state["last_build_started"] = time.time()
         log.info("build start (%s)", reason)
         try:
-            use_ai = USE_AI and (time.time() - state.get("ai_at", 0) >= AI_INTERVAL_S or reason == "manual")
+            # Model reads only on the timetable (ai_budget): once per window, never because someone pressed Refresh.
+            # Every other build refreshes prices and carries the last model reads forward.
+            use_ai = USE_AI and ai_budget.take("report")
             report = await asyncio.to_thread(_run_build_sync, use_ai)
             src = report.get("ai_source") or ("model" if (report.get("ai_stats") or {}).get("calls", 0) > 0 else "none")
             if src in ("model", "mixed") and report.get("regime"):
@@ -169,6 +170,7 @@ async def do_build(reason: str) -> bool:
             elif src == "rules" and report.get("regime"):
                 # Backup engine answered: fresh reads from rules, clearly labelled. Re-try the model next build.
                 state["ai_at"] = 0
+                ai_budget.release("report")          # failed: the next build in this window may try the model again
                 log.warning("model reads failed this build (%s); %s answers came from the backup rules", (report.get("ai_stats") or {}).get("last_error"), (report.get("ai_stats") or {}).get("rule_answers"))
             else:
                 if not state.get("ai_report") and AI_REPORT_PATH.exists():
@@ -178,6 +180,7 @@ async def do_build(reason: str) -> bool:
                         pass
                 report = _carry_ai(report, state.get("ai_report"))
                 if use_ai:
+                    ai_budget.release("report")
                     log.error("model reads failed this build (%s failures); carrying reads from %s", (report.get("ai_stats") or {}).get("failures"), report.get("ai_from"))
             state["report"] = report
             state["last_error"] = None
@@ -320,7 +323,7 @@ async def make_brief(day: str, slot: str = "morning") -> None:
         return
     state["brief_building"] = True
     try:
-        b = await morning_brief(state["report"], Judge(enabled=USE_AI), slot)
+        b = await morning_brief(state["report"], Judge(enabled=USE_AI, gate="brief-" + slot), slot)
         if slot == "morning":
             for sym in ("SPY", "QQQ"):
                 x = (b.get("indexes") or {}).get(sym) or {}
@@ -667,7 +670,7 @@ async def direction_loop() -> None:
     while True:
         try:
             if state.get("report") and fetch.market_state() == "open" and time.time() - state.get("direction_at", 0) >= 15 * 60:
-                read = await intraday_read(state["report"], Judge(enabled=USE_AI))
+                read = await intraday_read(state["report"], Judge(enabled=USE_AI, gate="intraday"))   # model once an hour, rules in between
                 read["id"] = db.log_direction(read)
                 state["direction"] = read; state["direction_at"] = time.time()
                 log.info("direction read: %s (%.2f) %s", read.get("expected"), read.get("confidence") or 0, read.get("driver"))
@@ -858,6 +861,7 @@ async def api_status() -> dict[str, Any]:
         "builds": state["builds"],
         "next_scheduled_in_s": max(0, int(_interval() - (now - (state["last_build_finished"] or 0)))),
         "refresh_available_in_s": max(0, int(config.REFRESH_COOLDOWN_S - (now - state["last_manual_refresh"]))),
+        "ai_schedule": ai_budget.describe(),
         "ai_enabled": USE_AI,
         "app_version": _APP_VERSION,
     }
@@ -908,7 +912,7 @@ async def api_stock(ticker: str, request: Request) -> JSONResponse:
     state["adhoc_inflight"].add(t)
     try:
         tone = (((r or {}).get("regime") or {}).get("tone") or {}).get("choice", "mixed")
-        rec = await asyncio.to_thread(lambda: asyncio.run(analyze_ticker(t, tone, USE_AI)))
+        rec = await asyncio.to_thread(lambda: asyncio.run(analyze_ticker(t, tone, USE_AI, gate="never")))   # no visitor-triggered model calls
     except Exception as e:  # noqa: BLE001
         log.exception("adhoc analysis failed for %s", t)
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
@@ -959,11 +963,13 @@ async def api_news() -> JSONResponse:
         fresh = [it for it in items[:60] if not it.get("ai")][:30]
         if fresh:                                            # read each new headline once so the feed can keep only what matters
             from .analyze import Judge, _headline_state
-            ans = await Judge(enabled=USE_AI).run_many([_headline_state(h) for h in fresh], J.HEADLINE_QUESTIONS)
+            ans = await Judge(enabled=USE_AI, gate="headlines").run_many([_headline_state(h) for h in fresh], J.HEADLINE_QUESTIONS)
             changed = False
             for it, a in zip(fresh, ans):
                 if a:
-                    it["ai"] = a; reads[it["id"]] = a; changed = True
+                    it["ai"] = a
+                    if not any(isinstance(v, dict) and v.get("rules") for v in a.values()):   # keep only model reads;
+                        reads[it["id"]] = a; changed = True                                     # rule reads are redone at the next window
             if changed:
                 fetch._cache_put("news_reads", reads)
         _news_cache.update(at=now, items=items[:60])
@@ -1395,7 +1401,7 @@ async def api_social() -> JSONResponse:
     if now - _social_cache["at"] > 300 or not _social_cache["data"]:
         try:
             from .analyze import Judge, social_snapshot
-            _social_cache["data"] = await social_snapshot(Judge(enabled=USE_AI))
+            _social_cache["data"] = await social_snapshot(Judge(enabled=USE_AI, gate="social"))
             _social_cache["at"] = now
         except Exception as e:  # noqa: BLE001
             log.warning("social refresh failed: %s", e)
@@ -2050,7 +2056,7 @@ def _pros_read_posts(users: dict[str, Any], reads: dict[str, Any]) -> dict[str, 
     status = {"asked": len(todo), "read": 0, "status": "idle" if not todo else "ok", "pending": 0}
     if not todo:
         return status
-    judge = Judge(rules_fallback=False)
+    judge = Judge(rules_fallback=False, gate="pros")
     states = [{"ticker": p["sym"], "post": p.get("body") or "", "author_tag": (p.get("tag") or "none").capitalize() if p.get("tag") else "none"} for p, _ in todo]
     try:
         answers = asyncio.run(judge.run_many(states, J.POST_QUESTIONS))
@@ -2170,7 +2176,7 @@ def _pros_sync() -> dict[str, Any]:
 
 
 async def pros_loop() -> None:
-    """Twice a day (06:00 and 17:30 ET) and at start-up when the last run is older than 20 hours."""
+    """Twice a day (07:00 and 17:30 ET, inside the model windows) and at start-up when the last run is older than 20 hours."""
     await asyncio.sleep(90)
     while True:
         try:
@@ -2184,7 +2190,7 @@ async def pros_loop() -> None:
                 led_n = 0
             last = (snap or {}).get("as_of", 0)
             bootstrap = led_n < 300 and fetch.market_state() not in ("open",) and time.time() - last > 3 * 3600   # fill the ledger fast, never in market hours
-            due = not snap or bootstrap or (now.hour in (6, 17) and (now.hour == 6 or now.minute >= 30) and state.get("pros_slot") != slot)
+            due = not snap or bootstrap or (now.hour in (7, 17) and (now.hour == 7 or now.minute >= 30) and state.get("pros_slot") != slot)
             if snap and not state.get("pros"):
                 state["pros"] = snap
             if due and not state.get("pros_running"):

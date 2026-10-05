@@ -54,9 +54,16 @@ class Judge:
     _day_calls: int = 0
     _clients: dict[str, Any] = {}            # one shared model client per provider per process
 
-    def __init__(self, enabled: bool = True, rules_fallback: bool = True):
+    def __init__(self, enabled: bool = True, rules_fallback: bool = True, gate: str | None = None):
         self.enabled = enabled
         self.rules_fallback = rules_fallback
+        # gate = a kind of work on the model timetable (ai_budget): the model is used only if this kind has not had
+        # its run in the current window yet; otherwise the backup rules answer. Decided once, on the first call.
+        self.gate = gate
+        self._gate_ok: bool | None = None
+        if gate and enabled:                              # decided here, once: several run_many calls may run at the same time
+            from . import ai_budget
+            self._gate_ok = False if gate == "never" else ai_budget.take(gate)
         self.provider = config.AI_PROVIDER
         self.model = config.CLAUDE_MODEL if self.provider == "claude" else config.TYPESAFE_MODEL if self.provider == "typesafe" else ""
         if self.provider in ("deepseek", "openai"):
@@ -104,6 +111,9 @@ class Judge:
     async def run_many(self, states: list[dict[str, Any]], questions: dict[str, Any]) -> list[dict[str, Any] | None]:
         if not self.enabled or not states:
             return [None] * len(states)
+        if self.gate:
+            if not self._gate_ok:
+                return self._fallback(states, questions)    # outside its model window: the backup rules answer
         name = self._name()
         if time.time() < Judge._credits_out_until:
             self.failures += len(states)
@@ -1045,7 +1055,7 @@ def _clean(obj: Any) -> Any:
     return str(obj)
 
 
-async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool = True) -> dict[str, Any] | None:
+async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool = True, gate: str | None = None) -> dict[str, Any] | None:
     """Full stock record for one ticker on demand (server mode: a name added from the page).
     Same pipeline as a build: technicals, price action, news, smart money, options, the
     round-1 stock read, then the stance round over the composed picture."""
@@ -1067,7 +1077,7 @@ async def analyze_ticker(ticker: str, market_tone: str = "mixed", use_ai: bool =
         smart[t]["congress"] = fetch.fetch_congress_trades().get("by_ticker", {}).get(t, [])[:8]
     options = fetch.fetch_options_flow([t])
     s["scan"] = _scan_slim(scanner.scan(fetch.fetch_intraday([t]), {t: s0}, [t], mstate)["by_ticker"].get(t))
-    judge = Judge(enabled=use_ai)
+    judge = Judge(enabled=use_ai, gate=gate)
     a, sm_a, op_a = await asyncio.gather(
         judge.run_one(_stock_state(s, mstate), J.STOCK_QUESTIONS),
         judge.run_many([_sm_state(t, smart[t], s["name"], s["technicals"])] if t in smart else [], J.SMART_MONEY_QUESTIONS),

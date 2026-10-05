@@ -47,11 +47,16 @@ jobs:
           MU_WATCHLIST: watchlist.txt
           MU_APP_URL: ${{ vars.MU_APP_URL }}
           MU_API_URL: ${{ vars.MU_API_URL }}     # repository variable: public URL of the app server (tunnel or Render)     # repository variable: the hosted app's URL once it is published
+          MU_HOSTED_AI: ${{ vars.MU_HOSTED_AI }}   # "1" lets this build call the model; off by default (see below)
         run: |
           mkdir -p site
+          # Model calls run on the app server's timetable only (hourly in the session, twice a day otherwise); the live
+          # page reads its report from the server. This hourly build is the fallback copy, so it uses the backup rules
+          # and spends no tokens unless the repository variable MU_HOSTED_AI is "1".
+          AI_FLAG="--no-ai"; [ "${MU_HOSTED_AI:-0}" = "1" ] && AI_FLAG=""
           # The runner occasionally aborts with a native heap error inside a data library; a fresh process succeeds.
           for attempt in 1 2 3; do
-            if market-update --out site; then break; fi
+            if market-update $AI_FLAG --out site; then break; fi
             echo "build attempt $attempt failed; retrying"; sleep 20
             [ "$attempt" = 3 ] && exit 1
           done
