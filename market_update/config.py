@@ -81,6 +81,8 @@ SECTOR_ETFS: dict[str, str] = {
     "XLU": "Utilities", "XLRE": "Real Estate", "ARKK": "ARK Innov", "TLT": "20Y Bonds",
     "HYG": "HY Credit", "GLD": "Gold ETF",
 }
+# Kept in SECTOR_ETFS for the flow gauges and quotes, but not industry groups: never ranked as a leading or lagging group.
+NON_INDUSTRY = {"ARKK", "HYG", "GLD", "TLT"}
 
 # Money-flow ratio gauges. "up_means" is what a rising ratio says about positioning.
 FLOW_GAUGES = [

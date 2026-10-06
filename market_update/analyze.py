@@ -1237,7 +1237,7 @@ def _brief_inputs(report: dict[str, Any]) -> dict[str, Any]:
     # the session so far: index ETFs, sector leaders and laggards, the biggest movers among analysed names, scanner count
     ind = {i["symbol"]: i for i in report.get("indices", [])}
     session = {"indexes": [{"symbol": k, "name": v.get("name"), "last": v.get("last"), "chg_pct": v.get("chg_pct")} for k, v in ind.items() if k in ("SPY", "QQQ", "IWM", "DIA")]}
-    secs = sorted([x for x in ((report.get("flows") or {}).get("sectors") or []) if isinstance(x.get("chg_1d"), (int, float))], key=lambda x: -x["chg_1d"])
+    secs = sorted([x for x in ((report.get("flows") or {}).get("sectors") or []) if isinstance(x.get("chg_1d"), (int, float)) and x.get("symbol") not in config.NON_INDUSTRY], key=lambda x: -x["chg_1d"])
     session["leaders"] = [{"label": x["label"], "chg_pct": x["chg_1d"]} for x in secs[:3]]
     session["laggards"] = [{"label": x["label"], "chg_pct": x["chg_1d"]} for x in secs[-3:]][::-1]
     movers = sorted([s for s in report.get("stocks", []) if isinstance(s.get("chg_pct"), (int, float))], key=lambda s: -abs(s["chg_pct"]))[:6]

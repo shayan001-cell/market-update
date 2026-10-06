@@ -103,9 +103,9 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const isNum = (x) => typeof x === "number" && isFinite(x);
   const fnum = (x, nd = 2) => (isNum(x) ? x.toLocaleString("en-US", { minimumFractionDigits: nd, maximumFractionDigits: nd }) : "–");
-  const fpct = (x, nd = 2, sign = true) => (isNum(x) ? ((sign && x > 0 ? "+" : "") + x.toFixed(nd) + "%").replace("-", "−") : "–");
+  const fpct = (x, nd = 2, sign = true) => (isNum(x) ? (Number(x.toFixed(nd)) === 0 ? (0).toFixed(nd) + "%" : ((sign && x > 0 ? "+" : "") + x.toFixed(nd) + "%").replace("-", "−")) : "–");   // a move that rounds to nothing has no sign
   const fbp = (x) => (isNum(x) ? ((x > 0 ? "+" : "") + x.toFixed(0) + " bp").replace("-", "−") : "–");
-  const fcap = (x) => { if (!isNum(x)) return "–"; for (const [d, s] of [[1e12, "T"], [1e9, "B"], [1e6, "M"]]) if (x >= d) return "$" + (x / d).toFixed(1) + s; return "$" + x.toFixed(0); };
+  const fcap = (x) => { if (!isNum(x)) return "–"; for (const [d, s] of [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]]) if (x >= d) return "$" + (x / d).toFixed(1) + s; return "$" + x.toFixed(0); };
   const fvol = (x) => { if (!isNum(x)) return "–"; for (const [d, s] of [[1e9, "B"], [1e6, "M"], [1e3, "K"]]) if (x >= d) return (x / d).toFixed(1) + s; return x.toFixed(0); };
   const cls = (x, inverse) => { if (!isNum(x) || Math.abs(x) < 0.005) return "flat"; let up = x > 0; if (inverse) up = !up; return up ? "up" : "down"; };
   const ICON_UP = '<svg class="ico" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2.5 10 8H2z"/></svg>';
@@ -412,10 +412,10 @@
       <div class="wc-head"><div class="wc-id"><button class="wc-ticker lnk-t" data-ticker-page="${esc(s.ticker)}" title="Open ${esc(s.ticker)}'s page">${esc(s.ticker)}</button><span class="wc-name" title="${esc(s.name)}">${esc(s.name)}</span></div><div class="wc-price">${priceHtml(s.ticker, s)}${compact ? "" : `<button class="wc-x" data-remove="${esc(s.ticker)}" title="Remove from this list">×</button>`}</div></div>
       ${verdict}
       ${nowStrip(s, r)}
-      <div class="wc-lean"><span class="lean ${leanCls}">${lean.toUpperCase()}</span><span class="wc-leansub">${a.bias ? convTag(a.bias.confidence) : "no model read"} · ${a.setup ? pretty(a.setup.choice) : "–"}</span></div>
+      <div class="wc-lean"><span class="lean ${leanCls}">${lean.toUpperCase()}</span><span class="wc-leansub">${a.bias ? convTag(a.bias.confidence) : "no model read"} · ${a.setup ? pretty(a.setup.choice) : "–"}${(() => { const v = verdictFor(s), sd = v && v.code ? pressingFor(v, null)[1] : null; return (sd === "up" && lean === "short") || (sd === "down" && lean === "long") ? ' · <span class="muted" title="The model\'s lean and the price verdict point different ways: the verdict on top is the one the card follows.">lean is against the verdict</span>' : ""; })()}</span></div>
       <div class="wc-scores"><span title="Swing setup quality, 0–100"><i>Swing</i><b>${words(s.scores.swing, 1.0001, SCORE_WORDS)}</b><em class="mono">${(s.scores.swing * 100).toFixed(0)}</em></span><span title="Day-trade fit, 0–100"><i>Day trade</i><b>${words(s.scores.day, 1.0001, SCORE_WORDS)}</b><em class="mono">${(s.scores.day * 100).toFixed(0)}</em></span><span title="Average daily move"><i>Moves</i><b class="mono">${fpct(t.atr_pct, 1, false)}</b><em>a day</em></span></div>
       <div class="wc-who"><div class="wc-who-h">Who is buying</div>${who || '<ul class="who"><li class="na">No smart-money data for this name.</li></ul>'}</div>
-      <div class="wc-read">${a.price_action ? `<div class="wc-pa">${PA.control[a.price_action.choice] || ""} ${PA.structure[pa.structure] || ""} Last candle: ${pretty(pa.pattern || "ordinary")}.</div>` : '<div class="wc-pa muted">No price-action read.</div>'}${pl ? `<div class="wc-plan ${pl.lean}">${pl.text}</div>` : '<div class="wc-plan">No plan: the model has no lean here.</div>'}</div>
+      <div class="wc-read">${a.price_action ? `<div class="wc-pa">${paControl(s)[1]} ${PA.structure[pa.structure] || ""} Last candle: ${pretty(pa.pattern || "ordinary")}.</div>` : '<div class="wc-pa muted">No price-action read.</div>'}${pl ? `<div class="wc-plan ${pl.lean}">${pl.text}</div>` : '<div class="wc-plan">No plan: the model has no lean here.</div>'}</div>
       ${checklistHtml(checklist(s, r || report))}
       <div class="wc-foot"><div class="wc-flags">${earn}${flags}${smBadge(s)}${opBadge(s)}</div><div class="wc-actions"><button class="btn sm" data-open="${esc(s.ticker)}">Full analysis</button><a class="btn sm ghost" href="${tvLink(s.ticker)}" target="_blank" rel="noopener">Chart</a></div></div>
     </article>`;
@@ -456,7 +456,7 @@
       tone === "risk_on" ? "Buy strength: longs through yesterday's high on above-normal volume; avoid shorting dips." : tone === "risk_off" ? "Sell strength: short pops into resistance and fade gaps; do not buy the first dip." : "No lead: trade the range between yesterday's high and low, and wait for the first 30 minutes.",
       mv ? `Size for a ${mv}% day on the S&P${vol >= 2 ? "; ranges will be wide, so stops need room" : "; ranges should stay ordinary"}.` : "",
       nq != null ? `${nq} names have unusual volume right now: start in SCAN, take the ones above VWAP with a breakout read.` : "",
-      leadingSector(r) ? `Leadership: ${leaderLabel(r)}. Trade in that group first.` : (lead && lead !== "unclear" ? `Leadership: ${pretty(lead)}. Trade in that group first.` : ""),
+      leadingSector(r) ? `Leadership: ${leaderLabel(r)}, the top group in today's industry table.` : (lead && lead !== "unclear" ? `Leadership: ${pretty(lead)}.` : ""),
     ].filter(Boolean);
     const swing = [
       tone === "risk_on" ? "Add to the strongest names on pullbacks to the 20-day average; let winners run." : tone === "risk_off" ? "Cut losers, hold cash, and only take setups with a tight stop and 2× reward." : "Keep size small until the tone resolves; favour names with a clear level.",
@@ -1605,8 +1605,12 @@
   }
   const INDEX_ETFS = { SPY: "S&P 500", QQQ: "Nasdaq 100", DIA: "Dow 30", IWM: "Small caps" };
   // FIX 3: one source for sector performance. Every "leading" label on the page comes from the top row of this list.
+  // The sector list also carries ARK Innovation, high-yield credit, gold and long bonds for the flow gauges. They are not
+  // industry groups, so no "leading group" label or industry ranking may pick them.
+  const NON_INDUSTRY = new Set(["ARKK", "HYG", "GLD", "TLT"]);
+  const industryRows = (r) => ((r.flows || {}).sectors || []).filter((x) => !NON_INDUSTRY.has(x.symbol));
   function sectorRows(r) {
-    return ((r.flows || {}).sectors || []).map((x) => ({ ...x, chg: qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg })).filter((x) => isNum(x.chg)).sort((a, b) => b.chg - a.chg);
+    return industryRows(r).map((x) => ({ ...x, chg: qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg })).filter((x) => isNum(x.chg)).sort((a, b) => b.chg - a.chg);
   }
   function leadingSector(r) { const rows = sectorRows(r); return rows.length ? rows[0] : null; }
   const leaderLabel = (r, fallback) => { const l = leadingSector(r); return l ? `${l.label} (${fpct(l.chg, 1)})` : fallback; };
@@ -1618,6 +1622,16 @@
     if (code) return ["two-way", "flat"];
     const d = q && q.direction;                        // no verdict at all: fall back to the scanner's direction
     return d === "up" ? ["buyers pressing", "up"] : d === "down" ? ["sellers pressing", "down"] : ["two-way", "flat"];
+  }
+  // The short-term "who is in control" read follows the card's verdict: when the latest candles lean the other way it is
+  // named as a pullback or bounce inside the verdict's move, never as a second, opposite call on the same card.
+  function paControl(s) {
+    const c = s && s.ai && s.ai.price_action && s.ai.price_action.choice; if (!c) return null;
+    const v = verdictFor(s), side = v && v.code ? pressingFor(v, null)[1] : null, cs = { buyers_in_control: "up", sellers_in_control: "down" }[c];
+    if ((side === "up" || side === "down") && cs && cs !== side)
+      return side === "up" ? ["Pullback in the up move", "Sellers have the latest candles, against the card's up verdict: so far a pullback inside the move."]
+                           : ["Bounce in the down move", "Buyers have the latest candles, against the card's down verdict: so far a bounce inside the move."];
+    return [pretty(c), PA.control[c] || ""];
   }
   const bigCap = (t, r) => { const s = stockFor(t); if (s && isNum((s.fundamentals || {}).market_cap)) return s.fundamentals.market_cap >= 10e9; const q = (r.lite || {})[t]; return !!(q && isNum(q.avg_dollar_volume) && q.avg_dollar_volume >= 1e9 && q.kind !== "ETF"); };
   const flowOf = (t, r) => { const q = Q.map[t] || {}; if (isNum(q.rvol)) return q; const l = ((r.lite || {})[t] || {}).scan; return l ? { rvol: l.rvol_tod, above_vwap: l.above_vwap, score: l.score, direction: l.direction } : {}; };
@@ -1911,7 +1925,7 @@
       <table class="tbl act-tbl"><thead><tr><th>Name</th><th>Price</th><th>Activity</th><th>What is happening</th><th>Sensible play</th><th></th></tr></thead><tbody>${uniq.map((x) => `<tr class="clickable" data-ticker-page="${esc(x.t)}"><td class="sym"><b>${esc(x.t)}</b><div class="meta2">${esc(x.name || "")} · ${x.src}</div></td><td class="num">${priceHtml(x.t, null)}</td><td class="num"><b class="${isNum(x.vol) && x.vol >= 2 ? "up" : ""}">${isNum(x.vol) ? x.vol.toFixed(1) + "×" : "–"}</b><div class="meta2">vs normal</div></td><td><span class="pill ${x.cls}">${esc(x.why)}</span></td><td class="meta2">${esc(x.play)}</td><td>${isWatched(x.t) ? '<span class="muted">on list</span>' : `<button class="btn sm ghost" data-add-ticker="${esc(x.t)}" data-stop>+ Watch</button>`}</td></tr>`).join("")}</tbody></table></section>`;
   }
   function secThemes(r) {
-    const sec = ((r.flows || {}).sectors || []).filter((x) => isNum(x.chg_1d)).slice().sort((a, b) => b.chg_1d - a.chg_1d);
+    const sec = industryRows(r).filter((x) => isNum(x.chg_1d)).slice().sort((a, b) => b.chg_1d - a.chg_1d);
     const T_ = r.theme || {}; const groups = (T_.groups || []).filter((g) => isNum(g.avg_ret_1m)).slice().sort((a, b) => b.avg_ret_1m - a.avg_ret_1m);
     if (!sec.length && !groups.length) return "";
     const mx = Math.max(0.1, ...sec.map((x) => Math.abs(x.chg_1d)));
@@ -1956,6 +1970,8 @@
     pos: { complacent: "Complacent: low put/call, call-heavy single-stock flow, little hedging. Crowded long.", bullish_healthy: "Bullish and healthy: call-leaning flow with normal index hedging.", balanced: "Balanced: no side dominant.", hedged: "Hedged: index puts elevated while single-stock calls stay active.", fearful: "Fearful: put buying across categories." },
   };
   const opBadge = (s) => { const o = s && s.options; if (!o || !o.ai) return ""; const rd = OP.read[o.ai.read.choice]; const cl = { up: "ok", up2: "ok", down: "bad", flat: "" }[rd[2]] || ""; return `<span class="tag ${cl}" title="${esc(rd[1])} Intensity ${OP.intensity[Math.round(o.ai.intensity.score)]}, put/call ${o.pc_volume ?? "–"}.">options: ${rd[0].toLowerCase()}${o.ai.intensity.score >= 2 ? " · heavy" : ""}</span>`; };
+  // strike against the spot price, in words: out of the money, in the money or at the money
+  const moneyness = (p) => (!isNum(p) ? "" : Math.abs(p) < 0.5 ? "at the money" : `${Math.abs(p).toFixed(0)}% ${p > 0 ? "OTM" : "ITM"}`);
   function secOptions(r) {
     const O = r.options; if (!O || !O.rows || !O.rows.length) return `<section><h2>Options flow</h2><div class="muted">No options data this build.</div></section>`;
     const cb = O.cboe || {}; const rt = cb.ratios || {};
@@ -1973,15 +1989,15 @@
         <td class="num">${fcap(o.total_notional)}<div class="meta2">${fcap(o.call_notional)} calls · ${fcap(o.put_notional)} puts</div></td>
         <td class="num"><span class="up">${fvol(o.call_volume)}</span> / <span class="down">${fvol(o.put_volume)}</span><div class="meta2">P/C ${o.pc_volume ?? "–"} · OI P/C ${o.pc_oi ?? "–"}</div></td>
         <td><div class="brd" style="grid-template-columns:1fr 44px;margin:0"><span class="bar" style="width:100%"><span class="bar-fill up" style="width:${isNum(o.call_share) ? (o.call_share * 100).toFixed(0) : 0}%"></span></span><span class="num">${isNum(o.call_share) ? (o.call_share * 100).toFixed(0) + "%" : "–"}</span></div><div class="meta2">share of $ in calls</div></td>
-        <td>${tc ? `<b>${fnum(tc.strike, 0)}C</b> ${tc.dte}d <span class="muted">${fvol(tc.volume)} vol · ${fcap(tc.notional)}${isNum(tc.otm_pct) ? " · " + fpct(tc.otm_pct, 0) + " OTM" : ""}</span>` : "–"}<div class="meta2">${tp ? `<b>${fnum(tp.strike, 0)}P</b> ${tp.dte}d ${fvol(tp.volume)} vol · ${fcap(tp.notional)}` : ""}</div></td>
-        <td>${(o.unusual || []).slice(0, 2).map((u) => `<div><span class="${u.side === "call" ? "up" : "down"}">${fnum(u.strike, 0)}${u.side === "call" ? "C" : "P"}</span> ${u.dte}d · ${fvol(u.volume)} vol vs ${fvol(u.oi)} OI (${u.vol_oi}×) · ${fcap(u.notional)}</div>`).join("") || '<span class="muted">none</span>'}</td>
+        <td>${tc ? `<b>${fnum(tc.strike, 0)}C</b> ${tc.dte}d <span class="muted">${fvol(tc.volume)} vol · ${fcap(tc.notional)}${isNum(tc.otm_pct) ? " · " + moneyness(tc.otm_pct) : ""}</span>` : "–"}<div class="meta2">${tp ? `<b>${fnum(tp.strike, 0)}P</b> ${tp.dte}d ${fvol(tp.volume)} vol · ${fcap(tp.notional)}` : ""}</div></td>
+        <td>${(o.unusual || []).slice(0, 2).map((u) => `<div class="op-unu"><span class="${u.side === "call" ? "up" : "down"}">${fnum(u.strike, 0)}${u.side === "call" ? "C" : "P"}</span> ${u.dte}d · <b>${fcap(u.notional)}</b><div class="meta2">${fvol(u.volume)} vol vs ${fvol(u.oi)} OI (${u.vol_oi}×)</div></div>`).join("") || '<span class="muted">none</span>'}</td>
         <td>${rd ? `<span class="pill ${rd[2]}">${rd[0]}</span> ${convTag(a.read.confidence)}<div class="meta2">${OP.intensity[Math.round(a.intensity.score)]} · ${esc(rd[1])}</div>` : "–"}</td></tr>`; }).join("");
     const heavy = (O.heavy || []).slice(0, 12).map((u) => `<li><b>${esc(u.ticker)}</b> <span class="${u.side === "call" ? "up" : "down"}">${fnum(u.strike, 0)} ${u.side}</span> · ${esc(u.expiry)} (${u.dte}d) · ${fvol(u.volume)} contracts vs ${fvol(u.oi)} open (${u.vol_oi}×) · <b>${fcap(u.notional)}</b>${isNum(u.otm_pct) ? ` · ${fpct(u.otm_pct, 0)} from spot` : ""}</li>`).join("");
-    return `<section class="op-section"><h2>Options flow: where the bets are going <span class="muted">source: Yahoo option chains, 15-minute delayed, refreshed every 30 min · Cboe daily totals as of ${esc(cb.as_of || "–")} · "unusual" = today's contracts ≥ 3× the ones already open and ≥ $250k</span></h2>
+    return `<section class="op-section"><h2>Options flow: where the bets are going <span class="muted">source: Yahoo option chains, 15-minute delayed, refreshed every 30 min · ${cb.as_of ? `Cboe daily totals as of ${esc(cb.as_of)} · ` : ""}"unusual" = today's contracts ≥ 3× the ones already open and ≥ $250k</span></h2>
       ${explain("Calls are bets on up, puts on down or protection. Notional is contracts × price × 100, the dollars actually traded. When volume swamps open interest, the positions are new today, which is the closest public proxy for aggressive buying.")}
       ${head}
       <h3 style="margin-top:4px">Heaviest new positioning today</h3>
-      <div class="heavy-strip">${(O.heavy || []).slice(0, 10).map((u) => `<div class="hv ${u.side}"><div class="hv-t"><b>${esc(u.ticker)}</b> <span class="${u.side === "call" ? "up" : "down"}">${fnum(u.strike, 0)} ${u.side.toUpperCase()}</span></div><div class="hv-n">${fcap(u.notional)}</div><div class="meta2">${u.dte}d · ${fvol(u.volume)} contracts${u.vol_oi ? ` · ${u.vol_oi}× OI` : " · OI not posted"}${isNum(u.otm_pct) ? ` · ${fpct(u.otm_pct, 0)}` : ""}</div></div>`).join("") || '<div class="muted">nothing unusual</div>'}</div>
+      <div class="heavy-strip">${(O.heavy || []).slice(0, 10).map((u) => `<div class="hv ${u.side}"><div class="hv-t"><b>${esc(u.ticker)}</b> <span class="${u.side === "call" ? "up" : "down"}">${fnum(u.strike, 0)} ${u.side.toUpperCase()}</span></div><div class="hv-n">${fcap(u.notional)}</div><div class="meta2">${u.dte}d · ${fvol(u.volume)} contracts${u.vol_oi ? ` · ${u.vol_oi}× OI` : " · OI not posted"}${isNum(u.otm_pct) ? ` · ${moneyness(u.otm_pct)}` : ""}</div></div>`).join("") || '<div class="muted">nothing unusual</div>'}</div>
       <div class="tbl-wrap" style="margin-top:12px"><table class="tbl op-tbl"><thead><tr><th>Ticker</th><th>$ traded</th><th>Call / put vol</th><th>Call share</th><th>Top strikes</th><th>Unusual</th><th>Model read</th></tr></thead><tbody>${rows}</tbody></table></div>
     </section>`;
   }
@@ -2379,7 +2395,7 @@
   function paTile(s) {
     const pa = s.price_action || {}, a = s.ai || {};
     if (!pa.pattern) return "";
-    const ctrl = a.price_action ? `<div class="tile-value small">${pretty(a.price_action.choice)}</div>${explain(PA.control[a.price_action.choice] || "")}` : "";
+    const pc = paControl(s), ctrl = pc ? `<div class="tile-value small">${esc(pc[0])}</div>${explain(pc[1])}` : "";
     const entry = a.entry_quality ? `<div class="wc-scores" style="margin-top:6px"><span>Entry quality ${bar(a.entry_quality.score, 3)}<b class="mono">${a.entry_quality.score.toFixed(1)}/3</b> · ${PA.entry[Math.round(a.entry_quality.score)]}</span></div>` : "";
     const sh = (pa.swing_highs || []).map((p) => fnum(p.v)).join(" → "), sl = (pa.swing_lows || []).map((p) => fnum(p.v)).join(" → ");
     return `<div class="tile"><div class="tile-label">Price action · who is in control</div>${ctrl}${entry}
@@ -3254,7 +3270,7 @@
   }
   function pulseSectors(r) {
     const key = { "1d": "chg_1d", "1w": "chg_5d", "1m": "chg_1m" }[pulsePeriod];
-    const rows = ((r.flows || {}).sectors || []).map((x) => ({ ...x, v: pulsePeriod === "1d" ? qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg : x[key] })).filter((x) => isNum(x.v)).sort((a, b) => b.v - a.v);
+    const rows = industryRows(r).map((x) => ({ ...x, v: pulsePeriod === "1d" ? qp(x.symbol, { chg_pct: x.chg_1d, last: x.last }).chg : x[key] })).filter((x) => isNum(x.v)).sort((a, b) => b.v - a.v);
     if (!rows.length) return "";
     const mx = Math.max(0.5, ...rows.map((x) => Math.abs(x.v)));
     const bars = rows.map((x) => { const w = (Math.abs(x.v) / mx) * 50; return `<li><span class="ps-l">${esc(x.label)}</span><span class="ps-bar"><i class="${cls(x.v)}" style="${x.v >= 0 ? `left:50%` : `right:50%`};width:${w.toFixed(1)}%"></i></span><span class="ps-v ${cls(x.v)}">${fpct(x.v, 1)}</span></li>`; }).join("");
@@ -3263,7 +3279,7 @@
     return `<article class="pz pz-sectors" data-pz="sectors"><div class="pz-h"><span class="pz-eye">Where the money went</span><div class="pz-seg">${seg}</div></div>
       <p class="pl-lede"><b class="${cls(top.v)}">${esc(top.label)}</b> led, <b class="${cls(bot.v)}">${esc(bot.label)}</b> lagged.</p><ul class="ps-list">${bars}</ul></article>`;
   }
-  const RADAR = { breadth: ["More stocks joining in", "Only the giants carrying it"], size: ["Small caps winning", "Big caps preferred"], offense: ["Offense over defense", "Defense over offense"], credit: ["Bond market relaxed", "Bond market nervous"], growth: ["Growth beating fear", "Fear beating growth"], semis: ["Chips leading", "Chips lagging"] };
+  const RADAR = { breadth: ["More stocks joining in", "Only the giants carrying it"], size: ["Small caps winning", "Big caps preferred"], offense: ["Offense over defense", "Defense over offense"], credit: ["Bond market relaxed", "Bond market nervous"], growth: ["Growth beating fear", "Fear beating growth"], semis: ["Chips ahead of the market this month", "Chips behind the market this month"] };
   function pulseRadar(r) {
     const gs = (((r.flows || {}).gauges) || []);
     const items = gs.map((g) => { if (g.key === "vixterm") { if (!isNum(g.value)) return ""; const st = g.value > 1; return `<li class="${st ? "down" : "up"}"><span class="pr-ar">${st ? "!" : "✓"}</span><span><b>${st ? "Short-term stress" : "No short-term stress"}</b><i>VIX vs 3-month VIX ${fnum(g.value, 2)}</i></span></li>`; }
@@ -3424,6 +3440,12 @@
     const first = m.querySelector("input"); if (first) first.focus();
   }
   let recordData = null;
+  // A scored call is a hit or a miss; a closed window with no direction (wait, hold, range) or an unchanged price is neither.
+  function recResult(x) {
+    if (x.hit === 1) return "hit"; if (x.hit === 0) return "miss";
+    if (!x.eval_ts) return "open";
+    return isNum(x.eval_price) && x.price && Math.abs(x.eval_price / x.price - 1) < 0.0005 ? "no move" : "no direction";
+  }
   async function loadRecord() { try { const res = await api("/api/track-record", { cache: "no-store" }); if (res.ok) { recordData = await res.json(); if (currentView === "record") renderAll(); } } catch (e) {} }
   function secRecord() {
     if (STATIC_MODE) return `<section><h2>Track record</h2><div class="muted">The scored history lives on the app server.</div></section>`;
@@ -3432,11 +3454,14 @@
     const tile = (l, v, sub) => `<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${sub || ""}</div></div>`;
     const byv = (j.by_verdict || []).map((x) => `<tr><td>${esc(x.kind)}</td><td><b>${esc(pretty(x.verdict))}</b></td><td class="num">${x.n}</td><td class="num">${x.scored || 0}</td><td class="num">${x.hits || 0}</td><td class="num"><b>${rate(x.hits || 0, x.scored || 0)}</b></td><td class="num ${cls(x.avg_move_pct)}">${pct(x.avg_move_pct)}</td></tr>`).join("") || '<tr><td colspan="7" class="muted">No calls scored yet: the first swing windows close 7 days after the first build with the ledger on.</td></tr>';
     const byt = (j.by_ticker || []).map((x) => `<tr class="clickable" data-ticker-page="${esc(x.ticker)}"><td><b>${esc(x.ticker)}</b></td><td class="num">${x.n}</td><td class="num">${x.scored || 0}</td><td class="num">${x.hits || 0}</td><td class="num"><b>${rate(x.hits || 0, x.scored || 0)}</b></td><td class="num ${cls(x.avg_move_pct)}">${pct(x.avg_move_pct)}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">Nothing scored yet.</td></tr>';
-    const rec = (j.recent || []).map((x) => `<tr class="clickable" data-ticker-page="${esc(x.ticker)}"><td class="mono">${new Date(x.ts * 1000).toLocaleString()}</td><td><b>${esc(x.ticker)}</b></td><td>${esc(x.kind)}</td><td>${esc(pretty(x.verdict))}</td><td class="num">${fnum(x.price)}</td><td class="num">${fnum(x.eval_price)}</td><td class="${x.hit === 1 ? "up" : x.hit === 0 ? "down" : "muted"}">${x.hit === 1 ? "hit" : x.hit === 0 ? "miss" : x.eval_ts ? "no direction" : "open"}</td></tr>`).join("");
+    const rec = (j.recent || []).map((x) => `<tr class="clickable" data-ticker-page="${esc(x.ticker)}"><td class="mono">${new Date(x.ts * 1000).toLocaleString()}</td><td><b>${esc(x.ticker)}</b></td><td>${esc(x.kind)}</td><td>${esc(pretty(x.verdict))}</td><td class="num">${fnum(x.price)}</td><td class="num">${fnum(x.eval_price)}</td><td class="${x.hit === 1 ? "up" : x.hit === 0 ? "down" : "muted"}">${recResult(x)}</td></tr>`).join("");
+    const kindsLine = (k) => Object.entries(k || {}).filter(([, v]) => v.scored).map(([n, v]) => `${esc(n)} ${rate(v.hits, v.scored)} of ${v.scored}`).join(" · ");
+    const byd = (j.by_day || []).map((x) => `<tr class="clickable" data-vday="${esc(x.day)}"><td>${esc(x.day)}</td><td class="num">${x.n}</td><td class="num">${x.scored}</td><td class="num">${x.hits}</td><td class="num"><b>${rate(x.hits, x.scored)}</b></td><td class="muted">${kindsLine(x.kinds) || (x.scored ? "" : "windows still open")}</td></tr><tr class="day-detail" data-vday-detail="${esc(x.day)}" hidden><td colspan="6"><div class="muted">Loading…</div></td></tr>`).join("");
     return `<section class="record"><h2>Track record <span class="muted">every verdict, scored against the price after its window · public page: <a href="${esc(API || "")}/track-record" target="_blank" rel="noopener">${esc((API || location.origin) + "/track-record")}</a></span></h2>
-      ${explain("Each time the desk publishes a verdict, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. Up after a bullish call, or down after a bearish one, counts as a hit. Calls with no direction (wait, hold, range, flat) are listed but not scored. This is the desk keeping itself honest, not advice.")}
+      ${explain("Each time the desk publishes a verdict, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. Up after a bullish call, or down after a bearish one, counts as a hit. Calls with no direction (wait, hold, range, flat) are listed but not scored, and so is a call whose price has not moved by the check (the market was shut, for example). This is the desk keeping itself honest, not advice.")}
       <div class="grid c3" style="margin-bottom:12px">${tile("Calls logged", T.n || 0, T.since ? "since " + new Date(T.since * 1000).toLocaleDateString() : "")}${tile("Scored so far", T.scored || 0, "windows that have closed")}${tile("Hit rate", rate(T.hits || 0, T.scored || 0), `${T.hits || 0} hits`)}</div>
       <h3>By verdict</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Window</th><th>Verdict</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody>${byv}</tbody></table></div>
+      <h3 style="margin-top:14px">Calls, day by day <span class="muted">grouped by the day the call was made · click a day for every call and its result</span></h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Day</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>By window</th></tr></thead><tbody>${byd || '<tr><td colspan="6" class="muted">No calls logged yet.</td></tr>'}</tbody></table></div>
       <h3 style="margin-top:14px">By name</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody>${byt}</tbody></table></div>
       ${j.direction ? (() => { const md = Object.fromEntries((j.analysis_days || []).map((x) => [x.day, x])); return `<h3 style="margin-top:14px">Market direction, day by day <span class="muted">the morning call and every 15-minute read, scored at the close · click a day</span></h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Day</th><th>Morning call</th><th>Intraday reads</th><th>Scored</th><th>Hits</th><th>Hit rate</th></tr></thead><tbody>${(j.direction.by_day || []).map((x) => { const m = md[x.day] || {}; return `<tr class="clickable" data-day="${esc(x.day)}"><td>${esc(x.day)}</td><td>${m.morning_scored ? (m.morning_hits ? '<span class="up">hit</span>' : '<span class="down">miss</span>') : (m.morning_calls ? "open" : "–")}</td><td class="num">${x.n}</td><td class="num">${x.scored || 0}</td><td class="num">${x.hits || 0}</td><td class="num"><b>${rate(x.hits || 0, x.scored || 0)}</b></td></tr><tr class="day-detail" data-day-detail="${esc(x.day)}" hidden><td colspan="6"><div class="muted">Loading…</div></td></tr>`; }).join("") || '<tr><td colspan="6" class="muted">No reads yet. The first session with the desk running fills this in.</td></tr>'}</tbody></table></div>`; })() : ""}
       <h3 style="margin-top:14px">Most recent calls</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Name</th><th>Window</th><th>Verdict</th><th>Price then</th><th>Price after</th><th>Result</th></tr></thead><tbody>${rec || '<tr><td colspan="7" class="muted">No calls logged yet.</td></tr>'}</tbody></table></div></section>`;
@@ -3805,6 +3830,12 @@
         const morning = (j.morning || []).map((m) => `<li><b>${esc(m.symbol)}</b> morning call: ${esc(pretty(m.read || "–"))} at ${fnum(m.price)} → ${isNum(m.outcome_pct) ? fpct(m.outcome_pct, 2) + " by the close" : "open"} ${m.hit === 1 ? '<span class="up">hit</span>' : m.hit === 0 ? '<span class="down">miss</span>' : ""}</li>`).join("");
         const reads = (j.reads || []).map((r) => `<li><samp>${t(r.ts)}</samp> <span class="pill ${DIR[r.expected] ? DIR[r.expected][1] : "flat"}">${esc(r.expected || "–")}</span> ${convTag(r.confidence)} <span class="muted">${r.driver ? (DIR_DRIVER[r.driver] || pretty(r.driver)) : ""}${r.facts && r.facts.spy ? ` · SPY ${r.facts.spy.above_vwap ? "above" : "below"} the day's average price` : ""}${r.facts && r.facts.sentiment ? ` · Reddit ${esc(r.facts.sentiment.reddit_spy || "none")}` : ""}</span> → SPY ${isNum(r.move_spy_pct) ? fpct(r.move_spy_pct, 2) + " to the close" : "open"} ${r.hit === 1 ? '<span class="up">hit</span>' : r.hit === 0 ? '<span class="down">miss</span>' : ""}</li>`).join("");
         row.querySelector("td").innerHTML = `<ul class="bf-list">${morning}${reads || '<li class="muted">no intraday reads that day</li>'}</ul>`; } catch (e) { row.querySelector("td").innerHTML = '<div class="muted">Could not load that day.</div>'; } }));
+    document.querySelectorAll("tr[data-vday]").forEach((tr) => tr.addEventListener("click", async () => { const day = tr.getAttribute("data-vday"); const row = document.querySelector(`tr[data-vday-detail="${CSS.escape(day)}"]`); if (!row) return; row.hidden = !row.hidden; if (row.hidden) return;
+      try { const res = await api(`/api/track-record/day?day=${encodeURIComponent(day)}`, { cache: "no-store" }); const j = await res.json();
+        const t = (ts) => new Date(ts * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
+        const calls = (j.calls || []).map((c) => { const r = recResult(c); const mv = isNum(c.eval_price) && c.price ? (c.eval_price / c.price - 1) * 100 : null;
+          return `<tr><td class="mono">${t(c.ts)}</td><td><b>${esc(c.ticker)}</b></td><td>${esc(c.kind)}</td><td>${esc(pretty(c.verdict))}</td><td class="num">${fnum(c.price)}</td><td class="num">${fnum(c.eval_price)}</td><td class="num ${cls(mv)}">${isNum(mv) ? fpct(mv, 1) : "–"}</td><td class="${r === "hit" ? "up" : r === "miss" ? "down" : "muted"}">${r}${r === "open" ? ` · checked after ${c.horizon_days}d` : ""}</td></tr>`; }).join("");
+        row.querySelector("td").innerHTML = calls ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>ET</th><th>Name</th><th>Window</th><th>Call</th><th>Price then</th><th>Price after</th><th>Move</th><th>Result</th></tr></thead><tbody>${calls}</tbody></table></div>` : '<div class="muted">No calls that day.</div>'; } catch (e) { row.querySelector("td").innerHTML = '<div class="muted">Could not load that day.</div>'; } }));
     document.querySelectorAll("[data-brief-toggle]").forEach((b) => b.addEventListener("click", () => { const slot = b.getAttribute("data-brief-toggle"); briefOpen = briefOpen === slot ? null : slot; const el = $(".briefs"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } }));
     document.querySelectorAll("[data-view-link]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); switchView(b.getAttribute("data-view-link")); }));
     wireDesk();

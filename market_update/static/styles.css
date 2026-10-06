@@ -3131,3 +3131,8 @@ body:has(#gate.gate-full:not([hidden])){overflow:hidden}
   .chs-chart{height:62vh}
   .chs-panel{height:auto;overflow:visible}
 }
+/* Pro badge on the header bell: the compact header hides button labels, so the badge sits on the bell's corner instead
+   of beside it. It stays visible at every width: it marks the premium feature. */
+header.topbar #alerts-btn{position:relative;overflow:visible}
+header.topbar #alerts-btn .pro-badge{display:inline-block !important;position:absolute;top:-7px;right:-11px;margin:0;padding:1px 5px;font-size:8.5px;line-height:1.35;letter-spacing:.06em;box-shadow:0 0 0 2px #151517;pointer-events:none}
+.op-tbl .op-unu + .op-unu { margin-top: 6px; }

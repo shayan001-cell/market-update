@@ -1338,6 +1338,16 @@ async def api_track_record() -> JSONResponse:
     return JSONResponse(tr, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/track-record/day")
+async def api_track_record_day(day: str) -> JSONResponse:
+    """Public: every verdict call made on one ET day, with its result once the window has closed."""
+    try:
+        datetime.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD")
+    return JSONResponse({"day": day, "calls": await asyncio.to_thread(db.verdict_day_detail, day)}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/alerts")
 async def api_alerts_get(request: Request) -> dict[str, Any]:
     email = _session_email(request)
@@ -1369,9 +1379,10 @@ _TRACK_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><tit
 .tr-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)} .tr-tiles .tile{background:var(--surface-2)}
 table.tbl{width:100%} .hit{color:var(--up)} .miss{color:var(--down)} .open{color:var(--muted)}</style></head><body><div class="tr-wrap">
 <div class="tr-h"><img src="/static/brand/oneview-symbol.png" alt="" style="width:34px;height:34px;border-radius:8px"><div><b>Track record</b><div class="muted" style="font-size:12px">Every verdict the model has made, scored against the price after its time window</div></div></div>
-<p class="tr-note">How this works: each time the desk publishes a verdict on a name, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. A bullish call counts as a hit if the price went up, a bearish call if it went down. Calls with no direction (wait, hold, range, flat) are listed but not scored. Nothing here is advice; it is the desk keeping itself honest.</p>
+<p class="tr-note">How this works: each time the desk publishes a verdict on a name, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. A bullish call counts as a hit if the price went up, a bearish call if it went down. Calls with no direction (wait, hold, range, flat) are listed but not scored, and so is a call whose price has not moved by the check (the market was shut). Nothing here is advice; it is the desk keeping itself honest.</p>
 <div id="tiles" class="tr-tiles"></div>
 <h3>By verdict</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Window</th><th>Verdict</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byv"></tbody></table></div>
+<h3>Calls, day by day</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Day</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th></tr></thead><tbody id="byd"></tbody></table></div>
 <h3>By name</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byt"></tbody></table></div>
 <h3>Most recent calls</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Name</th><th>Window</th><th>Verdict</th><th>Price then</th><th>Price after</th><th>Result</th></tr></thead><tbody id="recent"></tbody></table></div>
 <p class="muted" style="font-size:11px">Prices from Yahoo Finance, delayed. Information, not advice.</p></div>
@@ -1380,8 +1391,9 @@ table.tbl{width:100%} .hit{color:var(--up)} .miss{color:var(--down)} .open{color
 const pretty=k=>String(k||"").replace(/_/g," ");const pct=x=>x==null?"–":(x>0?"+":"")+x.toFixed(1)+"%";const rate=(h,n)=>n?Math.round(h/n*100)+"%":"–";
 const T=j.totals||{};document.getElementById("tiles").innerHTML=[["Calls logged",T.n||0,T.since?"since "+new Date(T.since*1000).toLocaleDateString():""],["Scored so far",T.scored||0,"windows that have closed"],["Hit rate",rate(T.hits||0,T.scored||0),(T.hits||0)+" hits"]].map(([l,v,s])=>`<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${s}</div></div>`).join("");
 document.getElementById("byv").innerHTML=(j.by_verdict||[]).map(r=>`<tr><td>${e(r.kind)}</td><td><b>${e(pretty(r.verdict))}</b></td><td class="num">${r.n}</td><td class="num">${r.scored||0}</td><td class="num">${r.hits||0}</td><td class="num">${rate(r.hits||0,r.scored||0)}</td><td class="num">${pct(r.avg_move_pct)}</td></tr>`).join("")||'<tr><td colspan="7" class="muted">No calls scored yet. Check back after the first windows close.</td></tr>';
+document.getElementById("byd").innerHTML=(j.by_day||[]).map(r=>`<tr><td>${e(r.day)}</td><td class="num">${r.n}</td><td class="num">${r.scored}</td><td class="num">${r.hits}</td><td class="num">${rate(r.hits,r.scored)}</td></tr>`).join("")||'<tr><td colspan="5" class="muted">No calls logged yet.</td></tr>';
 document.getElementById("byt").innerHTML=(j.by_ticker||[]).map(r=>`<tr><td><b>${e(r.ticker)}</b></td><td class="num">${r.n}</td><td class="num">${r.scored||0}</td><td class="num">${r.hits||0}</td><td class="num">${rate(r.hits||0,r.scored||0)}</td><td class="num">${pct(r.avg_move_pct)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">Nothing scored yet.</td></tr>';
-document.getElementById("recent").innerHTML=(j.recent||[]).map(r=>`<tr><td>${new Date(r.ts*1000).toLocaleString()}</td><td><b>${e(r.ticker)}</b></td><td>${e(r.kind)}</td><td>${e(pretty(r.verdict))}</td><td class="num">${r.price!=null?r.price.toFixed(2):"–"}</td><td class="num">${r.eval_price!=null?r.eval_price.toFixed(2):"–"}</td><td class="${r.hit===1?"hit":r.hit===0?"miss":"open"}">${r.hit===1?"hit":r.hit===0?"miss":r.eval_ts?"not directional":"open"}</td></tr>`).join("");})();
+document.getElementById("recent").innerHTML=(j.recent||[]).map(r=>`<tr><td>${new Date(r.ts*1000).toLocaleString()}</td><td><b>${e(r.ticker)}</b></td><td>${e(r.kind)}</td><td>${e(pretty(r.verdict))}</td><td class="num">${r.price!=null?r.price.toFixed(2):"–"}</td><td class="num">${r.eval_price!=null?r.eval_price.toFixed(2):"–"}</td><td class="${r.hit===1?"hit":r.hit===0?"miss":"open"}">${r.hit===1?"hit":r.hit===0?"miss":r.eval_ts?(r.eval_price!=null&&r.price&&Math.abs(r.eval_price/r.price-1)<0.0005?"no move":"not directional"):"open"}</td></tr>`).join("");})();
 </script></body></html>"""
 
 

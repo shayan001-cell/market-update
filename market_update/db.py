@@ -381,6 +381,8 @@ BULLISH = {"buy_now", "buy_the_dip", "long_momentum", "buy_dip_to_support", "acc
 BEARISH = {"short_setup", "short_momentum", "trim", "avoid", "fade_the_gap", "trend_down", "momentum_down", "drifting_down", "selling_today",
            "stay_out", "exit", "exit_trim"}
 HORIZON = {"swing": 7, "intraday": 1, "long_term": 90, "desk": 7}          # calendar days until a call is scored
+NO_MOVE = 0.0005                    # a later price within 0.05% of the call price is no move, not a hit or a miss
+NO_MOVE_GRACE_DAYS = 4
 
 
 def log_verdicts(rows: list[dict[str, Any]]) -> int:
@@ -408,7 +410,7 @@ def evaluate_verdicts(prices: dict[str, float]) -> int:
     now = time.time()
     n = 0
     with connect() as con:
-        due = con.execute("SELECT id, ticker, verdict, price, horizon_days FROM verdicts WHERE eval_ts IS NULL AND ts + horizon_days * 86400 <= ?", (now,)).fetchall()
+        due = con.execute("SELECT id, ticker, verdict, price, ts, horizon_days FROM verdicts WHERE eval_ts IS NULL AND ts + horizon_days * 86400 <= ?", (now,)).fetchall()
         for r in due:
             px = prices.get(r["ticker"])
             if px is None or not r["price"]:
@@ -416,7 +418,12 @@ def evaluate_verdicts(prices: dict[str, float]) -> int:
             move = px / r["price"] - 1
             v = r["verdict"]
             hit = None
-            if v in BULLISH:
+            if abs(move) < NO_MOVE:
+                # Same price as the call: the market has not traded since (a weekend or holiday). Wait for a real
+                # print; if the price still has not moved a few days past the window, record it as no move, unscored.
+                if now < r["ts"] + (r["horizon_days"] + NO_MOVE_GRACE_DAYS) * 86400:
+                    continue
+            elif v in BULLISH:
                 hit = 1 if move > 0 else 0
             elif v in BEARISH:
                 hit = 1 if move <= 0 else 0
@@ -437,7 +444,38 @@ def track_record() -> dict[str, Any]:
             "FROM verdicts GROUP BY ticker HAVING scored > 0 ORDER BY scored DESC, hits DESC LIMIT 60")]
         recent = [dict(r) for r in con.execute("SELECT ticker, kind, verdict, price, ts, eval_price, eval_ts, hit FROM verdicts ORDER BY ts DESC LIMIT 80")]
         totals = dict(con.execute("SELECT COUNT(*) AS n, SUM(CASE WHEN hit = 1 THEN 1 ELSE 0 END) AS hits, SUM(CASE WHEN hit IS NOT NULL THEN 1 ELSE 0 END) AS scored, MIN(ts) AS since FROM verdicts").fetchone())
-    return {"by_verdict": by_verdict, "by_ticker": by_ticker, "recent": recent, "totals": totals, "as_of": time.time()}
+    return {"by_verdict": by_verdict, "by_ticker": by_ticker, "recent": recent, "totals": totals, "by_day": verdict_days(), "as_of": time.time()}
+
+
+def _et_day(ts: float) -> str:
+    from datetime import datetime
+    return datetime.fromtimestamp(ts, tz=config.ET).date().isoformat()
+
+
+def verdict_days(limit: int = 60) -> list[dict[str, Any]]:
+    """Calls grouped by the ET day they were made: how many, how many have been scored, how many hit, per window."""
+    with connect() as con:
+        rows = con.execute("SELECT kind, ts, hit FROM verdicts").fetchall()
+    days: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        d = days.setdefault(_et_day(r["ts"]), {"n": 0, "scored": 0, "hits": 0, "kinds": {}})
+        k = d["kinds"].setdefault(r["kind"], {"n": 0, "scored": 0, "hits": 0})
+        for x in (d, k):
+            x["n"] += 1
+            if r["hit"] is not None:
+                x["scored"] += 1
+                x["hits"] += int(r["hit"] == 1)
+    return [{"day": day, **v} for day, v in sorted(days.items(), reverse=True)[:limit]]
+
+
+def verdict_day_detail(day: str) -> list[dict[str, Any]]:
+    """Every call made on one ET day, with its later price and result."""
+    from datetime import datetime, timedelta
+    start = datetime.fromisoformat(day).replace(tzinfo=config.ET)
+    lo, hi = start.timestamp(), (start + timedelta(days=1)).timestamp()
+    with connect() as con:
+        return [dict(r) for r in con.execute(
+            "SELECT ticker, kind, verdict, price, ts, horizon_days, eval_price, eval_ts, hit FROM verdicts WHERE ts >= ? AND ts < ? ORDER BY ts", (lo, hi))]
 
 
 # ---- alerts (settings only for now; delivery comes later) -----------------------------------------
