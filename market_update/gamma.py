@@ -7,7 +7,7 @@ No model calls. Everything comes from Yahoo option chains and quotes:
     Gamma per contract is Black-Scholes with each option's own implied vol; before the open the chains carry no
     vol, so the VIX curve (VXN for the Nasdaq) stands in.
   - Flip: the price where net gamma changes sign. Call wall: the strike above price with the most call gamma.
-    Put wall: the strike below price with the most put gamma.
+    Put wall: the put strike below price with the most open interest.
 Open interest is as of the previous close; volume is today's in the session, otherwise the last session's.
 """
 from __future__ import annotations
@@ -117,14 +117,19 @@ def _product(p: dict[str, Any], iv_fallback) -> dict[str, Any]:
         raise ValueError(f"no quote for {p['key']}")
     df = _chain(p["chain"], chain_spot, p["max_days"], iv_fallback, p["key"] == "NQ")
     df["gex"] = _gex(df, chain_spot)
-    by_k = df.groupby(["side", "K"]).gex.sum()
-    calls = by_k.get("C", pd.Series(dtype=float)); puts = by_k.get("P", pd.Series(dtype=float))
-    above = calls[calls.index > chain_spot]; below = puts[puts.index < chain_spot]
-    call_wall = float(above.idxmax()) if len(above) else None
-    put_wall = float(below.idxmin()) if len(below) else None
-    # the magnet: the strike within 2% of price carrying the most gamma of either kind
+    # Walls by open interest, not gamma: gamma always peaks at the strike next to price, which put the "walls" a point
+    # away. The ceiling is the call strike above price (0.25% to 2.5% away, expiries within 10 days) with the most contracts open,
+    # the floor the put strike below price with the most. The magnet is the strike within 1% carrying the most gamma.
+    # Only expiries in the next 10 days and strikes within 2.5% count: a day trader's levels, not quarterly round numbers.
+    near = df[pd.to_datetime(df.exp) <= pd.Timestamp(fetch.now_et().date()) + pd.Timedelta(days=10)]
+    oi = (near if len(near) else df).groupby(["side", "K"]).oi.sum()
+    c_oi = oi.get("C", pd.Series(dtype=float)); p_oi = oi.get("P", pd.Series(dtype=float))
+    up = c_oi[(c_oi.index >= chain_spot * 1.0025) & (c_oi.index <= chain_spot * 1.025)]
+    dn = p_oi[(p_oi.index <= chain_spot * 0.9975) & (p_oi.index >= chain_spot * 0.975)]
+    call_wall = float(up.idxmax()) if len(up) and up.max() > 0 else None
+    put_wall = float(dn.idxmax()) if len(dn) and dn.max() > 0 else None
     tot = df.assign(a=df.gex.abs()).groupby("K").a.sum()
-    tot = tot[(tot.index > chain_spot * 0.98) & (tot.index < chain_spot * 1.02)]
+    tot = tot[(tot.index > chain_spot * 0.99) & (tot.index < chain_spot * 1.01)]
     magnet = float(tot.idxmax()) if len(tot) else None
     lv = np.linspace(chain_spot * 0.94, chain_spot * 1.06, 121)
     vals = [_gex(df, x).sum() for x in lv]

@@ -472,13 +472,22 @@ def sector_table(history: pd.DataFrame, snapshot: dict[str, dict[str, Any]]) -> 
 # ---------------------------------------------------------------------------
 # News
 # ---------------------------------------------------------------------------
+_SEARCH_NEWS: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+SEARCH_NEWS_TTL_S = 300          # one search per ticker per 5 minutes: 40 tickers a minute got the machine rate-limited
+
+
 def _search_news(sym: str, n: int) -> list[dict[str, Any]]:
     """Headlines from Yahoo search, reshaped to the per-ticker feed's layout so fetch_news reads both the same way."""
+    hit = _SEARCH_NEWS.get(sym)
+    if hit and _clock.time() - hit[0] < SEARCH_NEWS_TTL_S:
+        return hit[1]
     try:
         res = yf.Search(sym, news_count=n, max_results=1, raise_errors=False).news or []
     except Exception as e:  # noqa: BLE001
         log.warning("news search failed for %s: %s", sym, e)
-        return []
+        return hit[1] if hit else []
+    if not res and hit:                # rate-limited or empty answer: keep the last good headlines
+        return hit[1]
     out = []
     for x in res:
         if x.get("type") not in (None, "STORY", "VIDEO") or not x.get("uuid"):
@@ -489,6 +498,7 @@ def _search_news(sym: str, n: int) -> list[dict[str, Any]]:
             "provider": {"displayName": x.get("publisher") or ""},
             "pubDate": datetime.fromtimestamp(ts, tz=ET).isoformat() if ts else None,
             "canonicalUrl": {"url": x.get("link") or ""}}})
+    _SEARCH_NEWS[sym] = (_clock.time(), out)
     return out
 
 

@@ -3351,71 +3351,100 @@
       const changed = !gammaSnap || gammaSnap.at !== j.at; gammaSnap = j; gammaRecv = Date.now();
       if (changed && currentView === "home" && report) { const el = $("[data-cj]"); const tmp = document.createElement("div"); tmp.innerHTML = secCalm(); if (el && tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else if (!el && tmp.firstElementChild) { const h = $(".pulse .pulse-head"); if (h) h.insertAdjacentElement("afterend", tmp.firstElementChild); } } } catch (e) { /* server restarting */ }
   }
-  const CJ_MOOD = { greed: ["Greedy", "calls are piling in, unusually few puts", "down"], calls: ["Calls leading", "more call buying than usual for this market", "up2"], normal: ["Normal", "the usual mix of hedging and betting", "flat"], hedging: ["Extra hedging", "more puts than usual: people are buying protection", "warn"], fear: ["Fearful", "puts are piling in", "down"] };
+  const CJ_MOOD = { greed: ["Greedy", "very few puts: call buyers are crowding in", "down"], calls: ["Calls leading", "more call buying than usual here", "up"], normal: ["Normal", "the usual mix of hedging and betting", "flat"], hedging: ["Extra hedging", "more puts than usual: protection is being bought", "warn"], fear: ["Fearful", "puts are piling in", "down"] };
   const cjNum = (x, key) => (isNum(x) ? fnum(x, key === "SPY" ? 2 : 0) : "–");
-  function cjLadder(p) {
-    const pts = [p.put_wall, p.flip, p.call_wall, p.price, p.magnet].filter(isNum); if (pts.length < 2) return "";
-    let lo = Math.min(...pts), hi = Math.max(...pts); const pad = Math.max((hi - lo) * 0.18, p.price * 0.0015); lo -= pad; hi += pad;
-    const x = (v) => ((v - lo) / (hi - lo) * 100).toFixed(2);
-    const flipX = isNum(p.flip) ? x(p.flip) : null;
-    const tick = (v, c, t) => (isNum(v) ? `<i class="cj-tk ${c}" style="left:${x(v)}%" title="${t} ${cjNum(v, p.key)}"></i>` : "");
-    return `<div class="cj-lad" role="img" aria-label="Price ${cjNum(p.price, p.key)}; floor ${cjNum(p.put_wall, p.key)}; line ${cjNum(p.flip, p.key)}; ceiling ${cjNum(p.call_wall, p.key)}">
-      <div class="cj-trk">${flipX !== null ? `<span class="cj-z jumpy" style="width:${flipX}%"></span><span class="cj-z calm" style="left:${flipX}%;width:${100 - flipX}%"></span>` : ""}
-        ${tick(p.put_wall, "floor", "Floor")}${tick(p.call_wall, "ceil", "Ceiling")}${isNum(p.flip) ? `<i class="cj-tk line" style="left:${flipX}%" title="The line ${cjNum(p.flip, p.key)}"></i>` : ""}${isNum(p.magnet) && p.magnet !== p.call_wall && p.magnet !== p.put_wall ? `<i class="cj-tk mag" style="left:${x(p.magnet)}%" title="Magnet ${cjNum(p.magnet, p.key)}"></i>` : ""}
-        <b class="cj-px ${p.above_flip ? "calm" : "jumpy"}" style="left:${x(p.price)}%"><em>${cjNum(p.price, p.key)}</em></b></div>
-      <div class="cj-ends"><span>${p.key === "SPY" ? "lower" : "lower"}</span><span>higher</span></div></div>`;
+  const cjAbs = (v, key) => fnum(Math.abs(v), key === "SPY" ? 2 : 0);
+  const cjGap = (v, p) => { if (!isNum(v) || !isNum(p.price)) return ""; const k = v - p.price; return `${k >= 0 ? "+" : "−"}${cjAbs(k, p.key)}`; };
+  const cjZone = (p) => (p.above_flip === true || (p.above_flip == null && p.regime === "positive") ? "calm" : "jumpy");
+  const cjUnit = (p) => (p.key === "SPY" ? "" : " pts");
+  // The plain-English line under each road: where price is against the line, and the nearest level in its path.
+  function cjSay(p) {
+    if (!isNum(p.flip) || !isNum(p.price)) return cjZone(p) === "calm" ? "Dealers' hedging is cushioning moves right now." : "Dealers' hedging can make moves bigger right now.";
+    const d = p.price - p.flip, u = cjUnit(p);
+    if (d >= 0) return `<b>${cjAbs(d, p.key)}${u} above the line.</b> While it holds above ${cjNum(p.flip, p.key)}, dips tend to get bought and pops sold.${isNum(p.call_wall) ? ` Ceiling ahead at ${cjNum(p.call_wall, p.key)}.` : ""}`;
+    return `<b>${cjAbs(d, p.key)}${u} below the line.</b> Swings can run either way until it gets back above ${cjNum(p.flip, p.key)}.${isNum(p.put_wall) ? ` Floor below at ${cjNum(p.put_wall, p.key)}.` : ""}`;
   }
-  function cjLegend(p) {
-    const d = (v) => { if (!isNum(v)) return ""; const k = v - p.price; return `<i>${k >= 0 ? "+" : "−"}${fnum(Math.abs(k), p.key === "SPY" ? 2 : 0)}</i>`; };
-    const row = (cls_, label, v, help) => (isNum(v) ? `<li class="${cls_}" title="${help}"><span class="cj-sw"></span><b>${label}</b><span class="mono">${cjNum(v, p.key)}</span>${d(v)}</li>` : "");
-    return `<ul class="cj-leg">${row("ceil", "Ceiling", p.call_wall, "The strike above price with the most call options: rallies often stall here.")}${row("line", "The line", p.flip, "Above it, dealers' hedging tends to soften moves; below it, to make them bigger.")}${row("floor", "Floor", p.put_wall, "The strike below price with the most put options: drops often slow here.")}${isNum(p.magnet) && p.magnet !== p.call_wall && p.magnet !== p.put_wall ? row("mag", "Magnet", p.magnet, "The strike near price with the most options of any kind: price is often pulled toward it.") : ""}</ul>`;
+  // the road: jumpy stretch drawn as a jagged line, calm stretch as a smooth wave, a "now" pin, flags for the levels
+  function cjRoad(p) {
+    const pts = [p.put_wall, p.flip, p.call_wall, p.price].filter(isNum); if (pts.length < 2) return '<div class="cj-road muted">Levels did not load.</div>';
+    let lo = Math.min(...pts), hi = Math.max(...pts); const pad = Math.max((hi - lo) * 0.14, p.price * 0.001); lo -= pad; hi += pad;
+    const x = (v) => Math.max(1, Math.min(99, (v - lo) / (hi - lo) * 100));
+    const fx = isNum(p.flip) ? x(p.flip) : (cjZone(p) === "calm" ? 0 : 100);
+    // labels hang toward the middle of the road so the outer ones never run past its ends
+    const flag = (v, k, label) => { if (!isNum(v)) return ""; const at = x(v); const side = at > 62 ? "to-l" : at < 38 ? "to-r" : "mid";
+      return `<span class="cj-flag ${k} ${side}" style="left:${at.toFixed(2)}%"><i></i><em>${label}<b class="mono">${cjNum(v, p.key)}</b></em></span>`; };
+    return `<div class="cj-road" role="img" aria-label="${esc(p.key)} at ${cjNum(p.price, p.key)}. Floor ${cjNum(p.put_wall, p.key)}, line ${cjNum(p.flip, p.key)}, ceiling ${cjNum(p.call_wall, p.key)}.">
+      <div class="cj-lane"><span class="cj-z jumpy" style="width:${fx.toFixed(2)}%"></span><span class="cj-z calm" style="left:${fx.toFixed(2)}%;width:${(100 - fx).toFixed(2)}%"></span>
+        ${isNum(p.flip) ? `<span class="cj-gate" style="left:${fx.toFixed(2)}%"></span>` : ""}
+        <span class="cj-now ${cjZone(p)}" style="left:${x(p.price).toFixed(2)}%"><em class="mono">${cjNum(p.price, p.key)}</em><i></i></span></div>
+      <div class="cj-flags">${flag(p.put_wall, "floor", "Floor")}${flag(p.flip, "line", "Line")}${flag(p.call_wall, "ceil", "Ceiling")}</div></div>`;
   }
   function cjMeter(p) {
-    if (!isNum(p.pc_volume)) return "";
+    if (!isNum(p.pc_volume)) return '<div class="cj-pc muted">No put/call volume yet.</div>';
     const [vl, lo, hi, vh] = p.pc_band, min = 0.4, max = 2.6; const at = (v) => Math.max(0, Math.min(100, (v - min) / (max - min) * 100));
     const m = CJ_MOOD[p.pc_mood] || CJ_MOOD.normal;
     const segs = [[min, vl, "greed"], [vl, lo, "calls"], [lo, hi, "normal"], [hi, vh, "hedging"], [vh, max, "fear"]].map(([a, b, k]) => `<span class="cj-seg ${k}" style="width:${(at(b) - at(a)).toFixed(2)}%"></span>`).join("");
     const hist = ((gammaSnap && gammaSnap.history) || []).map((h) => h[p.key] && h[p.key].pc).filter(isNum);
-    const spark = hist.length >= 3 ? (() => { const w = 90, h = 22, a = Math.min(...hist, lo), b = Math.max(...hist, hi); const pts = hist.map((v, i) => `${(i / (hist.length - 1) * w).toFixed(1)},${(h - (v - a) / ((b - a) || 1) * h).toFixed(1)}`).join(" ");
-      return `<span class="cj-spark" title="Puts vs calls through today: ${hist.map((v) => v.toFixed(2)).join(" → ")}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg><i>today</i></span>`; })() : "";
-    return `<div class="cj-pc"><div class="cj-pc-h"><span>Puts vs calls</span><b class="mono">${p.pc_volume.toFixed(2)}</b><span class="cj-mood ${m[2]}">${m[0]}</span>${spark}</div>
+    const trail = hist.length >= 3 ? (() => { const w = 56, h = 14, a = Math.min(...hist), b = Math.max(...hist); const pts = hist.map((v, i) => `${(i / (hist.length - 1) * w).toFixed(1)},${(h - 2 - (v - a) / ((b - a) || 1) * (h - 4)).toFixed(1)}`).join(" ");
+      return `<svg class="cj-trail" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Today: ${hist.map((v) => v.toFixed(2)).join(", ")}"><polyline points="${pts}"/></svg>`; })() : "";
+    return `<div class="cj-pc" title="${esc(m[1])}. Usual range here: ${lo} to ${hi}.">
+      <div class="cj-pc-k">Puts vs calls</div>
+      <div class="cj-pc-h"><b class="mono">${p.pc_volume.toFixed(2)}</b><span class="cj-mood ${m[2]}">${m[0]}</span>${trail}</div>
       <div class="cj-bar">${segs}<i class="cj-needle" style="left:${at(p.pc_volume).toFixed(1)}%"></i></div>
-      <div class="cj-pc-s">${esc(m[1])} · usual for ${esc(p.from === "SPX" ? "the S&P 500 index" : p.from)}: ${lo}–${hi}</div></div>`;
+      <div class="cj-pc-s"><span>calls</span><span>usual ${lo}–${hi}</span><span>puts</span></div></div>`;
   }
-  function cjCard(p) {
-    const calm = p.above_flip === true, known = p.above_flip !== null && p.above_flip !== undefined;
-    const zone = known ? (calm ? ["CALM ZONE", "calm", `Price is above the line at ${cjNum(p.flip, p.key)}. Big option dealers' hedging tends to <b>soften</b> moves: dips get bought, pops get sold.`]
-                               : ["JUMPY ZONE", "jumpy", `Price is below the line at ${cjNum(p.flip, p.key)}. Big option dealers' hedging tends to <b>make moves bigger</b> in either direction.`])
-                       : (p.regime === "positive" ? ["CALM ZONE", "calm", "Dealers' hedging tends to soften moves right now."] : ["JUMPY ZONE", "jumpy", "Dealers' hedging tends to make moves bigger right now."]);
-    return `<article class="cj-card ${zone[1]}">
-      <div class="cj-top"><div><b class="cj-k">${esc(p.key)}</b><span class="cj-n">${esc(p.name)}</span></div><div class="cj-p"><b class="mono">${cjNum(p.price, p.key)}</b>${isNum(p.chg_pct) ? `<span class="delta ${cls(p.chg_pct)}">${fpct(p.chg_pct, 2)}</span>` : ""}</div></div>
-      <div class="cj-zone"><span class="cj-badge ${zone[1]}"><i></i>${zone[0]}</span><p>${zone[2]}</p></div>
-      ${cjLadder(p)}${cjLegend(p)}${cjMeter(p)}
-      ${p.stale ? `<div class="cj-small warn">This reading is from ${esc((p.stale_at || "").slice(11, 16))} ET: the latest option chain did not load.</div>` : ""}<div class="cj-small">Net dealer gamma ${p.net_gamma_bn >= 0 ? "+" : "−"}$${Math.abs(p.net_gamma_bn).toFixed(1)}B per 1% move · read from ${esc(p.from)} options${p.key !== p.from ? `, levels in ${esc(p.key)} points` : ""}</div></article>`;
+  function cjRow(p, i) {
+    const z = cjZone(p);
+    return `<li class="cj-row ${z}${p.stale ? " stale" : ""}" style="--i:${i}">
+      <div class="cj-id"><div class="cj-mkt"><b class="cj-k">${esc(p.key)}</b><span class="cj-n">${esc(p.name)}</span></div>
+        <div class="cj-px-c"><b class="mono">${cjNum(p.price, p.key)}</b>${isNum(p.chg_pct) ? `<span class="delta ${cls(p.chg_pct)}">${fpct(p.chg_pct, 2)}</span>` : ""}</div>
+        <span class="cj-badge ${z}"><svg viewBox="0 0 24 12" aria-hidden="true">${z === "calm" ? '<path d="M1 6c3.5-4.5 7.5-4.5 11 0s7.5 4.5 11 0"/>' : '<path d="M1 9l3.5-6 3.5 6 3.5-6 3.5 6 3.5-6 3.5 6"/>'}</svg>${z === "calm" ? "Calm" : "Jumpy"}</span></div>
+      <div class="cj-mid">${cjRoad(p)}<p class="cj-say">${cjSay(p)}</p></div>
+      ${cjMeter(p)}
+      ${p.stale ? `<div class="cj-stale">Reading from ${esc((p.stale_at || "").slice(11, 16))} ET: the latest option chain did not load, retrying.</div>` : ""}
+    </li>`;
   }
   function cjNext() {
     if (!gammaSnap) return ""; const left = Math.max(0, (gammaSnap.next_in_s || 0) * 1000 - (Date.now() - gammaRecv)); const m = Math.floor(left / 60000), sec = Math.floor(left / 1000) % 60;
-    return gammaSnap.market_state === "open" ? (left > 0 ? `next update ${m}:${String(sec).padStart(2, "0")}` : "updating…") : "updates every 10 min in the session";
+    return gammaSnap.market_state === "open" ? (left > 0 ? `next in ${m}:${String(sec).padStart(2, "0")}` : "updating") : "every 10 min in the session";
   }
   setInterval(() => { const el = document.querySelector("[data-cj-next]"); if (el) el.textContent = cjNext(); }, 1000);
+  function cjSkeleton() {
+    return `<section class="cj" data-cj aria-busy="true"><div class="cj-side"><span class="cj-eye">Options map · ES · NQ · SPY</span><h3 class="cj-title">Calm or <span>Jumpy?</span></h3><p class="cj-sum muted">Reading the option chains…</p></div>
+      <div class="cj-main"><ul class="cj-rows">${[0, 1, 2].map((i) => `<li class="cj-row sk" style="--i:${i}"><span class="sk-b w1"></span><span class="sk-b w3"></span><span class="sk-b w2"></span></li>`).join("")}</ul></div></section>`;
+  }
+  const CJ_WAVE = { calm: '<path d="M1 6c3.5-4.5 7.5-4.5 11 0s7.5 4.5 11 0"/>', jumpy: '<path d="M1 9l3.5-6 3.5 6 3.5-6 3.5 6 3.5-6 3.5 6"/>' };
   function secCalm() {
     if (STATIC_MODE) return "";
-    const g = gammaSnap; if (!g) { pollGamma(); return `<section class="cj" data-cj><div class="cj-h"><div><span class="cj-eye">Options map · ES · NQ · SPY</span><h3 class="cj-title">Calm or Jumpy?</h3></div></div><div class="muted" style="padding:6px 2px">Reading the option chains…</div></section>`; }
+    const g = gammaSnap; if (!g) { pollGamma(); return cjSkeleton(); }
+    const P = g.products || [], jumpy = P.filter((p) => cjZone(p) === "jumpy"), calm = P.filter((p) => cjZone(p) === "calm");
     const V = g.vix || {}, vx = V.VIX || {}; const vch = isNum(vx.prev) ? vx.last - vx.prev : null;
-    const vmood = { calm: ["Calm", "up"], normal: ["Normal", "flat"], nervous: ["Nervous", "warn"], stressed: ["Stressed", "down"] }[V.mood] || ["", "flat"];
-    const curve = V.curve === "inverted" ? "short-term fear is above longer-term: stress is near" : "short-term fear is below longer-term: no stress priced in";
-    const when = (g.at || "").slice(11, 16);
-    return `<section class="cj" data-cj>
-      <div class="cj-h"><div><span class="cj-eye">Options map · ES · NQ · SPY · every 10 min</span><h3 class="cj-title">Calm or Jumpy?</h3></div>
-        <div class="cj-meta">${isNum(vx.last) ? `<span class="cj-vix ${vmood[1]}" title="VIX9D ${fnum((V.VIX9D || {}).last)} · VIX ${fnum(vx.last)} · VIX3M ${fnum((V.VIX3M || {}).last)} · Nasdaq VXN ${fnum((V.VXN || {}).last)}"><b>VIX ${fnum(vx.last)}</b>${isNum(vch) ? `<span class="delta ${vch > 0 ? "down" : vch < 0 ? "up" : "flat"}">${vch >= 0 ? "+" : "−"}${Math.abs(vch).toFixed(2)}</span>` : ""}<em>${vmood[0]}</em></span><span class="cj-curve">${curve}</span>` : ""}
-          <span class="cj-when">${g.market_state === "open" ? `${esc(when)} ET` : `last read ${esc(when)} ET · ${esc(g.volume_is)}`} · <span data-cj-next>${cjNext()}</span></span></div></div>
-      <div class="cj-grid">${(g.products || []).map(cjCard).join("") || '<div class="muted">The option chains did not load this round.</div>'}</div>
-      <details class="cj-how"><summary>How to read this</summary><ul>
-        <li><b>The line</b> is where big option dealers flip from cushioning the market to pushing it. <b>Above it (calm zone)</b> their hedging buys dips and sells pops. <b>Below it (jumpy zone)</b> their hedging chases the move, so swings get bigger.</li>
-        <li><b>Ceiling</b> and <b>floor</b> are the strikes with the most call and put options. Price often stalls near them. <b>Magnet</b> is the strike that pulls price toward it, often on expiry days.</li>
-        <li><b>Puts vs calls</b> is puts traded ÷ calls traded. Index funds normally run above 1 because big money hedges with them. Extremes matter most: very high is fear (often near lows), very low is complacency (often near highs).</li>
-        <li><b>VIX</b> is the market's expected swing over 30 days. Under 16 is calm, over 20 nervous.</li></ul></details>
-      <p class="cj-foot">Estimates from SPX, QQQ and SPY option chains (futures options are not included), using the standard assumption that dealers hold the other side of what customers trade. Open interest is as of the previous close. Information, not advice.</p></section>`;
+    const vmood = { calm: ["Calm", "up"], normal: ["Normal", "flat"], nervous: ["Nervous", "warn"], stressed: ["Stressed", "down"] }[V.mood] || ["–", "flat"];
+    const verdict = !P.length ? ["", "No reading this round."] : !jumpy.length ? ["calm", "All three are calm: dealers are cushioning moves."] : !calm.length ? ["jumpy", "All three are jumpy: swings can run further than usual."]
+      : ["mixed", `${jumpy.map((p) => p.key).join(" and ")} ${jumpy.length > 1 ? "are" : "is"} jumpy, ${calm.map((p) => p.key).join(" and ")} ${calm.length > 1 ? "are" : "is"} calm.`];
+    const orbs = P.map((p) => { const z = cjZone(p); return `<span class="cj-orb ${z}" title="${esc(p.key)}: ${z}"><svg viewBox="0 0 24 12" aria-hidden="true">${CJ_WAVE[z]}</svg><b>${esc(p.key)}</b></span>`; }).join("");
+    const vixPos = isNum(vx.last) ? Math.max(0, Math.min(100, (vx.last - 10) / 25 * 100)) : 0;
+    return `<section class="cj ${verdict[0]}" data-cj>
+      <div class="cj-side">
+        <span class="cj-eye"><span class="cj-dot ${g.market_state === "open" ? "on" : ""}"></span>Options map · ES · NQ · SPY · every 10 min</span>
+        <h3 class="cj-title">Calm or <span>Jumpy?</span></h3>
+        <div class="cj-orbs">${orbs}</div>
+        <p class="cj-sum">${esc(verdict[1])}</p>
+        ${isNum(vx.last) ? `<div class="cj-vix ${vmood[1]}"><div class="cj-vix-h"><span>VIX</span><b class="mono">${fnum(vx.last)}</b>${isNum(vch) ? `<span class="delta ${vch > 0 ? "down" : vch < 0 ? "up" : "flat"}">${vch >= 0 ? "+" : "−"}${Math.abs(vch).toFixed(2)}</span>` : ""}<em>${vmood[0]}</em></div>
+          <div class="cj-vbar"><span></span><span></span><span></span><span></span><i style="left:${vixPos.toFixed(1)}%"></i></div>
+          <div class="cj-vlab"><span>10</span><span>16</span><span>20</span><span>28</span><span>35</span></div>
+          <div class="cj-vix-s">The market's fear gauge. ${V.curve === "inverted" ? "Near-term fear is above longer-term: stress is close." : "Near-term fear is below longer-term: no stress priced in."}</div></div>` : ""}
+        <ol class="cj-steps">
+          <li><b>Find the dot.</b> That is the price now.</li>
+          <li><b><svg viewBox="0 0 24 12" aria-hidden="true" class="calm">${CJ_WAVE.calm}</svg>Smooth = calm.</b> Above the line, big dealers' hedging buys dips and sells pops.</li>
+          <li><b><svg viewBox="0 0 24 12" aria-hidden="true" class="jumpy">${CJ_WAVE.jumpy}</svg>Jagged = jumpy.</b> Below the line, their hedging chases the move, so swings run further.</li>
+          <li><b>Floor and ceiling</b> are the strikes with the most options open. Price often pauses there.</li></ol>
+        <div class="cj-when">${esc((g.at || "").slice(11, 16))} ET · <span data-cj-next>${cjNext()}</span></div>
+      </div>
+      <div class="cj-main">
+        <ul class="cj-rows">${P.map(cjRow).join("") || '<li class="cj-row muted">Nothing to show this round.</li>'}</ul>
+        <p class="cj-foot">ES read from SPX options and NQ from QQQ options, shown in futures points. Puts vs calls: puts traded ÷ calls traded today; index products usually run above 1 because funds hedge with them. Standard dealer assumption, open interest from the previous close. Information, not advice.</p>
+      </div></section>`;
   }
   function secPulse(r) {
     const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";

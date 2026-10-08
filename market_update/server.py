@@ -947,9 +947,9 @@ _news_cache: dict[str, Any] = {"at": 0.0, "items": []}
 
 @app.get("/api/news")
 async def api_news() -> JSONResponse:
-    """Live headline feed for the home page: market seeds plus every watchlist ticker, refreshed at most once a minute."""
+    """Live headline feed for the home page: market seeds plus every watchlist ticker, refreshed at most every 2 minutes."""
     now = time.time()
-    if now - _news_cache["at"] > 60:
+    if now - _news_cache["at"] > 120:
         symbols = list(dict.fromkeys(config.NEWS_SEED_SYMBOLS + config.load_watchlist()))[:40]
         try:
             items = await asyncio.to_thread(fetch.fetch_news, symbols, 6, 24)
