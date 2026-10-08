@@ -820,6 +820,7 @@ async def _startup() -> None:
     asyncio.create_task(direction_loop())
     asyncio.create_task(stocktwits_loop())
     asyncio.create_task(odds_loop())
+    asyncio.create_task(gamma_loop())
     asyncio.create_task(pros_loop())
     asyncio.create_task(desk_loop())
     asyncio.create_task(live_scanner())
@@ -2224,6 +2225,65 @@ async def api_pros(request: Request) -> JSONResponse:
     if not snap:
         return JSONResponse({"status": "warming", "running": bool(state.get("pros_running"))}, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "ok", "running": bool(state.get("pros_running")), **snap}, headers={"Cache-Control": "no-store"})
+
+
+GAMMA_PATH = DATA_DIR / "gamma.json"
+
+
+def _gamma_sync() -> dict[str, Any]:
+    from . import gamma
+    snap = gamma.snapshot()
+    old = state.get("gamma") or {}
+    have = {p["key"] for p in snap["products"]}
+    for op in old.get("products") or []:             # a market whose read failed keeps its last reading, marked stale
+        if op["key"] not in have:
+            snap["products"].append({**op, "stale": True, "stale_at": op.get("stale_at") or old.get("at")})
+    order = {"ES": 0, "NQ": 1, "SPY": 2}
+    snap["products"].sort(key=lambda p: order.get(p["key"], 9))
+    day = snap["at"][:10]
+    hist = [h for h in (old.get("history") or []) if h.get("at", "")[:10] == day] if snap["market_state"] == "open" else (old.get("history") or [])
+    if snap["market_state"] == "open" and snap["products"]:
+        hist.append({"at": snap["at"], **{p["key"]: {"price": p["price"], "flip": p["flip"], "pc": p["pc_volume"]} for p in snap["products"] if not p.get("stale")},
+                     "vix": (snap["vix"].get("VIX") or {}).get("last")})
+    snap["history"] = hist[-48:]
+    try:
+        GAMMA_PATH.write_text(json.dumps(snap, default=float))
+    except Exception:  # noqa: BLE001
+        log.warning("could not save the options map")
+    return snap
+
+
+async def gamma_loop() -> None:
+    """Options map: every 10 minutes in the session, every 3 hours otherwise. Chain reads only, no model calls."""
+    if not state.get("gamma") and GAMMA_PATH.exists():
+        try:
+            state["gamma"] = json.loads(GAMMA_PATH.read_text()); state["gamma_at"] = time.time() - 600
+        except Exception:  # noqa: BLE001
+            pass
+    await asyncio.sleep(120)                          # after a restart the build and scanner hit Yahoo first
+    while True:
+        try:
+            interval = 600 if fetch.market_state() == "open" else 3 * 3600
+            if time.time() - state.get("gamma_at", 0) >= interval:
+                state["gamma"] = await asyncio.to_thread(_gamma_sync); state["gamma_at"] = time.time()
+                fresh = sum(1 for p in state["gamma"]["products"] if not p.get("stale"))
+                if not fresh:                         # rate-limited or chains down: try again in 2 minutes, not 10
+                    state["gamma_at"] = time.time() - interval + 120
+                log.info("options map: %s fresh of %s in %ss", fresh, len(state["gamma"]["products"]), state["gamma"]["elapsed_s"])
+        except Exception:  # noqa: BLE001
+            log.exception("options map loop error")
+        await asyncio.sleep(30)
+
+
+@app.get("/api/gamma")
+async def api_gamma(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    g = state.get("gamma")
+    if not g:
+        return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
+    nxt = max(0, int(state.get("gamma_at", 0) + (600 if fetch.market_state() == "open" else 3 * 3600) - time.time()))
+    return JSONResponse({"status": "ok", **g, "next_in_s": nxt}, headers={"Cache-Control": "no-store"})
 
 
 async def odds_loop() -> None:

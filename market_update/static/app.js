@@ -3341,11 +3341,88 @@
     ].join("");
     return out ? `<div class="mkb" data-mk-bets><span class="mkb-h">Money on the line <i>Kalshi · Polymarket</i></span><div class="mkb-row">${out}</div></div>` : "";
   }
+  // ---------------------------------------------------------------- Calm or Jumpy? (options map, every 10 minutes)
+  // Dealer gamma and put/call for ES, NQ and SPY in plain words: above the flip line dealers' hedging softens moves,
+  // below it hedging makes them bigger. Server: gamma.py via /api/gamma; no model calls.
+  let gammaSnap = null, gammaRecv = 0;
+  async function pollGamma() {
+    if (STATIC_MODE) return;
+    try { const res = await api("/api/gamma", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") { setTimeout(pollGamma, 20000); return; }
+      const changed = !gammaSnap || gammaSnap.at !== j.at; gammaSnap = j; gammaRecv = Date.now();
+      if (changed && currentView === "home" && report) { const el = $("[data-cj]"); const tmp = document.createElement("div"); tmp.innerHTML = secCalm(); if (el && tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else if (!el && tmp.firstElementChild) { const h = $(".pulse .pulse-head"); if (h) h.insertAdjacentElement("afterend", tmp.firstElementChild); } } } catch (e) { /* server restarting */ }
+  }
+  const CJ_MOOD = { greed: ["Greedy", "calls are piling in, unusually few puts", "down"], calls: ["Calls leading", "more call buying than usual for this market", "up2"], normal: ["Normal", "the usual mix of hedging and betting", "flat"], hedging: ["Extra hedging", "more puts than usual: people are buying protection", "warn"], fear: ["Fearful", "puts are piling in", "down"] };
+  const cjNum = (x, key) => (isNum(x) ? fnum(x, key === "SPY" ? 2 : 0) : "–");
+  function cjLadder(p) {
+    const pts = [p.put_wall, p.flip, p.call_wall, p.price, p.magnet].filter(isNum); if (pts.length < 2) return "";
+    let lo = Math.min(...pts), hi = Math.max(...pts); const pad = Math.max((hi - lo) * 0.18, p.price * 0.0015); lo -= pad; hi += pad;
+    const x = (v) => ((v - lo) / (hi - lo) * 100).toFixed(2);
+    const flipX = isNum(p.flip) ? x(p.flip) : null;
+    const tick = (v, c, t) => (isNum(v) ? `<i class="cj-tk ${c}" style="left:${x(v)}%" title="${t} ${cjNum(v, p.key)}"></i>` : "");
+    return `<div class="cj-lad" role="img" aria-label="Price ${cjNum(p.price, p.key)}; floor ${cjNum(p.put_wall, p.key)}; line ${cjNum(p.flip, p.key)}; ceiling ${cjNum(p.call_wall, p.key)}">
+      <div class="cj-trk">${flipX !== null ? `<span class="cj-z jumpy" style="width:${flipX}%"></span><span class="cj-z calm" style="left:${flipX}%;width:${100 - flipX}%"></span>` : ""}
+        ${tick(p.put_wall, "floor", "Floor")}${tick(p.call_wall, "ceil", "Ceiling")}${isNum(p.flip) ? `<i class="cj-tk line" style="left:${flipX}%" title="The line ${cjNum(p.flip, p.key)}"></i>` : ""}${isNum(p.magnet) && p.magnet !== p.call_wall && p.magnet !== p.put_wall ? `<i class="cj-tk mag" style="left:${x(p.magnet)}%" title="Magnet ${cjNum(p.magnet, p.key)}"></i>` : ""}
+        <b class="cj-px ${p.above_flip ? "calm" : "jumpy"}" style="left:${x(p.price)}%"><em>${cjNum(p.price, p.key)}</em></b></div>
+      <div class="cj-ends"><span>${p.key === "SPY" ? "lower" : "lower"}</span><span>higher</span></div></div>`;
+  }
+  function cjLegend(p) {
+    const d = (v) => { if (!isNum(v)) return ""; const k = v - p.price; return `<i>${k >= 0 ? "+" : "−"}${fnum(Math.abs(k), p.key === "SPY" ? 2 : 0)}</i>`; };
+    const row = (cls_, label, v, help) => (isNum(v) ? `<li class="${cls_}" title="${help}"><span class="cj-sw"></span><b>${label}</b><span class="mono">${cjNum(v, p.key)}</span>${d(v)}</li>` : "");
+    return `<ul class="cj-leg">${row("ceil", "Ceiling", p.call_wall, "The strike above price with the most call options: rallies often stall here.")}${row("line", "The line", p.flip, "Above it, dealers' hedging tends to soften moves; below it, to make them bigger.")}${row("floor", "Floor", p.put_wall, "The strike below price with the most put options: drops often slow here.")}${isNum(p.magnet) && p.magnet !== p.call_wall && p.magnet !== p.put_wall ? row("mag", "Magnet", p.magnet, "The strike near price with the most options of any kind: price is often pulled toward it.") : ""}</ul>`;
+  }
+  function cjMeter(p) {
+    if (!isNum(p.pc_volume)) return "";
+    const [vl, lo, hi, vh] = p.pc_band, min = 0.4, max = 2.6; const at = (v) => Math.max(0, Math.min(100, (v - min) / (max - min) * 100));
+    const m = CJ_MOOD[p.pc_mood] || CJ_MOOD.normal;
+    const segs = [[min, vl, "greed"], [vl, lo, "calls"], [lo, hi, "normal"], [hi, vh, "hedging"], [vh, max, "fear"]].map(([a, b, k]) => `<span class="cj-seg ${k}" style="width:${(at(b) - at(a)).toFixed(2)}%"></span>`).join("");
+    const hist = ((gammaSnap && gammaSnap.history) || []).map((h) => h[p.key] && h[p.key].pc).filter(isNum);
+    const spark = hist.length >= 3 ? (() => { const w = 90, h = 22, a = Math.min(...hist, lo), b = Math.max(...hist, hi); const pts = hist.map((v, i) => `${(i / (hist.length - 1) * w).toFixed(1)},${(h - (v - a) / ((b - a) || 1) * h).toFixed(1)}`).join(" ");
+      return `<span class="cj-spark" title="Puts vs calls through today: ${hist.map((v) => v.toFixed(2)).join(" → ")}"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}"/></svg><i>today</i></span>`; })() : "";
+    return `<div class="cj-pc"><div class="cj-pc-h"><span>Puts vs calls</span><b class="mono">${p.pc_volume.toFixed(2)}</b><span class="cj-mood ${m[2]}">${m[0]}</span>${spark}</div>
+      <div class="cj-bar">${segs}<i class="cj-needle" style="left:${at(p.pc_volume).toFixed(1)}%"></i></div>
+      <div class="cj-pc-s">${esc(m[1])} · usual for ${esc(p.from === "SPX" ? "the S&P 500 index" : p.from)}: ${lo}–${hi}</div></div>`;
+  }
+  function cjCard(p) {
+    const calm = p.above_flip === true, known = p.above_flip !== null && p.above_flip !== undefined;
+    const zone = known ? (calm ? ["CALM ZONE", "calm", `Price is above the line at ${cjNum(p.flip, p.key)}. Big option dealers' hedging tends to <b>soften</b> moves: dips get bought, pops get sold.`]
+                               : ["JUMPY ZONE", "jumpy", `Price is below the line at ${cjNum(p.flip, p.key)}. Big option dealers' hedging tends to <b>make moves bigger</b> in either direction.`])
+                       : (p.regime === "positive" ? ["CALM ZONE", "calm", "Dealers' hedging tends to soften moves right now."] : ["JUMPY ZONE", "jumpy", "Dealers' hedging tends to make moves bigger right now."]);
+    return `<article class="cj-card ${zone[1]}">
+      <div class="cj-top"><div><b class="cj-k">${esc(p.key)}</b><span class="cj-n">${esc(p.name)}</span></div><div class="cj-p"><b class="mono">${cjNum(p.price, p.key)}</b>${isNum(p.chg_pct) ? `<span class="delta ${cls(p.chg_pct)}">${fpct(p.chg_pct, 2)}</span>` : ""}</div></div>
+      <div class="cj-zone"><span class="cj-badge ${zone[1]}"><i></i>${zone[0]}</span><p>${zone[2]}</p></div>
+      ${cjLadder(p)}${cjLegend(p)}${cjMeter(p)}
+      ${p.stale ? `<div class="cj-small warn">This reading is from ${esc((p.stale_at || "").slice(11, 16))} ET: the latest option chain did not load.</div>` : ""}<div class="cj-small">Net dealer gamma ${p.net_gamma_bn >= 0 ? "+" : "−"}$${Math.abs(p.net_gamma_bn).toFixed(1)}B per 1% move · read from ${esc(p.from)} options${p.key !== p.from ? `, levels in ${esc(p.key)} points` : ""}</div></article>`;
+  }
+  function cjNext() {
+    if (!gammaSnap) return ""; const left = Math.max(0, (gammaSnap.next_in_s || 0) * 1000 - (Date.now() - gammaRecv)); const m = Math.floor(left / 60000), sec = Math.floor(left / 1000) % 60;
+    return gammaSnap.market_state === "open" ? (left > 0 ? `next update ${m}:${String(sec).padStart(2, "0")}` : "updating…") : "updates every 10 min in the session";
+  }
+  setInterval(() => { const el = document.querySelector("[data-cj-next]"); if (el) el.textContent = cjNext(); }, 1000);
+  function secCalm() {
+    if (STATIC_MODE) return "";
+    const g = gammaSnap; if (!g) { pollGamma(); return `<section class="cj" data-cj><div class="cj-h"><div><span class="cj-eye">Options map · ES · NQ · SPY</span><h3 class="cj-title">Calm or Jumpy?</h3></div></div><div class="muted" style="padding:6px 2px">Reading the option chains…</div></section>`; }
+    const V = g.vix || {}, vx = V.VIX || {}; const vch = isNum(vx.prev) ? vx.last - vx.prev : null;
+    const vmood = { calm: ["Calm", "up"], normal: ["Normal", "flat"], nervous: ["Nervous", "warn"], stressed: ["Stressed", "down"] }[V.mood] || ["", "flat"];
+    const curve = V.curve === "inverted" ? "short-term fear is above longer-term: stress is near" : "short-term fear is below longer-term: no stress priced in";
+    const when = (g.at || "").slice(11, 16);
+    return `<section class="cj" data-cj>
+      <div class="cj-h"><div><span class="cj-eye">Options map · ES · NQ · SPY · every 10 min</span><h3 class="cj-title">Calm or Jumpy?</h3></div>
+        <div class="cj-meta">${isNum(vx.last) ? `<span class="cj-vix ${vmood[1]}" title="VIX9D ${fnum((V.VIX9D || {}).last)} · VIX ${fnum(vx.last)} · VIX3M ${fnum((V.VIX3M || {}).last)} · Nasdaq VXN ${fnum((V.VXN || {}).last)}"><b>VIX ${fnum(vx.last)}</b>${isNum(vch) ? `<span class="delta ${vch > 0 ? "down" : vch < 0 ? "up" : "flat"}">${vch >= 0 ? "+" : "−"}${Math.abs(vch).toFixed(2)}</span>` : ""}<em>${vmood[0]}</em></span><span class="cj-curve">${curve}</span>` : ""}
+          <span class="cj-when">${g.market_state === "open" ? `${esc(when)} ET` : `last read ${esc(when)} ET · ${esc(g.volume_is)}`} · <span data-cj-next>${cjNext()}</span></span></div></div>
+      <div class="cj-grid">${(g.products || []).map(cjCard).join("") || '<div class="muted">The option chains did not load this round.</div>'}</div>
+      <details class="cj-how"><summary>How to read this</summary><ul>
+        <li><b>The line</b> is where big option dealers flip from cushioning the market to pushing it. <b>Above it (calm zone)</b> their hedging buys dips and sells pops. <b>Below it (jumpy zone)</b> their hedging chases the move, so swings get bigger.</li>
+        <li><b>Ceiling</b> and <b>floor</b> are the strikes with the most call and put options. Price often stalls near them. <b>Magnet</b> is the strike that pulls price toward it, often on expiry days.</li>
+        <li><b>Puts vs calls</b> is puts traded ÷ calls traded. Index funds normally run above 1 because big money hedges with them. Extremes matter most: very high is fear (often near lows), very low is complacency (often near highs).</li>
+        <li><b>VIX</b> is the market's expected swing over 30 days. Under 16 is calm, over 20 nervous.</li></ul></details>
+      <p class="cj-foot">Estimates from SPX, QQQ and SPY option chains (futures options are not included), using the standard assumption that dealers hold the other side of what customers trade. Open interest is as of the previous close. Information, not advice.</p></section>`;
+  }
   function secPulse(r) {
     const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";
     return `<section class="pulse">
       <div class="pulse-head"><div class="mk-title">${mkTimer()}<h2 class="mk-h">Market <span>NOW</span></h2><span class="pz-live ${r.market_state === "open" ? "on" : ""}" title="Data updated ${esc(r.generated_at.slice(11, 16))} ET"><i></i>${st} · ${esc(r.generated_at.slice(11, 16))} ET</span></div>
         <p>${pulseLine(r)}</p>${mkBets()}</div>
+      ${secCalm()}
       <div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseLevels(r)}${pulseVitals(r)}${pulseSectors(r)}${pulseRadar(r)}${pulseHeat(r)}</div>
       <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
     </section>`;
@@ -3997,6 +4074,7 @@
     setInterval(pollPros, 600000);
     setTimeout(pollPros, 5000);
     setTimeout(pollOdds, 4500);
+    setTimeout(pollGamma, 3000); setInterval(pollGamma, 60000);
     setTimeout(pollCrowd, 3500);
     setInterval(pollLiveScan, 60000);
     setTimeout(pollLiveScan, 2500);
