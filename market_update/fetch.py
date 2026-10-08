@@ -472,6 +472,26 @@ def sector_table(history: pd.DataFrame, snapshot: dict[str, dict[str, Any]]) -> 
 # ---------------------------------------------------------------------------
 # News
 # ---------------------------------------------------------------------------
+def _search_news(sym: str, n: int) -> list[dict[str, Any]]:
+    """Headlines from Yahoo search, reshaped to the per-ticker feed's layout so fetch_news reads both the same way."""
+    try:
+        res = yf.Search(sym, news_count=n, max_results=1, raise_errors=False).news or []
+    except Exception as e:  # noqa: BLE001
+        log.warning("news search failed for %s: %s", sym, e)
+        return []
+    out = []
+    for x in res:
+        if x.get("type") not in (None, "STORY", "VIDEO") or not x.get("uuid"):
+            continue
+        ts = x.get("providerPublishTime")
+        out.append({"id": x["uuid"], "content": {
+            "id": x["uuid"], "title": x.get("title") or "", "summary": "",
+            "provider": {"displayName": x.get("publisher") or ""},
+            "pubDate": datetime.fromtimestamp(ts, tz=ET).isoformat() if ts else None,
+            "canonicalUrl": {"url": x.get("link") or ""}}})
+    return out
+
+
 def fetch_news(symbols: list[str], per_symbol: int = 10, lookback_hours: int = config.NEWS_LOOKBACK_HOURS) -> list[dict[str, Any]]:
     cutoff = now_et() - timedelta(hours=lookback_hours)
     seen: dict[str, dict[str, Any]] = {}
@@ -480,7 +500,11 @@ def fetch_news(symbols: list[str], per_symbol: int = 10, lookback_hours: int = c
             items = yf.Ticker(s).news or []
         except Exception as e:  # noqa: BLE001
             log.warning("news failed for %s: %s", s, e)
-            continue
+            items = []
+        if not items:
+            # Since early October 2026 Yahoo's per-ticker news feed answers with an empty list; its search endpoint
+            # still carries each ticker's headlines (title, publisher, link, publish time; no summary).
+            items = _search_news(s, per_symbol)
         for it in items[:per_symbol]:
             c = it.get("content") or {}
             nid = c.get("id") or it.get("id")

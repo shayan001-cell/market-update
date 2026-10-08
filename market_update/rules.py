@@ -72,8 +72,8 @@ def _count(text: str, words: tuple[str, ...]) -> int:
 # Keyword tables shared by headlines, regime driver and Trump posts
 # ---------------------------------------------------------------------------
 THEME_WORDS: dict[str, tuple[str, ...]] = {
-    "fed_rates": ("fed ", "federal reserve", "powell", "fomc", "rate cut", "rate hike", "interest rate", "treasury yield", "yields", "bond market"),
-    "macro_data": ("cpi", "inflation", "jobs report", "payroll", "unemployment", "gdp", "pmi", "ism", "retail sales", "consumer confidence", "housing starts", "pce"),
+    "fed_rates": ("fed ", "federal reserve", "powell", "fomc", "rate cut", "rate hike", "interest rate", "treasury yield", "yields", "bond market", "treasury auction", "auction"),
+    "macro_data": ("cpi", "inflation", "jobs report", "jobless claims", "payroll", "unemployment", "gdp", "pmi", "ism", "retail sales", "consumer confidence", "housing starts", "pce"),
     "earnings": ("earnings", "guidance", "quarterly results", "revenue beat", "profit", "eps", "outlook"),
     "ai_tech": ("nvidia", "ai ", "artificial intelligence", "chip", "semiconductor", "openai", "microsoft", "apple", "alphabet", "google", "meta", "amazon", "cloud", "data center", "capex"),
     "geopolitics": ("tariff", "trade war", "sanction", "china", "iran", "russia", "ukraine", "israel", "election", "war ", "missile", "geopolit"),
@@ -132,26 +132,43 @@ def _group_of(text: str, default: str) -> str:
 # ---------------------------------------------------------------------------
 # Question-set answerers. Each takes the same state dict the model would see.
 # ---------------------------------------------------------------------------
+# Evergreen pieces and stock-picking columns: never time-sensitive, whatever names they mention.
+OPINION_WORDS = ("should you", "stocks to buy", "stock to buy", "to buy before", "to buy now", "buy before", "upside ahead", "unstoppable", "millionaire", "forever", "here's why", "here is why",
+                 "is it time", "better buy", "dividend stock", "retire", "passive income", "so hot right now", "no-brainer", "set for life",
+                 "could soar", "top stock", "best stock", "trillion-dollar opportunity", "what to know about")
+# A specific company catalyst: an analyst action, a deal, results, guidance, a regulator, or a stated move of a few percent.
+CATALYST_WORDS = ("upgrade", "downgrade", "price target", "initiates", "guidance", "beats", "misses", "earnings", "takeover", "acquire",
+                  "acquisition", "merger", "buyout", "fda", "approval", "recall", "lawsuit", "probe", "halt", "bankrupt", "layoff", "ceo ")
+_MOVE_RE = re.compile(r"\b(jumps?|climbs?|sinks?|slides?|drops?|falls?|rises?|soars?|plunges?|tumbles?|surges?|gains?|slips?|advances?|rall(?:y|ies)|pops?|tanks?)\s+\d+(?:\.\d+)?%", re.I)
+
+
 def headline(st: dict[str, Any]) -> dict[str, Any]:
     Q = J.HEADLINE_QUESTIONS
     text = f"{st.get('headline') or ''}. {st.get('summary') or ''}"
+    low = text.lower()
     theme, hits = _theme_of(text, "other")
-    tickers = st.get("related_tickers") or []
     wide = _count(text, MARKET_WIDE_WORDS)
-    if theme in ("fed_rates", "macro_data", "geopolitics") or wide >= 2:
+    macro_hit = any(_count(text, THEME_WORDS[k]) for k in ("fed_rates", "macro_data", "geopolitics"))
+    opinion = any(w in low for w in OPINION_WORDS)
+    catalyst = bool(_MOVE_RE.search(text)) or any(w in low for w in CATALYST_WORDS)
+    # The search feed tags each headline with the one ticker it was found under, so ticker count says nothing about
+    # scope: oil, chips or crypto news is sector news whichever ticker it came in under.
+    if opinion:
+        scope = "not_market"
+    elif macro_hit or wide >= 2:
         scope = "market_wide"
-    elif theme in ("ai_tech", "energy_commodities", "crypto", "regulatory_legal") and len(tickers) != 1:
+    elif theme in ("ai_tech", "energy_commodities", "crypto", "regulatory_legal"):
         scope = "sector"
-    elif len(tickers) >= 1 or theme in ("earnings", "deals"):
+    elif theme in ("earnings", "deals") or catalyst or st.get("related_tickers"):
         scope = "single_stock"
     elif hits == 0:
         scope = "not_market"
     else:
         scope = "sector"
-    impact = {"market_wide": 2.0 + min(0.6, 0.2 * hits), "sector": 1.4, "single_stock": 1.0, "not_market": 0.2}[scope]
+    impact = {"market_wide": 2.0 + min(0.6, 0.2 * hits), "sector": 1.4, "single_stock": 1.0 + (0.5 if catalyst else 0), "not_market": 0.2}[scope]
     bull, bear = _count(text, BULL_WORDS), _count(text, BEAR_WORDS)
     direction = "bullish" if bull > bear else "bearish" if bear > bull else ("mixed" if bull else "none")
-    actionable = {"market_wide": 0.72, "sector": 0.58, "single_stock": 0.4, "not_market": 0.08}[scope]
+    actionable = {"market_wide": 0.72, "sector": 0.58, "single_stock": 0.62 if catalyst else 0.4, "not_market": 0.08}[scope]
     return {"actionable": noul(actionable), "direction": choice(Q["direction"], direction, 0.5 if bull != bear else LOW),
             "scope": choice(Q["scope"], scope, 0.55), "impact": score(Q["impact"], impact, 0.5), "theme": choice(Q["theme"], theme, 0.55 if hits else LOW)}
 
