@@ -2275,6 +2275,34 @@ async def gamma_loop() -> None:
         await asyncio.sleep(30)
 
 
+_earn_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_earn_lock = asyncio.Lock()
+
+
+@app.get("/api/earnings")
+async def api_earnings(request: Request, week: int = 0) -> JSONResponse:
+    """Earnings calendar for one week (0 = this week, -1 last, 1 next) with a review of every report that is out."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    week = max(-8, min(4, int(week)))
+    hit = _earn_cache.get(week)
+    if hit and time.time() - hit[0] < 600:
+        return JSONResponse({"status": "ok", **hit[1]}, headers={"Cache-Control": "no-store"})
+    async with _earn_lock:                       # one build at a time: Nasdaq and Yahoo both rate-limit
+        hit = _earn_cache.get(week)
+        if not (hit and time.time() - hit[0] < 600):
+            from . import earnings as EA
+            try:
+                data = await asyncio.to_thread(EA.week, week)
+            except Exception as e:  # noqa: BLE001
+                log.exception("earnings week %s", week)
+                if hit:
+                    return JSONResponse({"status": "ok", **hit[1], "stale": True}, headers={"Cache-Control": "no-store"})
+                return JSONResponse({"status": "error", "detail": str(e)[:160]}, status_code=502)
+            _earn_cache[week] = (time.time(), data)
+    return JSONResponse({"status": "ok", **_earn_cache[week][1]}, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/gamma")
 async def api_gamma(request: Request) -> JSONResponse:
     if not _session_email(request):

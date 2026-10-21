@@ -36,8 +36,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["charts", "Charts", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", charts: "Live · Charts", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["charts", "Charts", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["earnings", "Earnings", ""], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", charts: "Live · Charts", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", earnings: "Earnings calendar", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -2410,6 +2410,80 @@
     return `<section><h2>Today's economic events <span class="muted">${esc(r.session_label)} · times ET · relevance for US stocks judged by the model · highlighted rows can move the whole market</span></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Time</th><th>Ccy</th><th>Event</th><th>Relevance</th><th>Forecast</th><th>Previous</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
   }
 
+  // ---------------------------------------------------------------- Earnings calendar with a review of each report
+  // One week at a time from /api/earnings: who reports when, the consensus, and once out: beat / in line / miss and
+  // how the stock took it in the next session. The review is rules on the numbers, no model calls.
+  let earnWeek = 0, earnFilter = "all"; const earnData = {}, earnBusy = new Set();
+  async function loadEarnings(w) {
+    if (STATIC_MODE || earnBusy.has(w)) return; earnBusy.add(w);
+    let retry = false;
+    try { const res = await api(`/api/earnings?week=${w}`, { cache: "no-store" });
+      if (res.status === 401) retry = true;                      // still signing in: ask again shortly, never keep this
+      else { const j = await res.json(); earnData[w] = res.ok && j.status === "ok" ? j : { error: j.detail || "The calendar did not load." }; } }
+    catch (e) { earnData[w] = { error: "The server is not reachable right now." }; }
+    earnBusy.delete(w);
+    if (retry) { setTimeout(() => { if (currentView === "earnings") loadEarnings(w); }, 3000); return; }
+    if (currentView === "earnings") renderAll();
+  }
+  const EA_RES = { beat: ["Beat", "up"], miss: ["Miss", "down"], inline: ["In line", "flat"] };
+  const EA_REACT = { bought: "Bought", sold: "Sold", flat: "Shrugged off" };
+  const EA_SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const EA_MOON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+  const eaEps = (x) => (isNum(x) ? (x < 0 ? "−$" : "$") + Math.abs(x).toFixed(2) : "–");
+  function myTickers() { const o = new Set(); if (lists && lists.lists) Object.values(lists.lists).forEach((a) => (a || []).forEach((t) => o.add(t))); return o; }
+  function eaCard(r, mine) {
+    const watched = mine.has(r.symbol);
+    const top = `<div class="ea-top"><b class="ea-sym">${esc(r.symbol)}</b>${watched ? '<span class="ea-mine" title="On your list">your list</span>' : ""}<span class="ea-cap mono">${fcap(r.market_cap)}</span></div><div class="ea-name">${esc(r.name)}</div>`;
+    if (r.status !== "reported") {
+      return `<li class="ea-card up-next" data-ticker-page="${esc(r.symbol)}" title="${esc(r.name)} reports ${r.when === "before" ? "before the open" : r.when === "after" ? "after the close" : ""} on ${esc(r.date)}">${top}
+        <div class="ea-est"><span>Est <b class="mono">${eaEps(r.eps_est)}</b></span>${isNum(r.eps_last_year) ? `<span>last yr <span class="mono">${eaEps(r.eps_last_year)}</span></span>` : ""}${isNum(r.growth_pct) ? `<span class="${cls(r.growth_pct)}">${fpct(r.growth_pct, 0)}</span>` : ""}</div></li>`;
+    }
+    const res = EA_RES[r.result] || ["Reported", "flat"];
+    const mv = r.reaction_pct;
+    return `<li class="ea-card done ${res[1]}" data-ticker-page="${esc(r.symbol)}" title="${esc(r.review || "")}">${top}
+      <div class="ea-res"><span class="ea-pill ${res[1]}">${res[0]}${isNum(r.surprise_pct) && r.result !== "inline" ? ` ${fpct(r.surprise_pct, 0)}` : ""}</span><span class="mono ea-eps">${eaEps(r.eps)} <i>vs ${eaEps(r.eps_est)}</i></span></div>
+      ${isNum(mv) ? `<div class="ea-react ${cls(mv)}"><span class="ea-mv mono">${fpct(mv, 1)}</span><span>${EA_REACT[r.reaction] || ""}${r.result === "beat" && r.reaction === "sold" ? " anyway" : r.result === "miss" && r.reaction === "bought" ? " anyway" : ""}</span><i>${r.reaction_span ? "two sessions" : "next session"}</i></div>` : '<div class="ea-react muted"><span>Reaction after the next session</span></div>'}</li>`;
+  }
+  function eaDay(d, j, mine) {
+    const dt = new Date(d.date + "T12:00:00"); const isToday = d.date === j.today;
+    const head = `<div class="ea-dh${isToday ? " today" : ""}"><b>${dt.toLocaleDateString("en-US", { weekday: "short" })}</b><span>${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>${isToday ? '<em>today</em>' : ""}<i>${d.holiday ? "market closed" : `${d.rows.length} of ${d.total}`}</i></div>`;
+    if (d.holiday) return `<section class="ea-day off">${head}<p class="ea-empty">Market holiday.</p></section>`;
+    let rows = d.rows;
+    if (earnFilter === "mine") rows = rows.filter((r) => mine.has(r.symbol));
+    else if (earnFilter === "big") rows = rows.filter((r) => (r.market_cap || 0) >= 1e11);
+    else if (earnFilter === "out") rows = rows.filter((r) => r.status === "reported");
+    const grp = (when, label, icon) => { const g = rows.filter((r) => (when === "unknown" ? !["before", "after"].includes(r.when) : r.when === when)); return g.length ? `<div class="ea-g"><div class="ea-gh">${icon}${label}<span>${g.length}</span></div><ul>${g.map((r) => eaCard(r, mine)).join("")}</ul></div>` : ""; };
+    const body = grp("before", "Before the open", EA_SUN) + grp("after", "After the close", EA_MOON) + grp("unknown", "Time not given", "");
+    return `<section class="ea-day${isToday ? " today" : ""}">${head}${body || `<p class="ea-empty">${earnFilter === "all" ? "No companies of $2B or more." : "Nothing for this filter."}</p>`}</section>`;
+  }
+  function secEarningsCal() {
+    if (STATIC_MODE) return `<section><h2>Earnings calendar</h2><div class="muted">The calendar lives on the app server.</div></section>`;
+    const j = earnData[earnWeek];
+    const weeks = [[-1, "Last week"], [0, "This week"], [1, "Next week"]].map(([w, l]) => `<button type="button" class="${earnWeek === w ? "on" : ""}" data-ea-week="${w}">${l}</button>`).join("");
+    const filters = [["all", "All"], ["out", "Reported"], ["big", "$100B+"], ["mine", "My lists"]].map(([k, l]) => `<button type="button" class="${earnFilter === k ? "on" : ""}" data-ea-filter="${k}">${l}</button>`).join("");
+    const head = (sub) => `<div class="ea-head"><div><span class="ea-eye">Earnings · ${sub}</span><h2 class="ea-title">Who reports, and how it landed</h2></div><div class="ea-ctl"><div class="ea-seg" role="tablist" aria-label="Week">${weeks}</div><div class="ea-seg sm" aria-label="Filter">${filters}</div></div></div>`;
+    if (!j) { loadEarnings(earnWeek); return `<section class="ea">${head("loading")}<div class="ea-grid">${[0, 1, 2, 3, 4].map((i) => `<section class="ea-day sk" style="--i:${i}"><span class="sk-b"></span><span class="sk-b tall"></span><span class="sk-b tall"></span></section>`).join("")}</div></section>`; }
+    if (j.error) return `<section class="ea">${head("unavailable")}<div class="ea-err">${esc(j.error)} <button type="button" class="lnk" data-ea-retry>Try again</button></div></section>`;
+    const S = j.summary || {}, mine = myTickers();
+    const wk = new Date(j.week_of + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const tile = (label, val, sub, c) => `<div class="ea-tile"><span>${label}</span><b class="mono ${c || ""}">${val}</b><i>${sub}</i></div>`;
+    const movers = (S.movers || []).map((m) => `<button type="button" class="ea-mover ${cls(m.reaction_pct)}" data-ticker-page="${esc(m.symbol)}"><b>${esc(m.symbol)}</b><span class="mono">${fpct(m.reaction_pct, 1)}</span></button>`).join("");
+    return `<section class="ea">${head(`week of ${wk}`)}
+      <div class="ea-sum">
+        ${tile("Reported", `${S.reported || 0}<small>/${S.companies || 0}</small>`, `${S.upcoming || 0} still to come`)}
+        ${tile("Beat estimates", isNum(S.beat_rate) ? S.beat_rate + "%" : "–", `${S.beat || 0} beat · ${S.inline || 0} in line · ${S.miss || 0} missed`, isNum(S.beat_rate) ? (S.beat_rate >= 70 ? "up" : S.beat_rate < 55 ? "down" : "") : "")}
+        ${tile("Average reaction", isNum(S.avg_reaction) ? fpct(S.avg_reaction, 1) : "–", "in the session after each report", cls(S.avg_reaction))}
+        ${tile("Beat but sold", S.beat_but_sold || 0, "good numbers the market still sold")}
+        <div class="ea-tile wide"><span>Biggest moves</span><div class="ea-movers">${movers || '<i class="muted">none yet</i>'}</div></div>
+      </div>
+      <div class="ea-grid">${(j.days || []).map((d) => eaDay(d, j, mine)).join("")}</div>
+      <p class="ea-foot">Companies worth $2B or more, plus your list names. Beat or miss is earnings per share against the consensus estimate; within 2% counts as in line. The reaction is the close before the report to the close after it. Source: Nasdaq earnings calendar, prices from Yahoo. Information, not advice.</p></section>`;
+  }
+  document.addEventListener("click", (e) => {
+    const w = e.target.closest("[data-ea-week]"); if (w) { earnWeek = +w.getAttribute("data-ea-week"); renderAll(); return; }
+    const f = e.target.closest("[data-ea-filter]"); if (f) { earnFilter = f.getAttribute("data-ea-filter"); renderAll(); return; }
+    if (e.target.closest("[data-ea-retry]")) { delete earnData[earnWeek]; renderAll(); }
+  });
   function secEarnings(r) {
     const rows = r.earnings.map((e) => `<tr class="${e.attention >= 2 ? "hi" : ""}"><td class="sym"><b>${esc(e.symbol)}</b><div class="meta2">${esc(e.name)}</div></td><td>${esc(e.report_time)}</td><td class="num">${fcap(e.market_cap)}</td><td class="mono">${esc(e.eps_forecast) || "–"}<div class="meta2">yr ago ${esc(e.last_year_eps) || "–"}</div></td><td class="num">${bar(e.attention, 3)}<span class="mono">${e.attention.toFixed(1)}</span></td><td>${e.ai ? `<span class="tag">${pretty(e.ai.read_through.choice)}</span>` : "–"}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">No earnings.</td></tr>';
     return `<section><h2>Companies reporting earnings <span class="muted">${r.earnings.length} shown of ${r.earnings_total} reporting · attention score says how many traders will care</span></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Company</th><th>When</th><th>Mkt cap</th><th>EPS est.</th><th>Attention</th><th>Read-through</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
@@ -2720,7 +2794,7 @@
     { k: "home" },
     { g: "live", label: "Live", icon: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>', items: [["charts", "Live TradingView chart with OneView signals: what to do, stop, targets"], ["live", "The session as it happens: 15-minute reads, SPY and QQQ, runners"], ["liveview", "Briefings, big money, the President's posts, the crowd, the bets"]] },
     { k: "watch" },
-    { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"]] },
+    { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"], ["earnings", "Who reports this week, and how it landed"]] },
     { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["record", "Every call scored against the market"]] },
     { g: "admin", label: "Admin", admin: true, icon: ICONS.admin, items: [["desk", "Three scores per name and the big-cap scan"], ["check", "Every 15-minute read, scored"], ["admin", "Users, sessions and traffic"]] },
   ];
@@ -3474,6 +3548,7 @@
       case "charts": return `<div class="view one chs-view">${secCharts()}</div>`;
       case "map": setTimeout(() => { mountMap(); if (!mapData && !mapBusy && mapSym) loadMap(mapSym); }, 0); return `<div class="view one cm-view">${secMap()}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
+      case "earnings": return `<div class="view one ea-view">${secEarningsCal()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
       case "guide": return `<div class="view one">${secGuide()}</div>`;
