@@ -1,4 +1,11 @@
-"""Big options bets, live: the largest single trades and sweeps of the day from Alpaca's options data.
+"""Big options bets, live. Two sources:
+  - Cboe (default, no account): Cboe's public delayed option chains, read every 5 minutes. A contract whose volume
+    grew by MIN_PREMIUM of premium since the last read is a big bet in that window; its side comes from where the
+    last trade sat against the real bid and ask; volume bigger than the open interest marks new positions.
+    No single trades, so no sweeps.
+  - Alpaca (when ALPACA_API_KEY / ALPACA_SECRET_KEY are set): individual trades, sweeps, tick-test side (below).
+
+Alpaca mode, in detail:
 
 Every 10 minutes in the session:
   1. Option-chain snapshots for the watched names (expiries within 45 days, strikes within 15% of price) give each
@@ -189,6 +196,71 @@ def _ms(t: str) -> float:
     return _ts(t).timestamp() * 1000
 
 
+CBOE = "https://cdn-api.cboe.com/api/global/delayed_quotes/options/{sym}.json"
+CBOE_WINDOW_S = 300
+
+
+def run_cboe(names: list[str]) -> dict[str, Any]:
+    """One 5-minute read of Cboe's delayed chains: volume added since the last read, priced at the last trade."""
+    t0 = time.time()
+    today = fetch.now_et().date().isoformat()
+    day = load_day(today)
+    prev: dict[str, list[float]] = day.setdefault("vol", {})           # contract -> [volume, open interest] at the last read
+    first = not prev
+    seen = {b["id"] for b in day["bets"]}
+    before = len(day["bets"])
+    stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    exp_lte = fetch.now_et().date() + timedelta(days=45)
+    for u in names:
+        sym = ("_" + u) if u in ("SPX", "NDX", "VIX", "RUT") else u
+        try:
+            r = requests.get(CBOE.format(sym=sym), headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+            r.raise_for_status(); data = r.json().get("data") or {}
+        except Exception as e:  # noqa: BLE001
+            log.info("cboe chain %s: %s", u, e); continue
+        spot = data.get("current_price")
+        floor = INDEX_MIN_PREMIUM if u in INDEX else MIN_PREMIUM
+        for o in data.get("options") or []:
+            c = o.get("option") or ""
+            vol, last = float(o.get("volume") or 0), float(o.get("last_trade_price") or 0)
+            if not c or not vol:
+                continue
+            try:
+                meta = _parse(c)
+            except Exception:  # noqa: BLE001
+                continue
+            if date.fromisoformat(meta["exp"]) > exp_lte or (spot and abs(meta["strike"] / spot - 1) > 0.15):
+                continue
+            pv = prev.get(c, [None, None])[0]
+            oi = float(o.get("open_interest") or 0)
+            prev[c] = [vol, oi]
+            if first or pv is None or vol <= pv or not last:
+                continue                                  # the first read of the day only sets the baseline
+            add = vol - pv; prem = add * last * 100
+            if prem < floor:
+                continue
+            bid, ask = float(o.get("bid") or 0), float(o.get("ask") or 0)
+            spread = ask - bid if ask > bid > 0 else 0
+            side = "unclear"
+            if spread:
+                side = "bought" if last >= ask - spread * 0.35 else "sold" if last <= bid + spread * 0.35 else "unclear"   # middle 30%: unclear
+            bid_id = f"{c}|{stamp}"
+            if bid_id in seen:
+                continue
+            dte = (date.fromisoformat(meta["exp"]) - fetch.now_et().date()).days
+            otm = ((meta["strike"] / spot - 1) * 100 * (1 if meta["type"] == "call" else -1)) if spot else None
+            lean = {("call", "bought"): "bullish", ("put", "sold"): "bullish", ("put", "bought"): "bearish", ("call", "sold"): "bearish"}.get((meta["type"], side), "unclear")
+            day["bets"].append({"id": bid_id, "t": stamp, "contract": c, **meta, "dte": dte, "size": int(add), "price": last, "premium": round(prem),
+                                "side": side, "sweep": False, "legs": None, "over_oi": bool(oi and add > oi), "oi": oi, "bid": bid, "ask": ask,
+                                "otm_pct": round(otm, 1) if otm is not None else None, "lean": lean, "spot": spot, "window_s": CBOE_WINDOW_S})
+            seen.add(bid_id)
+        time.sleep(0.3)
+    day["bets"].sort(key=lambda b: b["t"], reverse=True)
+    day.update(feed="cboe", updated=time.time(), names=names)
+    _day_path(today).write_text(json.dumps(day))
+    return {"status": "ok", "feed": "cboe", "baseline": first, "new": len(day["bets"]) - before, "elapsed_s": round(time.time() - t0, 1)}
+
+
 def summary(d: str | None = None) -> dict[str, Any]:
     d = d or fetch.now_et().date().isoformat()
     day = load_day(d)
@@ -211,7 +283,7 @@ def summary(d: str | None = None) -> dict[str, Any]:
         n["tilt"] = round(n["bull"] / tot, 3) if tot else None
     rows = sorted(names.values(), key=lambda n: -(n["bull"] + n["bear"] + n["unclear"]))
     repeat = sorted(({"contract": c, "hits": k, **_parse(c)} for c, k in hits.items() if k >= 3), key=lambda x: -x["hits"])[:12]
-    tot = {"premium": sum(b["premium"] for b in bets), "bull": sum(b["premium"] for b in bets if b["lean"] == "bullish"),
+    tot = {"new_money": sum(1 for b in bets if b.get("over_oi")), "premium": sum(b["premium"] for b in bets), "bull": sum(b["premium"] for b in bets if b["lean"] == "bullish"),
            "bear": sum(b["premium"] for b in bets if b["lean"] == "bearish"), "bets": len(bets), "sweeps": sum(1 for b in bets if b["sweep"])}
     return {"date": day["date"], "feed": day.get("feed"), "updated": day.get("updated"), "totals": tot, "names": rows, "repeat": repeat, "bets": bets[:400]}
 

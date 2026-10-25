@@ -2601,6 +2601,7 @@
   function bbLive() {
     const j = bbData; if (!j) { loadBb("live"); return `<div class="bb-sk">${[0, 1, 2].map(() => '<span class="sk-b"></span>').join("")}</div>`; }
     if (j.error) return '<div class="bb-empty">The server is not reachable right now.</div>';
+    const cboe = j.feed !== "opra" && j.feed !== "indicative";
     if (!j.connected) return `<div class="bb-connect"><div><span class="bb-eye">Live tape · not connected yet</span><h3>Connect the options data feed</h3>
         <p>The live tape reads every options trade from Alpaca. ${j.admin ? "Add your two Alpaca keys to OneView's <code>.env</code> file on the server Mac, then restart the server:" : "It is being connected; the hedge fund books on the next tab work already."}</p>
         ${j.admin ? '<pre>ALPACA_API_KEY=…\nALPACA_SECRET_KEY=…</pre><p class="muted">The free Alpaca plan delays options trades by 15 minutes; the paid OPRA data plan makes them real time.</p>' : ""}</div>
@@ -2612,19 +2613,19 @@
         <b>${esc(n.und)}</b><span class="bb-bear"><i style="width:${(n.bear / mx * 100).toFixed(1)}%"></i></span><span class="bb-bull"><i style="width:${(n.bull / mx * 100).toFixed(1)}%"></i></span>
         <em class="mono ${n.net >= 0 ? "up" : "down"}">${n.net >= 0 ? "+" : "−"}${bbUsd(Math.abs(n.net))}</em></button>`).join("");
     let bets = (j.bets || []).filter((b) => (!bbSym || b.und === bbSym) && b.premium >= bbMin);
-    bets = bets.filter((b) => bbFilter === "all" || (bbFilter === "bull" && b.lean === "bullish") || (bbFilter === "bear" && b.lean === "bearish") || (bbFilter === "sweep" && b.sweep) || (bbFilter === "calls" && b.type === "call") || (bbFilter === "puts" && b.type === "put"));
+    bets = bets.filter((b) => bbFilter === "all" || (bbFilter === "bull" && b.lean === "bullish") || (bbFilter === "bear" && b.lean === "bearish") || (bbFilter === "sweep" && (cboe ? b.over_oi : b.sweep)) || (bbFilter === "calls" && b.type === "call") || (bbFilter === "puts" && b.type === "put"));
     const sideTxt = { bought: "Likely bought", sold: "Likely sold", unclear: "Side unclear" };
     const rows = bets.slice(0, 160).map((b, i) => `<li class="bb-bet ${b.lean}" style="--i:${Math.min(i, 12)}">
         <samp>${bbTime(b.t)}</samp>
         <div class="bb-c"><b>${esc(b.und)}</b><span class="bb-k">${fnum(b.strike, b.strike % 1 ? 1 : 0)}${b.type === "call" ? "C" : "P"} · ${bbMon(b.exp)} · ${b.dte}d${isNum(b.otm_pct) ? ` · ${b.otm_pct > 0 ? b.otm_pct.toFixed(0) + "% OTM" : Math.abs(b.otm_pct).toFixed(0) + "% ITM"}` : ""}</span></div>
         <div class="bb-p"><b class="mono">${bbUsd(b.premium)}</b><span class="mono">${b.size.toLocaleString()} @ ${b.price.toFixed(2)}</span></div>
-        <div class="bb-tags"><span class="bb-side ${b.side}">${sideTxt[b.side] || b.side}</span>${b.sweep ? `<span class="bb-sweep" title="One order split across ${b.legs} prints on several exchanges to fill fast">Sweep</span>` : ""}<span class="bb-lean ${b.lean}">${b.lean === "unclear" ? "No lean" : b.lean === "bullish" ? "Bullish" : "Bearish"}</span></div></li>`).join("");
+        <div class="bb-tags"><span class="bb-side ${b.side}">${sideTxt[b.side] || b.side}</span>${b.sweep ? `<span class="bb-sweep" title="One order split across ${b.legs} prints on several exchanges to fill fast">Sweep</span>` : ""}${b.over_oi ? `<span class="bb-sweep" title="More contracts traded in these five minutes than were open before today: new positions">New money</span>` : ""}<span class="bb-lean ${b.lean}">${b.lean === "unclear" ? "No lean" : b.lean === "bullish" ? "Bullish" : "Bearish"}</span></div></li>`).join("");
     const rep = (j.repeat || []).map((r) => `<span class="bb-rep"><b>${esc(r.und)}</b> ${fnum(r.strike, 0)}${r.type === "call" ? "C" : "P"} ${bbMon(r.exp)}<i>${r.hits} big prints</i></span>`).join("");
-    const chips = [["all", "All"], ["bull", "Bullish"], ["bear", "Bearish"], ["sweep", "Sweeps"], ["calls", "Calls"], ["puts", "Puts"]].map(([k, l]) => `<button type="button" class="${bbFilter === k ? "on" : ""}" data-bb-filter="${k}">${l}</button>`).join("");
+    const chips = [["all", "All"], ["bull", "Bullish"], ["bear", "Bearish"], ["sweep", cboe ? "New money" : "Sweeps"], ["calls", "Calls"], ["puts", "Puts"]].map(([k, l]) => `<button type="button" class="${bbFilter === k ? "on" : ""}" data-bb-filter="${k}">${l}</button>`).join("");
     const mins = [[0, "Any size"], [250000, "$250K+"], [1000000, "$1M+"]].map(([v, l]) => `<button type="button" class="${bbMin === v ? "on" : ""}" data-bb-min="${v}">${l}</button>`).join("");
     const when = j.date !== (new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })) ? `last session, ${bbMon(j.date)}` : "today";
     return `<div class="bb-kpis">
-        <div class="bb-kpi"><span>Big-bet premium ${when}</span><b class="mono">${bbUsd(T.premium)}</b><i>${T.bets || 0} bets · ${T.sweeps || 0} sweeps</i></div>
+        <div class="bb-kpi"><span>Big-bet premium ${when}</span><b class="mono">${bbUsd(T.premium)}</b><i>${T.bets || 0} bets · ${cboe ? `${T.new_money || 0} new money` : `${T.sweeps || 0} sweeps`}</i></div>
         <div class="bb-kpi wide"><span>Which way it leans</span>${tilt !== null ? `<div class="bb-split"><i class="up" style="width:${(tilt * 100).toFixed(1)}%"></i><i class="down" style="width:${((1 - tilt) * 100).toFixed(1)}%"></i></div><div class="bb-split-l"><span class="up">${bbUsd(T.bull)} bullish · ${Math.round(tilt * 100)}%</span><span class="down">${bbUsd(T.bear)} bearish</span></div>` : '<i class="muted">no leaning bets yet</i>'}</div>
         <div class="bb-kpi"><span>Has the flow been right?</span><b class="mono">${sc ? Math.round(hi / sc * 100) + "%" : "–"}</b><i>${sc ? `${hi} of ${sc} daily leans, 5 sessions later` : "scoring starts after the first closes"}</i></div>
       </div>
@@ -2634,7 +2635,7 @@
         <section class="bb-box"><div class="bb-tape-h"><h3>The tape <span class="muted">${bets.length} shown${bbSym ? " · " + esc(bbSym) : ""}</span></h3><div class="ea-seg sm">${chips}</div><div class="ea-seg sm">${mins}</div></div>
           <ul class="bb-tape">${rows || '<li class="muted">Nothing for this filter.</li>'}</ul></section>
       </div>
-      <p class="bb-foot">Big bet: a single trade or sweep of $100K+ in premium ($250K+ for SPY, QQQ and IWM) in the most active contracts expiring within 45 days. Alpaca gives no historical bid and ask, so the side is inferred: above the last trade counts as likely bought, below as likely sold. Calls bought and puts sold lean bullish; puts bought and calls sold lean bearish. Some big trades are hedges or one leg of a spread. Source: Alpaca options${j.feed === "indicative" ? " (free feed, trades 15 minutes delayed)" : " (OPRA)"}. Information, not advice.</p>`;
+      <p class="bb-foot">${cboe ? "Big bet: $100K+ in premium ($250K+ for SPY, QQQ and IWM) traded in one contract within a five-minute window, read from Cboe's public option chains (15 minutes delayed) for contracts expiring within 45 days. The side comes from where the last trade sat against the bid and ask: near the ask counts as likely bought, near the bid as likely sold, the middle as unclear. New money: more contracts traded in the window than were open before today. Calls bought and puts sold lean bullish; puts bought and calls sold lean bearish. Some big trades are hedges or one leg of a spread. Information, not advice." : ""}</p><p class="bb-foot" ${cboe ? "hidden" : ""}>Big bet: a single trade or sweep of $100K+ in premium ($250K+ for SPY, QQQ and IWM) in the most active contracts expiring within 45 days. Alpaca gives no historical bid and ask, so the side is inferred: above the last trade counts as likely bought, below as likely sold. Calls bought and puts sold lean bullish; puts bought and calls sold lean bearish. Some big trades are hedges or one leg of a spread. Source: Alpaca options${j.feed === "indicative" ? " (free feed, trades 15 minutes delayed)" : " (OPRA)"}. Information, not advice.</p>`;
   }
   function bbBooks() {
     const F = bbFunds; if (!F) { loadBb("funds"); return `<div class="bb-sk">${[0, 1, 2].map(() => '<span class="sk-b"></span>').join("")}</div>`; }

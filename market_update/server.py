@@ -2350,10 +2350,11 @@ async def bigbets_loop() -> None:
     while True:
         try:
             ms = fetch.market_state(); now = fetch.now_et(); today = now.date().isoformat()
-            due = ms == "open" and time.time() - state.get("bigbets_at", 0) >= 600
+            alp = bool(bigbets.creds())                  # Alpaca when keys are set (single trades), otherwise Cboe chains
+            due = ms == "open" and time.time() - state.get("bigbets_at", 0) >= (600 if alp else bigbets.CBOE_WINDOW_S)
             closing = ms != "open" and now.hour == 16 and state.get("bigbets_closed") != today and bigbets.load_day(today)["bets"]
-            if bigbets.creds() and (due or closing):
-                res = await asyncio.to_thread(bigbets.run, _bigbets_names(), _spot_map())
+            if due or closing:
+                res = await asyncio.to_thread(bigbets.run, _bigbets_names(), _spot_map()) if alp else await asyncio.to_thread(bigbets.run_cboe, _bigbets_names())
                 state["bigbets_at"] = time.time(); state["bigbets_status"] = res
                 log.info("big bets: %s", res)
                 if closing:
@@ -2386,7 +2387,7 @@ async def api_bigbets(request: Request) -> JSONResponse:
     if not email:
         raise HTTPException(status_code=401, detail="sign in first")
     from . import bigbets
-    connected = bool(bigbets.creds())
+    connected = True                                 # Cboe's public chains need no account; Alpaca upgrades it when keys exist
     summ = await asyncio.to_thread(bigbets.summary)
     tr = await asyncio.to_thread(db.track_record)
     flow = [x for x in tr.get("by_verdict", []) if x.get("kind") == "flow"]
