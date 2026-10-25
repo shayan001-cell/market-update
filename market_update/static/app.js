@@ -36,8 +36,8 @@
   const tvLink = (t) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(t.replace("-", "."))}`;
   let charts = [];
   let firstRender = true;
-  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["charts", "Charts", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["earnings", "Earnings", ""], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
-  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", charts: "Live · Charts", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", earnings: "Earnings calendar", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
+  const VIEWS = [["home", "Overview", "1"], ["live", "Intraday", ""], ["liveview", "Intraday view", ""], ["charts", "Charts", ""], ["watch", "Watchlist", "2"], ["map", "Company map", ""], ["scan", "Scanner", "3"], ["stock", "Stocks", "4"], ["theme", "Themes", "5"], ["smart", "Filings & flow", "6"], ["macro", "Market context", "7"], ["admin", "Admin", "8"], ["record", "Track record", "9"], ["earnings", "Earnings", ""], ["xray", "Tipster X-ray", ""], ["check", "Intraday check", ""], ["desk", "Trading desk", ""], ["guide", "Guide", "0"]];
+  const PAGE_TITLES = { home: "Your market overview", live: "Live · Intraday", liveview: "Live · Intraday view", charts: "Live · Charts", watch: "Your watchlist", map: "Company map", scan: "Scanner", stock: "Stocks", theme: "Themes", smart: "Filings and flow", macro: "Market context", admin: "Admin", record: "Track record", earnings: "Earnings calendar", xray: "Tipster X-ray", check: "Intraday check", desk: "Trading desk", guide: "How to use OneView" };
   // analysis timeframe: changes which read leads on the overview, the watchlist and the stocks table
   let horizon = "swing"; try { horizon = localStorage.getItem("mu-horizon") || "swing"; } catch (e) {}
   const HORIZONS = [["day", "Day", "Day trading: today's price and volume"], ["swing", "Swing", "Swing trading: the next one to ten sessions"], ["long", "Long term", "Long-term investing: the business and the primary trend"]];
@@ -2484,6 +2484,104 @@
     const f = e.target.closest("[data-ea-filter]"); if (f) { earnFilter = f.getAttribute("data-ea-filter"); renderAll(); return; }
     if (e.target.closest("[data-ea-retry]")) { delete earnData[earnWeek]; renderAll(); }
   });
+  // ---------------------------------------------------------------- Tipster X-ray (Research > Tipster X-ray)
+  // An honest report card for any StockTwits account, from the top-traders ledger or read live. Every call is scored
+  // against the price over its window and compared with what the market's own direction gave calls on the same side.
+  let xrIndex = null, xrUser = (location.hash.match(/[&#]u=([A-Za-z0-9_.\-]+)/) || [])[1] || null; const xrData = {}, xrBusy = new Set();
+  async function loadXrIndex() {
+    if (STATIC_MODE || xrBusy.has("_index")) return; xrBusy.add("_index");
+    try { const res = await api("/api/xray", { cache: "no-store" }); if (res.status === 401) { xrBusy.delete("_index"); setTimeout(loadXrIndex, 3000); return; } const j = await res.json(); xrIndex = j.status === "ok" ? j : { warming: true }; } catch (e) { xrIndex = { error: true }; }
+    xrBusy.delete("_index"); if (currentView === "xray") renderAll();
+  }
+  async function loadXr(u) {
+    const k = u.toLowerCase(); if (STATIC_MODE || xrBusy.has(k)) return; xrBusy.add(k);
+    try { const res = await api(`/api/xray/${encodeURIComponent(u)}`, { cache: "no-store" });
+      if (res.status === 401) { xrBusy.delete(k); setTimeout(() => loadXr(u), 3000); return; }
+      const j = await res.json(); xrData[k] = j.status === "ok" ? j : { error: j.detail || "That account could not be read." }; }
+    catch (e) { xrData[k] = { error: "The server is not reachable right now." }; }
+    xrBusy.delete(k); if (currentView === "xray") renderAll();
+  }
+  function xrGo(u) { u = (u || "").trim().replace(/^@/, "").replace(/^.*stocktwits\.com\//i, "").split(/[/?#]/)[0]; if (!u) return; xrUser = u; try { history.replaceState(null, "", "#view=xray&u=" + encodeURIComponent(u)); } catch (e) {} if (!xrData[u.toLowerCase()]) loadXr(u); renderAll(); }
+  const XR_G = { edge: ["up", "Real edge so far"], maybe: ["up2", "Promising, not proven"], luck: ["warn", "Looks like luck"], worse: ["down", "Worse than the market"], few: ["flat", "Too few calls to judge"] };
+  const xrPct = (x, d = 0) => (isNum(x) ? (x * 100).toFixed(d) + "%" : "–");
+  const XR_ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
+  const XR_OK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>', XR_NO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+  // where this account lands against callers with no skill and the same bullish/bearish mix (a bell curve)
+  function xrCurve(r) {
+    const D = r.dist; if (!D || !isNum(D.sd) || D.sd <= 0) return "";
+    const W = 560, H = 150, P = 18, x = (v) => P + v * (W - 2 * P), pdf = (v) => Math.exp(-0.5 * ((v - D.mean) / D.sd) ** 2);
+    const pts = []; for (let i = 0; i <= 200; i++) { const v = i / 200; pts.push([x(v), H - 26 - pdf(v) * (H - 52)]); }
+    const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+    const tail = pts.filter((p) => p[0] >= x(D.actual)); const tailPath = tail.length ? `M${x(D.actual).toFixed(1)} ${H - 26} ` + tail.map((p) => `L${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ") + ` L${x(1).toFixed(1)} ${H - 26} Z` : "";
+    const ax = x(D.actual), mx = x(D.mean), g = XR_G[r.grade.key] || XR_G.luck;
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map((v) => `<text x="${x(v)}" y="${H - 8}" text-anchor="middle">${v * 100}%</text>`).join("");
+    return `<figure class="xr-curve"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="A no-skill caller with the same mix lands around ${xrPct(D.mean)} right; @${esc(r.username)} landed at ${xrPct(D.actual)} of separate bets.">
+        <line class="xr-base" x1="${P}" y1="${H - 26}" x2="${W - P}" y2="${H - 26}"/>
+        <path class="xr-bell" d="${line}"/>${tailPath ? `<path class="xr-tail ${g[0]}" d="${tailPath}"/>` : ""}
+        <line class="xr-mean" x1="${mx}" y1="${H - 26}" x2="${mx}" y2="14"/><text class="xr-lbl" x="${mx}" y="10" text-anchor="middle">no-skill caller ${xrPct(D.mean)}</text>
+        <line class="xr-act ${g[0]}" x1="${ax}" y1="${H - 26}" x2="${ax}" y2="30"/><circle class="xr-dot ${g[0]}" cx="${ax}" cy="30" r="5"/>
+        <text class="xr-lbl strong" x="${Math.min(W - 60, Math.max(60, ax))}" y="${ax > mx ? 50 : 50}" text-anchor="middle">@${esc(r.username)} ${xrPct(D.actual)}</text>${ticks}</svg>
+      <figcaption>Each separate bet counted once. The shaded tail is how often a caller with <b>no skill</b> and the same bullish/bearish mix would do at least this well: <b>${isNum(r.luck) ? (r.luck < 0.001 ? "under 0.1%" : xrPct(r.luck, r.luck < 0.1 ? 1 : 0)) : "–"}</b>.</figcaption></figure>`;
+  }
+  function xrReport(r) {
+    const g = XR_G[r.grade.key] || XR_G.luck;
+    const bull = isNum(r.bull_share) ? Math.round(r.bull_share * 100) : null;
+    const share = `I X-rayed @${r.username} on OneView: ${xrPct(r.hit_rate)} of ${r.scored} calls right, against ${xrPct(r.expected_rate)} for the market's own direction. Verdict: ${r.grade.label}. ${APP_URL || location.origin + location.pathname}#view=xray&u=${r.username}`;
+    const tile = (label, val, sub, c) => `<div class="xr-k"><span>${label}</span><b class="mono ${c || ""}">${val}</b><i>${sub}</i></div>`;
+    const rec = (c, open) => `<li class="xr-r ${open ? "open" : c.hit ? "hit" : "miss"}"><span class="xr-ic">${open ? '<i class="xr-clock"></i>' : c.hit ? XR_OK : XR_NO}</span>
+        <div class="xr-rm"><div class="xr-rh"><b>${esc(c.sym)}</b><span class="pill ${c.side === "bullish" ? "up" : "down"}">${c.side === "bullish" ? "bull" : "bear"}</span><samp>${esc((c.at || "").slice(0, 10))}</samp>${open ? '<em>window still open</em>' : `<em class="mono ${cls(c.side === "bullish" ? c.ret : -c.ret)}">${fpct(c.ret, 1)} by ${esc(c.exit_day || "")}</em>`}</div>${c.text ? `<p>${esc(c.text)}</p>` : ""}</div></li>`;
+    const tick = (r.tickers || []).map((t) => `<li><b>${esc(t.sym)}</b><span class="xr-tb"><i style="width:${Math.round(t.hit_rate * 100)}%"></i></span><span class="mono">${xrPct(t.hit_rate)}</span><em>${t.n}</em></li>`).join("");
+    const months = (r.months || []).map((m) => `<span class="xr-mo" title="${esc(m.m)}: ${xrPct(m.hit_rate)} of ${m.n}"><i style="height:${Math.max(6, Math.round(m.hit_rate * 100))}%" class="${m.hit_rate >= 0.5 ? "up" : "down"}"></i><em>${esc(m.m.slice(5))}</em></span>`).join("");
+    return `<article class="xr-rep ${g[0]}">
+      <header class="xr-top"><div class="xr-id"><span class="xr-av">${esc(r.username.slice(0, 2).toUpperCase())}</span><div><h3>@${esc(r.username)}</h3><span class="muted">${r.source === "live" ? "read live just now" : "in the OneView ledger"} · ${r.scored} scored calls in ${r.bets} separate bets${isNum(r.likes) ? ` · ${r.likes} likes` : ""}</span></div></div>
+        <div class="xr-stamp ${g[0]}"><span>Verdict</span><b>${esc(r.grade.label)}</b></div></header>
+      <p class="xr-say">${esc(r.grade.say)}</p>
+      <div class="xr-keys">
+        ${tile("Right", xrPct(r.hit_rate), `${r.hits} of ${r.scored} calls`)}
+        ${tile("Market alone", xrPct(r.expected_rate), "same sides, same weeks")}
+        ${tile("Edge", isNum(r.edge_pts) ? (r.edge_pts > 0 ? "+" : "") + r.edge_pts.toFixed(1) + " pts" : "–", isNum(r.edge_pts) && r.edge_pts < 0 ? "right less often than the market" : "right more often than the market", isNum(r.edge_pts) ? (r.edge_pts >= 3 ? "up" : r.edge_pts <= -3 ? "down" : "") : "")}
+        ${tile("If you copied every call", isNum(r.copy_avg) ? fpct(r.copy_avg, 2) : "–", "average per call, before costs", cls(r.copy_avg))}
+      </div>
+      ${xrCurve(r)}
+      <div class="xr-two">
+        <section class="xr-box"><h4>Which way they lean</h4>${bull !== null ? `<div class="xr-bias"><span class="up" style="width:${bull}%"></span><span class="down" style="width:${100 - bull}%"></span></div><div class="xr-bias-l"><span class="up">${bull}% bullish</span><span class="down">${100 - bull}% bearish</span></div>${r.bias ? `<p class="xr-warn">Almost always ${r.bias}. One-way callers look brilliant while the market goes their way and give it back when it turns.</p>` : ""}` : ""}
+          ${months ? `<h4>Month by month</h4><div class="xr-months">${months}</div>` : ""}</section>
+        <section class="xr-box"><h4>What they call most</h4><ul class="xr-tk">${tick || '<li class="muted">–</li>'}</ul></section>
+      </div>
+      <section class="xr-box"><h4>Receipts <span class="muted">every call, scored over its window</span></h4><ul class="xr-rs">${(r.pending || []).map((c) => rec(c, true)).join("")}${(r.receipts || []).map((c) => rec(c, false)).join("")}</ul></section>
+      <div class="xr-act-row"><a class="btn" href="https://wa.me/?text=${encodeURIComponent(share)}" target="_blank" rel="noopener">Share this X-ray on WhatsApp</a><a class="btn ghost" href="https://stocktwits.com/${encodeURIComponent(r.username)}" target="_blank" rel="noopener">Open on StockTwits</a></div>
+    </article>`;
+  }
+  function secXray() {
+    if (STATIC_MODE) return `<section><h2>Tipster X-ray</h2><div class="muted">The X-ray runs on the app server.</div></section>`;
+    if (!xrIndex) loadXrIndex();
+    const I = xrIndex && !xrIndex.warming && !xrIndex.error ? xrIndex : null, S = (I && I.stats) || {}, P = I && I.persistence;
+    const gr = S.grades || {}; const tot = (gr.edge || 0) + (gr.maybe || 0) + (gr.luck || 0) + (gr.worse || 0);
+    const seg = (k, c) => (tot ? `<span class="${c}" style="width:${((gr[k] || 0) / tot * 100).toFixed(2)}%" title="${XR_G[k][1]}: ${gr[k] || 0}"></span>` : "");
+    const slope = P ? (() => { const y = (v) => 70 - (v - 0.4) / 0.4 * 60; return `<svg class="xr-slope" viewBox="0 0 220 84" aria-label="Top 20 accounts: ${xrPct(P.top_before)} right before ${P.cut}, ${xrPct(P.top_after)} after"><line x1="40" y1="${y(P.top_before)}" x2="180" y2="${y(P.top_after)}"/><circle cx="40" cy="${y(P.top_before)}" r="5"/><circle cx="180" cy="${y(P.top_after)}" r="5" class="after"/><text x="40" y="${y(P.top_before) - 10}" text-anchor="middle">${xrPct(P.top_before)}</text><text x="180" y="${y(P.top_after) - 10}" text-anchor="middle">${xrPct(P.top_after)}</text><text class="m" x="40" y="82" text-anchor="middle">before</text><text class="m" x="180" y="82" text-anchor="middle">after</text></svg>`; })() : "";
+    const hero = `<section class="xr-hero">
+      <div class="xr-ask"><span class="xr-eye">Research · Tipster X-ray</span><h2 class="xr-title">Is that trader<br>any good?</h2>
+        <p class="xr-lede">Type any StockTwits username. OneView scores every call they made against what the price did, then checks whether it beats plain luck.</p>
+        <form class="xr-search" data-xr-form><span>@</span><input name="u" list="xr-names" autocomplete="off" spellcheck="false" placeholder="username or profile link" value="${esc(xrUser || "")}" aria-label="StockTwits username"><button type="submit" class="xr-go">X-ray<i>${XR_ARROW}</i></button></form>
+        <datalist id="xr-names">${((I && I.names) || []).slice(0, 1500).map((n) => `<option value="${esc(n)}">`).join("")}</datalist></div>
+      <div class="xr-truth"><span class="xr-eye">What the ledger shows</span>
+        ${I ? `<div class="xr-big"><b class="mono">${xrPct(S.median_hit)}</b><span>the typical account is right, out of ${(S.rated || 0).toLocaleString()} rated and ${(S.calls || 0).toLocaleString()} calls</span></div>
+        <div class="xr-split">${seg("edge", "up")}${seg("maybe", "up2")}${seg("luck", "warn")}${seg("worse", "down")}</div>
+        <ul class="xr-split-l"><li class="up"><b>${gr.edge || 0}</b> real edge so far</li><li class="up2"><b>${gr.maybe || 0}</b> promising</li><li class="warn"><b>${gr.luck || 0}</b> luck</li><li class="down"><b>${gr.worse || 0}</b> worse than the market</li></ul>
+        ${P ? `<div class="xr-persist">${slope}<p>The 20 best accounts up to ${esc(P.cut)} were right <b>${xrPct(P.top_before)}</b> of the time. Since then: <b>${xrPct(P.top_after)}</b>, about the same as everyone else (${xrPct(P.rest_after)}). Hot streaks rarely last.</p></div>` : ""}` : `<p class="muted">${xrIndex && xrIndex.warming ? "The ledger is still being built." : "Loading the ledger…"}</p>`}</div></section>`;
+    let body = "";
+    if (xrUser) {
+      const d = xrData[xrUser.toLowerCase()];
+      if (!d) { loadXr(xrUser); body = `<div class="xr-scan" aria-busy="true"><div class="xr-beam"></div><b>Scanning @${esc(xrUser)}</b><span>reading their calls and checking each one against the price…</span></div>`; }
+      else if (d.error) body = `<div class="xr-err">${esc(d.error)}</div>`;
+      else body = xrReport(d);
+    }
+    const pop = I && (I.popular || []).length ? `<section class="xr-pop"><h3>Most-liked accounts, X-rayed <span class="muted">click any card</span></h3><div class="xr-grid">${I.popular.slice(0, 12).map((x, i) => { const g = XR_G[x.grade] || XR_G.luck; return `<button type="button" class="xr-card ${g[0]}" data-xr-user="${esc(x.username)}" style="--i:${i}"><span class="xr-c-h"><b>@${esc(x.username)}</b><em>${x.likes || 0} likes</em></span><span class="xr-c-v ${g[0]}">${esc(g[1])}</span><span class="xr-c-n"><span><b class="mono">${xrPct(x.hit_rate)}</b> right</span><span><b class="mono ${cls(x.edge_pts)}">${x.edge_pts > 0 ? "+" : ""}${isNum(x.edge_pts) ? x.edge_pts.toFixed(0) : "–"}</b> pts vs market</span><span><b class="mono">${x.bets}</b> bets</span></span></button>`; }).join("")}</div></section>` : "";
+    const foot = `<p class="xr-foot">How it works: a call is a post the author tagged bullish or bearish, or one TypeSafe read as a clear call. It is scored over its time frame (1, 5 or 20 sessions; 5 when none is given) from the next session's close. Repeating a call on the same ticker in the same week counts as one bet. "Market alone" is how often calls on the same side in the same weeks were right across every account. OneView can only see posts that still exist: accounts that delete losing calls look better than they are. Information, not advice.</p>`;
+    return `<div class="xr">${hero}${body}${xrUser ? "" : pop}${xrUser && body ? pop : ""}${foot}</div>`;
+  }
+  document.addEventListener("submit", (e) => { const f = e.target.closest("[data-xr-form]"); if (!f) return; e.preventDefault(); xrGo(new FormData(f).get("u")); });
+  document.addEventListener("click", (e) => { const c = e.target.closest("[data-xr-user]"); if (c) { xrGo(c.getAttribute("data-xr-user")); scrollTo({ top: 0, behavior: "smooth" }); } });
   function secEarnings(r) {
     const rows = r.earnings.map((e) => `<tr class="${e.attention >= 2 ? "hi" : ""}"><td class="sym"><b>${esc(e.symbol)}</b><div class="meta2">${esc(e.name)}</div></td><td>${esc(e.report_time)}</td><td class="num">${fcap(e.market_cap)}</td><td class="mono">${esc(e.eps_forecast) || "–"}<div class="meta2">yr ago ${esc(e.last_year_eps) || "–"}</div></td><td class="num">${bar(e.attention, 3)}<span class="mono">${e.attention.toFixed(1)}</span></td><td>${e.ai ? `<span class="tag">${pretty(e.ai.read_through.choice)}</span>` : "–"}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">No earnings.</td></tr>';
     return `<section><h2>Companies reporting earnings <span class="muted">${r.earnings.length} shown of ${r.earnings_total} reporting · attention score says how many traders will care</span></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Company</th><th>When</th><th>Mkt cap</th><th>EPS est.</th><th>Attention</th><th>Read-through</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
@@ -2795,7 +2893,7 @@
     { g: "live", label: "Live", icon: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>', items: [["charts", "Live TradingView chart with OneView signals: what to do, stop, targets"], ["live", "The session as it happens: 15-minute reads, SPY and QQQ, runners"], ["liveview", "Briefings, big money, the President's posts, the crowd, the bets"]] },
     { k: "watch" },
     { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"], ["earnings", "Who reports this week, and how it landed"]] },
-    { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["record", "Every call scored against the market"]] },
+    { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["xray", "Is that trader any good? An honest report card"], ["record", "Every call scored against the market"]] },
     { g: "admin", label: "Admin", admin: true, icon: ICONS.admin, items: [["desk", "Three scores per name and the big-cap scan"], ["check", "Every 15-minute read, scored"], ["admin", "Users, sessions and traffic"]] },
   ];
   let navOpen = null;
@@ -3549,6 +3647,7 @@
       case "map": setTimeout(() => { mountMap(); if (!mapData && !mapBusy && mapSym) loadMap(mapSym); }, 0); return `<div class="view one cm-view">${secMap()}</div>`;
       case "record": return `<div class="view one">${secRecord()}</div>`;
       case "earnings": return `<div class="view one ea-view">${secEarningsCal()}</div>`;
+      case "xray": return `<div class="view one xr-view">${secXray()}</div>`;
       case "check": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secCheck()}</div>`;
       case "desk": if (!(user && user.role === "admin")) { currentView = "home"; return viewHtml(r); } return `<div class="view one">${secDesk()}</div>`;
       case "guide": return `<div class="view one">${secGuide()}</div>`;
@@ -4131,6 +4230,7 @@
     try { if (/brief=1/.test(location.hash)) sessionStorage.setItem("mu-open-brief", "1"); } catch (e) {}
     addEventListener("hashchange", () => { const v = (location.hash.match(/view=([a-z]+)/) || [])[1]; const t = (location.hash.match(/[&#]t=([A-Za-z0-9.\-^=]+)/) || [])[1];
       if (v === "ticker" && t) { if (currentView !== "ticker" || tickerSel !== t.toUpperCase()) { tickerSel = t.toUpperCase(); currentView = "ticker"; if (report) renderAll(); } return; }
+      const u = (location.hash.match(/[&#]u=([A-Za-z0-9_.\-]+)/) || [])[1]; if (v === "xray" && u && u !== xrUser) { xrUser = u; if (currentView === "xray" && report) renderAll(); }
       if (v && v !== currentView && VIEWS.some((x) => x[0] === v)) { currentView = v; if (report) renderAll(); } });
     $("#refresh-btn").addEventListener("click", onRefresh);
     if (EMBEDDED && API) {

@@ -2179,6 +2179,12 @@ def _pros_sync() -> dict[str, Any]:
                       "symbols": pros.DISCOVERY_SYMBOLS, "posts_per_symbol": pros.DISCOVERY_POSTS, "posts_per_trader": pros.USER_POSTS, "per_run": pros.CANDIDATES}}
     led["updated"] = time.time()
     _PROS_LEDGER().write_text(json.dumps(led))
+    try:                                             # the Tipster X-ray reads every scored call from this store
+        from . import xray
+        xray.write_store(XRAY_PATH, users, calls_by_user)
+        _xray_cache.clear()
+    except Exception:  # noqa: BLE001
+        log.exception("x-ray store failed")
     fetch._cache_put("pros_snapshot", out)
     try:
         (config.OUTPUT_DIR / "pros.json").write_text(json.dumps(out, default=str))
@@ -2225,6 +2231,100 @@ async def api_pros(request: Request) -> JSONResponse:
     if not snap:
         return JSONResponse({"status": "warming", "running": bool(state.get("pros_running"))}, headers={"Cache-Control": "no-store"})
     return JSONResponse({"status": "ok", "running": bool(state.get("pros_running")), **snap}, headers={"Cache-Control": "no-store"})
+
+
+XRAY_PATH = DATA_DIR / "xray_store.json"
+_xray_cache: dict[str, Any] = {}
+
+
+def _xray_store() -> dict[str, Any] | None:
+    st = _xray_cache.get("store")
+    try:
+        mt = XRAY_PATH.stat().st_mtime
+    except OSError:
+        return None
+    if not st or _xray_cache.get("mtime") != mt:
+        try:
+            st = json.loads(XRAY_PATH.read_text()); _xray_cache.update(store=st, mtime=mt)
+        except Exception:  # noqa: BLE001
+            return _xray_cache.get("store")
+    return st
+
+
+def _xray_live(name: str) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+    """An account not in the ledger: read its last 90 posts now, score them, keep the result for 6 hours."""
+    from . import pros
+    hit = fetch._cache_get(f"xray_{name.lower()}", 6 * 3600)
+    if hit:
+        return hit["meta"], hit["calls"]
+    sid = st_open()
+    msgs = _st_user_messages(name, sid, pros.USER_POSTS)
+    if not msgs:
+        return None
+    posts = pros.posts_from(msgs)
+    calls = pros.calls_from(posts, {})
+    syms = sorted({c["yf"] for c in calls})[:60]
+    closes: dict[str, list[tuple[str, float]]] = {}
+    if syms:
+        df = fetch.fetch_history(syms, period="2y")
+        for y in syms:
+            try:
+                col = df[(y, "Close")] if (y, "Close") in df.columns else (df["Close"] if len(syms) == 1 else None)
+                if col is not None:
+                    closes[y] = [(d.strftime("%Y-%m-%d"), float(v)) for d, v in col.dropna().items()]
+            except Exception:  # noqa: BLE001
+                continue
+    calls = pros.score_calls([dict(c) for c in calls], closes)
+    u = (msgs[0].get("user") or {}) if msgs else {}
+    meta = {"name": u.get("name") or name, "likes": u.get("like_count"), "id": u.get("id"), "followers": u.get("followers"), "live": True}
+    keep = ("sym", "side", "at", "entry_day", "exit_day", "ret", "hit", "status", "h", "id", "body")
+    out = {"meta": meta, "calls": [{k: c.get(k) for k in keep} for c in calls if c.get("status") in ("scored", "open")]}
+    fetch._cache_put(f"xray_{name.lower()}", out)
+    return out["meta"], out["calls"]
+
+
+@app.get("/api/xray")
+async def api_xray_index(request: Request) -> JSONResponse:
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    st = await asyncio.to_thread(_xray_store)
+    if not st:
+        return JSONResponse({"status": "warming"}, headers={"Cache-Control": "no-store"})
+    idx = sorted(st.get("index") or [], key=lambda x: -(float(x.get("likes") or 0)))
+    return JSONResponse({"status": "ok", "as_of": st.get("as_of"), "stats": st.get("stats"), "persistence": st.get("persistence"),
+                         "popular": idx[:24], "names": sorted(st.get("users", {}).keys(), key=str.lower)}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/xray/{username}")
+async def api_xray_user(username: str, request: Request) -> JSONResponse:
+    """One account's report card. From the ledger when it is there, otherwise read live from StockTwits."""
+    if not _session_email(request):
+        raise HTTPException(status_code=401, detail="sign in first")
+    from . import xray
+    name = re.sub(r"[^A-Za-z0-9_.\-]", "", username.strip().lstrip("@").split("/")[-1])[:40]
+    if not name:
+        raise HTTPException(status_code=400, detail="username needed")
+    st = await asyncio.to_thread(_xray_store) or {}
+    users = st.get("users") or {}
+    key = next((k for k in users if k.lower() == name.lower()), None)
+    source = "ledger"
+    if key:
+        meta, calls = users[key]["meta"], users[key]["calls"]
+    else:
+        source = "live"
+        try:
+            got = await asyncio.to_thread(_xray_live, name)
+        except Exception as e:  # noqa: BLE001
+            log.warning("x-ray live %s: %s", name, e); got = None
+        if not got:
+            return JSONResponse({"status": "not_found", "detail": f"No public StockTwits posts found for @{name}."}, status_code=404)
+        meta, calls = got; key = name
+    base = st.get("base") or {}
+    if not base:
+        return JSONResponse({"status": "warming", "detail": "The ledger is still being built."}, headers={"Cache-Control": "no-store"})
+    rep = await asyncio.to_thread(xray.report, key, meta, calls, base, _st_clean_quote)
+    db.log_activity(_session_email(request), "xray", key)
+    return JSONResponse({"status": "ok", "source": source, "as_of": st.get("as_of"), "persistence": st.get("persistence"), **rep}, headers={"Cache-Control": "no-store"})
 
 
 GAMMA_PATH = DATA_DIR / "gamma.json"
