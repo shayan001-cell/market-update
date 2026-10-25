@@ -2583,60 +2583,19 @@
   document.addEventListener("submit", (e) => { const f = e.target.closest("[data-xr-form]"); if (!f) return; e.preventDefault(); xrGo(new FormData(f).get("u")); });
   document.addEventListener("click", (e) => { const c = e.target.closest("[data-xr-user]"); if (c) { xrGo(c.getAttribute("data-xr-user")); scrollTo({ top: 0, behavior: "smooth" }); } });
   // ---------------------------------------------------------------- Big money bets (Research > Big money bets)
-  // Tab 1, live: the day's biggest options trades and sweeps from Alpaca (bigbets.py), side inferred, scored later.
-  // Tab 2, delayed: what the big funds hold in calls and puts from their 13F filings (funds13f.py).
-  let bbTab = "live", bbData = null, bbFunds = null, bbFilter = "all", bbMin = 0, bbSym = null, bbFund = null, bbFind = "", bbGroup = "conviction";
+  // What the big funds hold in calls and puts, from their 13F filings (funds13f.py).
+  let bbFunds = null, bbFund = null, bbFind = "", bbGroup = "conviction";
   const bbBusy = new Set();
   async function loadBb(kind) {
     if (STATIC_MODE || bbBusy.has(kind)) return; bbBusy.add(kind);
-    try { const res = await api(kind === "live" ? "/api/bigbets" : "/api/funds13f", { cache: "no-store" });
+    try { const res = await api("/api/funds13f", { cache: "no-store" });
       if (res.status === 401) { bbBusy.delete(kind); setTimeout(() => loadBb(kind), 3000); return; }
-      const j = await res.json(); if (kind === "live") bbData = j; else bbFunds = j; }
-    catch (e) { if (kind === "live") bbData = { error: true }; else bbFunds = { error: true }; }
+      bbFunds = await res.json(); }
+    catch (e) { bbFunds = { error: true }; }
     bbBusy.delete(kind); if (currentView === "bigbets") renderAll();
   }
   const bbUsd = (x) => (!isNum(x) ? "–" : x >= 1e9 ? "$" + (x / 1e9).toFixed(1) + "B" : x >= 1e6 ? "$" + (x / 1e6).toFixed(1) + "M" : x >= 1e3 ? "$" + Math.round(x / 1e3) + "K" : "$" + Math.round(x));
   const bbMon = (iso) => { const d = new Date(iso + "T12:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
-  const bbTime = (t) => new Date(t).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
-  function bbLive() {
-    const j = bbData; if (!j) { loadBb("live"); return `<div class="bb-sk">${[0, 1, 2].map(() => '<span class="sk-b"></span>').join("")}</div>`; }
-    if (j.error) return '<div class="bb-empty">The server is not reachable right now.</div>';
-    const cboe = j.feed !== "opra" && j.feed !== "indicative";
-    if (!j.connected) return `<div class="bb-connect"><div><span class="bb-eye">Live tape · not connected yet</span><h3>Connect the options data feed</h3>
-        <p>The live tape reads every options trade from Alpaca. ${j.admin ? "Add your two Alpaca keys to OneView's <code>.env</code> file on the server Mac, then restart the server:" : "It is being connected; the hedge fund books on the next tab work already."}</p>
-        ${j.admin ? '<pre>ALPACA_API_KEY=…\nALPACA_SECRET_KEY=…</pre><p class="muted">The free Alpaca plan delays options trades by 15 minutes; the paid OPRA data plan makes them real time.</p>' : ""}</div>
-        <button type="button" class="btn" data-bb-tab="funds">See the hedge fund books</button></div>`;
-    const T = j.totals || {}, tilt = T.bull + T.bear ? T.bull / (T.bull + T.bear) : null;
-    const rec = j.flow_record || []; const sc = rec.reduce((a, x) => a + (x.scored || 0), 0), hi = rec.reduce((a, x) => a + (x.hits || 0), 0);
-    const names = (j.names || []).slice(0, 14), mx = Math.max(1, ...names.map((n) => Math.max(n.bull, n.bear)));
-    const tiltRows = names.map((n) => `<button type="button" class="bb-tr ${bbSym === n.und ? "on" : ""}" data-bb-sym="${esc(n.und)}">
-        <b>${esc(n.und)}</b><span class="bb-bear"><i style="width:${(n.bear / mx * 100).toFixed(1)}%"></i></span><span class="bb-bull"><i style="width:${(n.bull / mx * 100).toFixed(1)}%"></i></span>
-        <em class="mono ${n.net >= 0 ? "up" : "down"}">${n.net >= 0 ? "+" : "−"}${bbUsd(Math.abs(n.net))}</em></button>`).join("");
-    let bets = (j.bets || []).filter((b) => (!bbSym || b.und === bbSym) && b.premium >= bbMin);
-    bets = bets.filter((b) => bbFilter === "all" || (bbFilter === "bull" && b.lean === "bullish") || (bbFilter === "bear" && b.lean === "bearish") || (bbFilter === "sweep" && (cboe ? b.over_oi : b.sweep)) || (bbFilter === "calls" && b.type === "call") || (bbFilter === "puts" && b.type === "put"));
-    const sideTxt = { bought: "Likely bought", sold: "Likely sold", unclear: "Side unclear" };
-    const rows = bets.slice(0, 160).map((b, i) => `<li class="bb-bet ${b.lean}" style="--i:${Math.min(i, 12)}">
-        <samp>${bbTime(b.t)}</samp>
-        <div class="bb-c"><b>${esc(b.und)}</b><span class="bb-k">${fnum(b.strike, b.strike % 1 ? 1 : 0)}${b.type === "call" ? "C" : "P"} · ${bbMon(b.exp)} · ${b.dte}d${isNum(b.otm_pct) ? ` · ${b.otm_pct > 0 ? b.otm_pct.toFixed(0) + "% OTM" : Math.abs(b.otm_pct).toFixed(0) + "% ITM"}` : ""}</span></div>
-        <div class="bb-p"><b class="mono">${bbUsd(b.premium)}</b><span class="mono">${b.size.toLocaleString()} @ ${b.price.toFixed(2)}</span></div>
-        <div class="bb-tags"><span class="bb-side ${b.side}">${sideTxt[b.side] || b.side}</span>${b.sweep ? `<span class="bb-sweep" title="One order split across ${b.legs} prints on several exchanges to fill fast">Sweep</span>` : ""}${b.over_oi ? `<span class="bb-sweep" title="More contracts traded in these five minutes than were open before today: new positions">New money</span>` : ""}<span class="bb-lean ${b.lean}">${b.lean === "unclear" ? "No lean" : b.lean === "bullish" ? "Bullish" : "Bearish"}</span></div></li>`).join("");
-    const rep = (j.repeat || []).map((r) => `<span class="bb-rep"><b>${esc(r.und)}</b> ${fnum(r.strike, 0)}${r.type === "call" ? "C" : "P"} ${bbMon(r.exp)}<i>${r.hits} big prints</i></span>`).join("");
-    const chips = [["all", "All"], ["bull", "Bullish"], ["bear", "Bearish"], ["sweep", cboe ? "New money" : "Sweeps"], ["calls", "Calls"], ["puts", "Puts"]].map(([k, l]) => `<button type="button" class="${bbFilter === k ? "on" : ""}" data-bb-filter="${k}">${l}</button>`).join("");
-    const mins = [[0, "Any size"], [250000, "$250K+"], [1000000, "$1M+"]].map(([v, l]) => `<button type="button" class="${bbMin === v ? "on" : ""}" data-bb-min="${v}">${l}</button>`).join("");
-    const when = j.date !== (new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" })) ? `last session, ${bbMon(j.date)}` : "today";
-    return `<div class="bb-kpis">
-        <div class="bb-kpi"><span>Big-bet premium ${when}</span><b class="mono">${bbUsd(T.premium)}</b><i>${T.bets || 0} bets · ${cboe ? `${T.new_money || 0} new money` : `${T.sweeps || 0} sweeps`}</i></div>
-        <div class="bb-kpi wide"><span>Which way it leans</span>${tilt !== null ? `<div class="bb-split"><i class="up" style="width:${(tilt * 100).toFixed(1)}%"></i><i class="down" style="width:${((1 - tilt) * 100).toFixed(1)}%"></i></div><div class="bb-split-l"><span class="up">${bbUsd(T.bull)} bullish · ${Math.round(tilt * 100)}%</span><span class="down">${bbUsd(T.bear)} bearish</span></div>` : '<i class="muted">no leaning bets yet</i>'}</div>
-        <div class="bb-kpi"><span>Has the flow been right?</span><b class="mono">${sc ? Math.round(hi / sc * 100) + "%" : "–"}</b><i>${sc ? `${hi} of ${sc} daily leans, 5 sessions later` : "scoring starts after the first closes"}</i></div>
-      </div>
-      <div class="bb-grid">
-        <section class="bb-box"><h3>Money tilt by name <span class="muted">bearish left, bullish right · click to filter</span></h3><div class="bb-tilt">${tiltRows || '<p class="muted">No big bets yet today.</p>'}</div>${bbSym ? `<button type="button" class="lnk" data-bb-sym="">Show every name</button>` : ""}
-          ${rep ? `<h3 style="margin-top:14px">Hit again and again <span class="muted">3+ big prints in one contract</span></h3><div class="bb-reps">${rep}</div>` : ""}</section>
-        <section class="bb-box"><div class="bb-tape-h"><h3>The tape <span class="muted">${bets.length} shown${bbSym ? " · " + esc(bbSym) : ""}</span></h3><div class="ea-seg sm">${chips}</div><div class="ea-seg sm">${mins}</div></div>
-          <ul class="bb-tape">${rows || '<li class="muted">Nothing for this filter.</li>'}</ul></section>
-      </div>
-      <p class="bb-foot">${cboe ? "Big bet: $100K+ in premium ($250K+ for SPY, QQQ and IWM) traded in one contract within a five-minute window, read from Cboe's public option chains (15 minutes delayed) for contracts expiring within 45 days. The side comes from where the last trade sat against the bid and ask: near the ask counts as likely bought, near the bid as likely sold, the middle as unclear. New money: more contracts traded in the window than were open before today. Calls bought and puts sold lean bullish; puts bought and calls sold lean bearish. Some big trades are hedges or one leg of a spread. Information, not advice." : ""}</p><p class="bb-foot" ${cboe ? "hidden" : ""}>Big bet: a single trade or sweep of $100K+ in premium ($250K+ for SPY, QQQ and IWM) in the most active contracts expiring within 45 days. Alpaca gives no historical bid and ask, so the side is inferred: above the last trade counts as likely bought, below as likely sold. Calls bought and puts sold lean bullish; puts bought and calls sold lean bearish. Some big trades are hedges or one leg of a spread. Source: Alpaca options${j.feed === "indicative" ? " (free feed, trades 15 minutes delayed)" : " (OPRA)"}. Information, not advice.</p>`;
-  }
   function bbBooks() {
     const F = bbFunds; if (!F) { loadBb("funds"); return `<div class="bb-sk">${[0, 1, 2].map(() => '<span class="sk-b"></span>').join("")}</div>`; }
     if (F.error) return '<div class="bb-empty">The server is not reachable right now.</div>';
@@ -2669,22 +2628,15 @@
   }
   function secBigBets() {
     if (STATIC_MODE) return `<section><h2>Big money bets</h2><div class="muted">This page runs on the app server.</div></section>`;
-    const tabs = [["live", "Live options tape"], ["funds", "Hedge fund books"]].map(([k, l]) => `<button type="button" class="${bbTab === k ? "on" : ""}" data-bb-tab="${k}">${l}</button>`).join("");
     return `<div class="bb"><header class="bb-head"><div><span class="bb-eye">Research · Big money bets</span><h2 class="bb-title">Where the big money is betting</h2>
-        <p class="bb-lede">${bbTab === "live" ? "The biggest options trades of the day, who most likely started them, and which way they lean." : "What the largest hedge funds hold in calls and puts, from their own SEC filings."}</p></div>
-        <div class="ea-seg bb-tabs" role="tablist">${tabs}</div></header>
-      ${bbTab === "live" ? bbLive() : bbBooks()}</div>`;
+        <p class="bb-lede">What the largest hedge funds hold in calls and puts, from their own SEC filings.</p></div></header>
+      ${bbBooks()}</div>`;
   }
   document.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-bb-tab]"); if (t) { bbTab = t.getAttribute("data-bb-tab"); renderAll(); return; }
-    const f = e.target.closest("[data-bb-filter]"); if (f) { bbFilter = f.getAttribute("data-bb-filter"); renderAll(); return; }
-    const m = e.target.closest("[data-bb-min]"); if (m) { bbMin = +m.getAttribute("data-bb-min"); renderAll(); return; }
-    const s = e.target.closest("[data-bb-sym]"); if (s) { const v = s.getAttribute("data-bb-sym"); bbSym = v && v !== bbSym ? v : null; renderAll(); return; }
     const fd = e.target.closest("[data-bb-fund]"); if (fd) { bbFund = fd.getAttribute("data-bb-fund") || null; renderAll(); return; }
     const gp = e.target.closest("[data-bb-group]"); if (gp) { bbGroup = gp.getAttribute("data-bb-group"); bbFund = null; renderAll(); }
   });
   document.addEventListener("input", (e) => { const i = e.target.closest("[data-bb-find]"); if (!i) return; bbFind = i.value; clearTimeout(i._t); i._t = setTimeout(() => { renderAll(); const n = document.querySelector("[data-bb-find]"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); });
-  setInterval(() => { if (currentView === "bigbets" && bbTab === "live" && bbData && bbData.market_state === "open") { bbData = null; loadBb("live"); } }, 120000);
   function secEarnings(r) {
     const rows = r.earnings.map((e) => `<tr class="${e.attention >= 2 ? "hi" : ""}"><td class="sym"><b>${esc(e.symbol)}</b><div class="meta2">${esc(e.name)}</div></td><td>${esc(e.report_time)}</td><td class="num">${fcap(e.market_cap)}</td><td class="mono">${esc(e.eps_forecast) || "–"}<div class="meta2">yr ago ${esc(e.last_year_eps) || "–"}</div></td><td class="num">${bar(e.attention, 3)}<span class="mono">${e.attention.toFixed(1)}</span></td><td>${e.ai ? `<span class="tag">${pretty(e.ai.read_through.choice)}</span>` : "–"}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">No earnings.</td></tr>';
     return `<section><h2>Companies reporting earnings <span class="muted">${r.earnings.length} shown of ${r.earnings_total} reporting · attention score says how many traders will care</span></h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Company</th><th>When</th><th>Mkt cap</th><th>EPS est.</th><th>Attention</th><th>Read-through</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
@@ -2996,7 +2948,7 @@
     { g: "live", label: "Live", icon: '<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>', items: [["charts", "Live TradingView chart with OneView signals: what to do, stop, targets"], ["live", "The session as it happens: 15-minute reads, SPY and QQQ, runners"], ["liveview", "Briefings, big money, the President's posts, the crowd, the bets"]] },
     { k: "watch" },
     { g: "markets", label: "Markets", icon: NAV_ICON.markets, items: [["macro", "The bigger picture: trend, rates, rotation"], ["theme", "Ten US themes, split into sectors"], ["stock", "Every analysed name in one table"], ["scan", "Unusual volume and low-float movers"], ["earnings", "Who reports this week, and how it landed"]] },
-    { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["bigbets", "Big options bets today, hedge funds' option books"], ["xray", "Is that trader any good? An honest report card"], ["record", "Every call scored against the market"]] },
+    { g: "research", label: "Research", icon: NAV_ICON.research, items: [["map", "Type a company, see how it connects"], ["smart", "Insiders, big holders, Congress, options"], ["bigbets", "Hedge funds' calls and puts, from their SEC filings"], ["xray", "Is that trader any good? An honest report card"], ["record", "Every call scored against the market"]] },
     { g: "admin", label: "Admin", admin: true, icon: ICONS.admin, items: [["desk", "Three scores per name and the big-cap scan"], ["check", "Every 15-minute read, scored"], ["admin", "Users, sessions and traffic"]] },
   ];
   let navOpen = null;

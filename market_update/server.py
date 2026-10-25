@@ -821,7 +821,6 @@ async def _startup() -> None:
     asyncio.create_task(stocktwits_loop())
     asyncio.create_task(odds_loop())
     asyncio.create_task(gamma_loop())
-    asyncio.create_task(bigbets_loop())
     asyncio.create_task(funds13f_loop())
     asyncio.create_task(pros_loop())
     asyncio.create_task(desk_loop())
@@ -2329,43 +2328,6 @@ async def api_xray_user(username: str, request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "source": source, "as_of": st.get("as_of"), "persistence": st.get("persistence"), **rep}, headers={"Cache-Control": "no-store"})
 
 
-def _spot_map() -> dict[str, float]:
-    r = state.get("report") or {}
-    out = {t: q.get("last_price") for t, q in (r.get("lite") or {}).items() if q.get("last_price")}
-    out.update({s["ticker"]: s["last_price"] for s in r.get("stocks", []) if s.get("last_price")})
-    return out
-
-
-def _bigbets_names() -> list[str]:
-    from . import bigbets
-    extra = [t for t in db.all_watchlist_tickers() if t.isalpha() and t not in bigbets.CORE]
-    return (bigbets.CORE + extra)[:30]
-
-
-async def bigbets_loop() -> None:
-    """Live big options bets: every 10 minutes in the session plus one run just after the close, which also logs each
-    name's net lean to the verdict ledger (kind "flow") so the flow gets scored like every other call."""
-    from . import bigbets
-    await asyncio.sleep(150)
-    while True:
-        try:
-            ms = fetch.market_state(); now = fetch.now_et(); today = now.date().isoformat()
-            alp = bool(bigbets.creds())                  # Alpaca when keys are set (single trades), otherwise Cboe chains
-            due = ms == "open" and time.time() - state.get("bigbets_at", 0) >= (600 if alp else bigbets.CBOE_WINDOW_S)
-            closing = ms != "open" and now.hour == 16 and state.get("bigbets_closed") != today and bigbets.load_day(today)["bets"]
-            if due or closing:
-                res = await asyncio.to_thread(bigbets.run, _bigbets_names(), _spot_map()) if alp else await asyncio.to_thread(bigbets.run_cboe, _bigbets_names())
-                state["bigbets_at"] = time.time(); state["bigbets_status"] = res
-                log.info("big bets: %s", res)
-                if closing:
-                    rows = bigbets.ledger_rows(bigbets.load_day(today), _spot_map(), f"flow-{today}")
-                    n = await asyncio.to_thread(db.log_verdicts, rows)
-                    state["bigbets_closed"] = today; log.info("big bets: %d flow calls logged", n)
-        except Exception as e:  # noqa: BLE001
-            state["bigbets_status"] = {"status": "error", "detail": str(e)[:200]}; log.exception("big bets loop error")
-        await asyncio.sleep(60)
-
-
 async def funds13f_loop() -> None:
     """Hedge funds' option books from 13F filings: refreshed once a day (filings land quarterly)."""
     from . import funds13f
@@ -2379,22 +2341,6 @@ async def funds13f_loop() -> None:
         except Exception:  # noqa: BLE001
             log.exception("13F loop error")
         await asyncio.sleep(1800)
-
-
-@app.get("/api/bigbets")
-async def api_bigbets(request: Request) -> JSONResponse:
-    email = _session_email(request)
-    if not email:
-        raise HTTPException(status_code=401, detail="sign in first")
-    from . import bigbets
-    connected = True                                 # Cboe's public chains need no account; Alpaca upgrades it when keys exist
-    summ = await asyncio.to_thread(bigbets.summary)
-    tr = await asyncio.to_thread(db.track_record)
-    flow = [x for x in tr.get("by_verdict", []) if x.get("kind") == "flow"]
-    st = state.get("bigbets_status") or {}
-    nxt = max(0, int(state.get("bigbets_at", 0) + 600 - time.time())) if fetch.market_state() == "open" else None
-    return JSONResponse({"status": "ok", "connected": connected, "admin": email.lower() in {e.lower() for e in config.ADMIN_EMAILS}, "run": st, "next_in_s": nxt,
-                         "market_state": fetch.market_state(), "flow_record": flow, **summ}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/funds13f")
