@@ -3275,7 +3275,9 @@
     horizonBar();
     const mini = $("#hud-mini"); if (mini) { mini.hidden = currentView !== "home"; mini.innerHTML = currentView === "home" ? heroMini(r) : ""; }
     if (sub) { sub.innerHTML = `${esc(r.session_label.split(",")[0])} ${esc(r.session_date.slice(5).replace("-", "/"))} · report ${esc(r.generated_at.slice(11, 16))} ET · <span data-qstamp>${quoteStamp()}</span>`; }
+    const entering = keepY == null;                 // a real page change (not a same-page refresh): play the entry once
     app.innerHTML = viewHtml(r);
+    if (entering) { app.classList.remove("view-enter"); void app.offsetWidth; app.classList.add("view-enter"); clearTimeout(app._ve); app._ve = setTimeout(() => app.classList.remove("view-enter"), 1100); }
     firstRender = false;
     if (keepY != null) { window.scrollTo(0, keepY.win); keepY.els.forEach(([el, y]) => { el.scrollTop = y; }); const nv = $("#app .view"); if (nv && keepY.view) nv.scrollTop = keepY.view; }
     lastRenderedView = currentView;

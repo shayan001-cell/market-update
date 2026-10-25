@@ -3410,3 +3410,69 @@ header.topbar #alerts-btn .pro-badge{display:inline-block !important;position:ab
 @media (prefers-reduced-motion:reduce){.xr-beam,.xr-rep,.xr-card,.xr-stamp{animation:none}}
 @media (max-width:1000px){.xr-hero{grid-template-columns:1fr} .xr-keys{grid-template-columns:repeat(2,minmax(0,1fr))} .xr-two{grid-template-columns:1fr}}
 @media (max-width:560px){.xr-ask{padding:24px 18px} .xr-truth{padding:20px 18px} .xr-rep{padding:16px} .xr-persist{grid-template-columns:1fr} .xr-stamp{transform:none;animation:none;justify-items:start}}
+
+/* ======================================================================================================
+   DESIGN LAYER v3 (2026-10-26): one site-wide finish over every page. Graphite + solar orange stay.
+   Type: Geist for text, Geist Mono for numbers, Sora for display. Depth: an ambient wash and fine grain
+   on the canvas, a lit top edge and a soft tinted shadow on containers. Headings in sentence case.
+   Controls share one hover / press / focus language. Page changes play a short staggered entry.
+   Kept last in the file on purpose: it is the override layer.
+   ====================================================================================================== */
+:root{
+  --font:"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+  --sans:var(--font); --macro:var(--font);
+  --mono:var(--font);              /* legacy rules use --mono for labels and headings: they stay in the text face */
+  --num:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;   /* real figures only */
+  --display:"Sora",var(--font);
+  --ease-out:cubic-bezier(.16,1,.3,1); --ease-spring:cubic-bezier(.34,1.4,.64,1);
+  --lift:inset 0 1px 0 rgba(255,255,255,.045),0 18px 42px -30px rgba(0,0,0,.9);
+  --lift-hover:inset 0 1px 0 rgba(255,255,255,.06),0 22px 50px -28px rgba(0,0,0,.95),0 0 0 1px color-mix(in srgb,var(--brand) 18%,transparent);
+}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+body{font-family:var(--font);font-variant-numeric:tabular-nums;letter-spacing:-.003em;
+  background:radial-gradient(1100px 620px at 8% -12%,rgba(255,122,47,.055),transparent 62%),radial-gradient(900px 520px at 108% 4%,rgba(150,160,255,.03),transparent 60%),var(--canvas);background-attachment:fixed}
+/* fine grain over the whole canvas: breaks the flat digital look; never takes clicks */
+body::after{content:"";position:fixed;inset:0;z-index:2;pointer-events:none;opacity:.035;mix-blend-mode:soft-light;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+::selection{background:color-mix(in srgb,var(--brand) 38%,transparent);color:var(--text)}
+.mono,.num,td.num,samp,code,kbd{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+/* headings: sentence case, display face, tight tracking; class rules below this specificity still win */
+h2{font-family:var(--display);font-weight:650;font-size:clamp(18px,1.45vw,22px);letter-spacing:-.022em;line-height:1.15;text-transform:none;border-left:0;padding-left:0;color:var(--text);text-wrap:balance}
+h2 .muted,h3 .muted{font-family:var(--font);font-size:12.5px;font-weight:400;letter-spacing:0;text-transform:none}
+h3{font-family:var(--font);font-weight:600;letter-spacing:-.012em;text-wrap:balance}
+p,li{text-wrap:pretty}
+/* page header: the page title carries the hierarchy, the stamp recedes */
+.hud-context #hud-title{font-family:var(--display);font-size:17px;font-weight:650;letter-spacing:-.02em;color:var(--text)}
+.hud-context #hud-sub{font-size:11.5px;color:var(--muted);letter-spacing:0}
+/* containers: lit top edge + soft tinted drop; hairlines a touch softer */
+:is(.pz,.sm-card,.tm-card,.card,.panel,.od-card,.od-fund,.od-funds,.od-wl,.odds,.ws-tile,.ea-day,.bcard,.wl-left,.wl-detail,.wd-plan,.wd-read,.wd-sec,.cj,.xr-hero,.xr-rep,.xr-card,.tbl-wrap,.bigmoney,.voices,.action,.meaning,.facts,.vlist,.tile,.pv-tile,.mkb-c,.hb-fed,.bm-grid,.tp-list,.desk,.scan,.record .tbl-wrap){box-shadow:var(--lift);border-color:color-mix(in srgb,var(--line) 88%,transparent)}
+:is(.xr-card,.tm-card,.ws-tile,.sm-card,.ea-card,.od-card,.mkb-c){transition:transform .35s var(--ease-out),box-shadow .35s var(--ease-out),border-color .35s var(--ease-out)}
+:is(.xr-card,.tm-card,.ws-tile,.od-card,.mkb-c):hover{transform:translateY(-2px);box-shadow:var(--lift-hover)}
+/* tables: quiet headers, row hover, numbers aligned */
+.tbl thead th{font-family:var(--font);font-size:11px;font-weight:600;letter-spacing:.035em;color:var(--muted);text-transform:none;white-space:nowrap}
+.tbl tbody tr{transition:background-color .2s var(--ease-out)}
+.tbl tbody tr:hover{background-color:rgba(255,255,255,.028)}
+.tbl td.num{font-family:var(--num)} .tbl td.num .meta2,.tbl td.num .muted{font-family:var(--font)}
+/* controls: one language for hover, press and keyboard focus */
+.btn,.tab,.ltab,.seg button,.ea-seg button,.cj-seg button,.pz-seg button,[data-sub]{transition:transform .22s var(--ease-out),background-color .25s var(--ease-out),border-color .25s var(--ease-out),color .25s var(--ease-out),box-shadow .25s var(--ease-out)}
+.btn{font-weight:600;letter-spacing:-.005em}
+.btn:not(.ghost):not(.sm):hover{box-shadow:0 10px 26px -12px color-mix(in srgb,var(--brand) 70%,transparent)}
+.btn:active,.tab:active,.ltab:active,.seg button:active,[data-sub]:active,.xr-card:active,.ea-card:active{transform:scale(.975)}
+:where(a,button,input,select,textarea,[tabindex]):focus-visible{outline:2px solid var(--brand-text);outline-offset:2px}
+input:not([type=checkbox]):not([type=radio]),select,textarea{transition:border-color .25s var(--ease-out),box-shadow .25s var(--ease-out)}
+input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px color-mix(in srgb,var(--brand) 16%,transparent)}
+/* pills and tags: crisper */
+.pill,.tag{font-family:var(--font);font-weight:600;letter-spacing:.02em}
+/* scrollbars: thin and dark */
+*{scrollbar-width:thin;scrollbar-color:#2c2c34 transparent}
+*::-webkit-scrollbar{width:10px;height:10px} *::-webkit-scrollbar-thumb{background:#2c2c34;border-radius:999px;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:#3a3a44;background-clip:content-box;border:3px solid transparent}
+/* page entry: sections rise in, one after another, only when the page changes */
+@keyframes v3-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+#app.view-enter .view>*,#app.view-enter .view .col-main>*,#app.view-enter .view .subview>*{animation:v3-rise .65s var(--ease-out) both}
+#app.view-enter .view>*:nth-child(2),#app.view-enter .view .col-main>*:nth-child(2),#app.view-enter .view .subview>*:nth-child(2){animation-delay:.06s}
+#app.view-enter .view>*:nth-child(3),#app.view-enter .view .col-main>*:nth-child(3),#app.view-enter .view .subview>*:nth-child(3){animation-delay:.12s}
+#app.view-enter .view>*:nth-child(4),#app.view-enter .view .col-main>*:nth-child(4),#app.view-enter .view .subview>*:nth-child(4){animation-delay:.18s}
+#app.view-enter .view>*:nth-child(n+5),#app.view-enter .view .col-main>*:nth-child(n+5),#app.view-enter .view .subview>*:nth-child(n+5){animation-delay:.24s}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}#app.view-enter *{animation:none!important}:is(.xr-card,.tm-card,.ws-tile,.od-card,.mkb-c):hover{transform:none}}
+.skip{position:fixed;left:12px;top:-60px;z-index:300;padding:10px 14px;border-radius:10px;background:var(--brand);color:#141416;font-weight:700;transition:top .25s var(--ease-out)} .skip:focus{top:12px}
