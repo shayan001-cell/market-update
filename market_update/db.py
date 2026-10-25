@@ -377,10 +377,10 @@ def import_legacy_json(users_path: Path) -> int:
 
 # ---- verdict ledger: every call the model makes, with the price at the time, evaluated later --------
 BULLISH = {"buy_now", "buy_the_dip", "long_momentum", "buy_dip_to_support", "accumulate", "trend_up", "momentum_up", "drifting_up", "pullback_in_uptrend", "buying_today",
-           "re_entry", "tactical_rebound", "hold_ride"}
+           "re_entry", "tactical_rebound", "hold_ride", "flow_bullish"}
 BEARISH = {"short_setup", "short_momentum", "trim", "avoid", "fade_the_gap", "trend_down", "momentum_down", "drifting_down", "selling_today",
-           "stay_out", "exit", "exit_trim"}
-HORIZON = {"swing": 7, "intraday": 1, "long_term": 90, "desk": 7}          # calendar days until a call is scored
+           "stay_out", "exit", "exit_trim", "flow_bearish"}
+HORIZON = {"swing": 7, "intraday": 1, "long_term": 90, "desk": 7, "flow": 7}   # flow: 7 calendar days ~ 5 sessions          # calendar days until a call is scored
 NO_MOVE = 0.0005                    # a later price within 0.05% of the call price is no move, not a hit or a miss
 NO_MOVE_GRACE_DAYS = 4
 
