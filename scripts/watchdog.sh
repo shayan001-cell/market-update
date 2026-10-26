@@ -30,11 +30,25 @@ done
 # The permanent address (Tailscale Funnel) wins whenever it answers; the Cloudflare quick tunnel is the fallback.
 REPO="${MU_REPO:-shayan001-cell/market-update}"
 FUNNEL=$(cat output/tv_webhook_base.txt 2>/dev/null || true)
-if [ -n "$FUNNEL" ] && curl -sf -m 10 "$FUNNEL/healthz" >/dev/null; then
+# This Mac's own DNS can fail on the Funnel name while the rest of the world reaches it fine (2026-10-26): when the
+# normal check fails, ask public DNS for the address and test it directly before declaring the Funnel down.
+funnel_ok() {
+  curl -sf -m 10 "$FUNNEL/healthz" >/dev/null && return 0
+  local host ip
+  host=${FUNNEL#https://}; host=${host%%/*}
+  for ip in $(dig +short "$host" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -2); do
+    if curl -sf -m 10 --resolve "$host:443:$ip" "$FUNNEL/healthz" >/dev/null; then log "permanent address answers via $ip but this Mac cannot resolve it: local DNS fault, address left as is"; return 0; fi
+  done
+  return 1
+}
+if [ -n "$FUNNEL" ] && funnel_ok; then
   if [ "$FUNNEL" != "$(cat /tmp/mu-tunnel-url.txt 2>/dev/null || true)" ]; then
-    echo "$FUNNEL" > /tmp/mu-tunnel-url.txt
-    gh variable set MU_API_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1
-    log "permanent address $FUNNEL answering: published, page rebuild started"
+    if gh variable set MU_API_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$FUNNEL" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1; then
+      echo "$FUNNEL" > /tmp/mu-tunnel-url.txt
+      log "permanent address $FUNNEL answering: published, page rebuild started"
+    else
+      log "permanent address $FUNNEL answering but NOT published: gh cannot reach GitHub (run: gh auth login)"
+    fi
   fi
   exit 0
 fi
@@ -58,7 +72,10 @@ CUR=$(grep -a -o "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/mu-tunnel.log | t
 PUB=$(cat /tmp/mu-tunnel-url.txt 2>/dev/null || true)
 case "$CUR" in https://*.trycloudflare.com) ;; *) CUR="" ;; esac     # only ever publish a real tunnel address
 if [ -n "$CUR" ] && [ "$CUR" != "$PUB" ]; then
-  echo "$CUR" > /tmp/mu-tunnel-url.txt
-  gh variable set MU_API_URL --body "$CUR" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$CUR" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1
-  log "tunnel address changed to $CUR: published, page rebuild started"
+  if gh variable set MU_API_URL --body "$CUR" --repo "$REPO" >/dev/null 2>&1 && gh variable set MU_APP_URL --body "$CUR" --repo "$REPO" >/dev/null 2>&1 && gh workflow run build.yml --repo "$REPO" >/dev/null 2>&1; then
+    echo "$CUR" > /tmp/mu-tunnel-url.txt               # recorded only once GitHub really has it, so a failed publish is retried
+    log "tunnel address changed to $CUR: published, page rebuild started"
+  else
+    log "tunnel address $CUR NOT published: gh cannot reach GitHub (run: gh auth login)"
+  fi
 fi
