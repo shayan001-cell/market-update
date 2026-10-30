@@ -54,6 +54,9 @@
     return verdictFor(s);
   }
   const ICONS = {
+    earnings: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8 14l2 2 4-4"/></svg>',
+    bigbets: '<svg viewBox="0 0 24 24"><path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg>',
+    xray: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5M8 11h1.5l1-2 1.5 4 1-2H14"/></svg>',
     home: '<svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M10 20v-5h4v5"/></svg>',
     scan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 3v9l6.5 4"/></svg>',
     stock: '<svg viewBox="0 0 24 24"><path d="M7 4v16M7 8h-2.5v7H7M12 3v18M12 6h-2.5v9H12M17 5v14M17 9h-2.5v6H17"/><path d="M7 8h2.5v7H7M12 6h2.5v9H12M17 9h2.5v6H17"/></svg>',
@@ -2963,16 +2966,22 @@
     if (navOpen === g) { closeNavPop(); return; }
     closeNavPop();
     const p = navPop(); const label = (k) => (VIEWS.find((v) => v[0] === k) || [k, k, ""]);
-    p.innerHTML = `<div class="np-h">${esc(m.label)}</div>` + m.items.map(([k, d]) => { const [, l, n] = label(k);
-      return `<button type="button" class="np-it ${currentView === k ? "on" : ""}" data-view="${k}" role="menuitem"><span class="np-ic">${ICONS[k] || ""}</span><span class="np-tx"><b>${esc(l)}</b><i>${esc(d)}</i></span>${n ? `<kbd>${n}</kbd>` : ""}</button>`; }).join("");
+    const NP_SAY = { live: "The session as it happens, from the first bell to the close.", markets: "The whole market: the big picture, themes, every name and what is moving.", research: "Dig into one company, one fund or one trader.", admin: "The desk's own tools and the site's traffic." };
+    p.innerHTML = `<div class="np-core"><div class="np-h"><span class="np-ic np-gic">${m.icon}</span><span><b>${esc(m.label)}</b><i>${esc(NP_SAY[m.g] || "")}</i></span></div>
+      <div class="np-list">${m.items.map(([k, d], i) => { const [, l, n] = label(k);
+      return `<button type="button" class="np-it ${currentView === k ? "on" : ""}" data-view="${k}" role="menuitem" style="--i:${i}"><span class="np-ic">${ICONS[k] || ""}</span><span class="np-tx"><b>${esc(l)}</b><i>${esc(d)}</i></span>${currentView === k ? `<em class="np-here">You are here</em>` : n ? `<kbd>${n}</kbd>` : ""}</button>`; }).join("")}</div>
+      <div class="np-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div></div>`;
+    p.dataset.grp = m.g;
     const br = btn.getBoundingClientRect();
-    p.style.left = Math.max(8, Math.min(innerWidth - 348, br.left - 8)) + "px"; p.style.top = (br.bottom + 8) + "px";
+    p.style.left = Math.max(8, Math.min(innerWidth - 408, br.left - 10)) + "px"; p.style.top = (br.bottom + 8) + "px";
     p.hidden = false; btn.setAttribute("aria-expanded", "true"); btn.classList.add("open"); navOpen = g;
     p.querySelectorAll(".np-it").forEach((it) => { it.onclick = () => { closeNavPop(); switchView(it.getAttribute("data-view")); }; });
     const first = p.querySelector(".np-it.on") || p.querySelector(".np-it"); if (first) first.focus({ preventScroll: true });
   }
   addEventListener("click", (e) => { if (!navOpen) return; if (e.target.closest("#nav-pop") || e.target.closest("[data-grp]")) return; closeNavPop(); });
-  addEventListener("keydown", (e) => { if (e.key === "Escape" && navOpen) closeNavPop(); });
+  addEventListener("keydown", (e) => { if (!navOpen) return; if (e.key === "Escape") { closeNavPop(); return; }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return; const its = [...document.querySelectorAll("#nav-pop .np-it")]; if (!its.length) return; e.preventDefault();
+    const i = its.indexOf(document.activeElement); its[(i + (e.key === "ArrowDown" ? 1 : -1) + its.length) % its.length].focus({ preventScroll: true }); });
   addEventListener("resize", () => { if (navOpen) closeNavPop(); });
   addEventListener("scroll", () => { if (navOpen && !matchMedia("(max-width: 700px)").matches) closeNavPop(); }, true);
   function renderNav() {
