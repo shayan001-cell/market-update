@@ -66,7 +66,12 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
         "lead": base.get("lead") or [], "lag": base.get("lag") or [],
         "reads": {"count": len(reads), "tally": tally, "latest": {k: last_read.get(k) for k in ("ts", "expected", "confidence", "driver")} if last_read else None},
         "spy_levels": {"prev_high": spy_t.get("prev_high"), "prev_low": spy_t.get("prev_low"), "sma20": spy_t.get("sma20")},
-        "headlines": since[:6], "posts": base.get("posts") or [], "crowd": base.get("crowd") or [], "spy_mood": base.get("spy_mood") or {},
+        "headlines": since[:6],
+        # the President's posts, labelled so a model cannot mistake who said it
+        "presidents_posts": [{"said_by": "the President" + (" (a repost)" if p.get("repost") else ""), "text": p.get("text"), "at_et": p.get("at"),
+                              "topic": (p.get("theme") or "").replace("_", " "), "sectors_it_touches": p.get("who"),
+                              "oneview_read": {"bullish_for_stocks": "good for stocks", "bearish_for_stocks": "bad for stocks"}.get(p.get("direction"), "mixed")} for p in (base.get("posts") or [])[:3]],
+        "posts": base.get("posts") or [], "crowd": base.get("crowd") or [], "spy_mood": base.get("spy_mood") or {},
         "heavy": base.get("heavy") or [], "ahead": ahead, "after_close": after_close,
     }
 
@@ -75,7 +80,8 @@ SYSTEM = (
     "You write OneView's 1 pm midday market note for a WhatsApp group of retail traders. Use ONLY the facts in the JSON "
     "you are given; never invent prices, news, quotes or events. Describe what happened and what is scheduled; never tell "
     "anyone what to do. Do not use the words buy, sell, short, long, target, stop, entry, exit, recommend, should, must, "
-    "consider or opportunity. Plain English, short sentences, no emoji, no dashes. Numbers as given, with % where they are percentages.\n"
+    "consider or opportunity. Never say one thing caused or followed from another unless the facts say so; put facts side by side instead. "
+    "Quote who said what exactly as labelled (presidents_posts.said_by). Plain English, short sentences, no emoji, no dashes. Numbers as given, with % where they are percentages.\n"
     "Return JSON only: {\"headline\": at most 12 words, \"so_far\": 2 sentences on the session so far, "
     "\"drivers\": 2 sentences on what is moving it (sectors, the biggest movers), \"voices\": 1 to 2 sentences on who said what "
     "(the President's posts, headlines since the open, the crowd), \"into_close\": 2 sentences on the levels and scheduled events "
@@ -104,6 +110,14 @@ def _fallback(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _round(x: Any) -> Any:
+    """Two decimals everywhere, so the written read never copies 766.6199951171875."""
+    if isinstance(x, float): return round(x, 2)
+    if isinstance(x, dict): return {k: _round(v) for k, v in x.items()}
+    if isinstance(x, list): return [_round(v) for v in x]
+    return x
+
+
 def _clean(t: str) -> str:
     return re.sub(r"\s*[–—]\s*", ", ", str(t or "")).strip()
 
@@ -116,9 +130,10 @@ def write(d: dict[str, Any]) -> dict[str, Any]:
         from . import config
         base_url, key, model = settings()
         client = openai.OpenAI(base_url=base_url, api_key=key, timeout=60, max_retries=1)
-        facts = json.dumps(d, default=str)
+        facts = json.dumps(_round({k: v for k, v in d.items() if k != "posts"}), default=str)
         for attempt in range(2):
-            r = client.chat.completions.create(model=model, max_tokens=700, temperature=0.3,
+            think = {"reasoning_effort": "low"} if "gemini" in model else {}      # Gemini thinks first; keep it short so the answer fits
+            r = client.chat.completions.create(model=model, max_tokens=2500, temperature=0.3, **think,
                                                messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": facts}],
                                                response_format={"type": "json_object"}, extra_body=EXTRA_BODY.get(config.AI_PROVIDER) or None)
             out = json.loads(r.choices[0].message.content)
