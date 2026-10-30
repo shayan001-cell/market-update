@@ -12,3 +12,4 @@ dist/
 .venv
 marketing/video/cap/
 marketing/video/*.mp4
+vendor/
