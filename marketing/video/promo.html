@@ -114,10 +114,13 @@ function pan(img, t, a, b) {                    // slow scroll through a tall ca
 }
 function rise(el, t, at, dist = 40) { if (!el) return; const k = ease((t - at) / 0.7); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dist}px)`; }
 window.render = (t) => {
-  for (const [id, a, b] of T) { const el = document.getElementById(id); const v = t >= a - 0.01 && t <= b + 0.01 ? vis(t, a, b) : 0; el.style.opacity = v;
-    el.style.transform = `translateY(${(1 - ease((t - a) / 0.8)) * 30}px)`; }
-  rise(document.getElementById("w1"), t, 0.2, 60); rise(document.getElementById("w2"), t, 0.6, 60); rise(document.getElementById("w3"), t, 1.2, 30);
-  const logo = document.querySelector("#s0 .logo"); const lk = ease(t / 0.8); logo.style.opacity = lk; logo.style.transform = `scale(${0.92 + 0.08 * lk})`;
+  for (const [id, a, b] of T) { const el = document.getElementById(id); let v = t >= a - 0.01 && t <= b + 0.01 ? vis(t, a, b) : 0;
+    if (id === "s0") v = t <= b - X ? 1 : vis(t, a, b);     // the opening frame is the cover: logo and headline already on screen
+    el.style.opacity = v; el.style.transform = id === "s0" ? "none" : `translateY(${(1 - ease((t - a) / 0.8)) * 30}px)`; }
+  // cover: everything visible from frame 0, with a slow push-in instead of an entrance
+  const push = 1 + 0.035 * inout(t / 3.6);
+  ["w1", "w2", "w3"].forEach((id) => { const el = document.getElementById(id); el.style.opacity = 1; el.style.transform = `scale(${push})`; el.style.transformOrigin = "left center"; });
+  const logo = document.querySelector("#s0 .logo"); logo.style.opacity = 1; logo.style.transform = `scale(${push})`; logo.style.transformOrigin = "left center";
   [1, 2, 3, 4, 5].forEach((n) => { const [, a, b] = T[n]; pan(document.getElementById("i" + n), t, a, b); const cap = document.querySelector(`#s${n} .cap`); rise(cap, t, a + 0.15, 36);
     const fr = document.querySelector(`#s${n} .frame`); if (fr) { const k = ease((t - a - 0.35) / 0.8); fr.style.opacity = k; fr.style.transform = `translateY(${(1 - k) * 80}px)`; } });
   const [, a6, b6] = T[6]; const seg = (b6 - a6 - 0.4) / 3; rise(document.querySelector("#s6 .cap"), t, a6 + 0.15, 36);
@@ -129,7 +132,7 @@ window.render = (t) => {
   const cta = document.querySelector("#s7 .cta"); if (t > a7 + 1.6) cta.style.transform = `scale(${1 + 0.015 * Math.sin((t - a7) * 4)})`;
   document.getElementById("bg").style.setProperty("--gx", (20 + 30 * Math.sin(t / 7)) + "%"); document.getElementById("bg").style.setProperty("--gy", (10 + 12 * Math.cos(t / 9)) + "%");
   document.getElementById("prog").style.width = (t / DUR * 100) + "%";
-  document.getElementById("fine").style.opacity = t > 3.4 ? 1 : ease((t - 2.4) / 0.8);
+  document.getElementById("fine").style.opacity = 1;
 };
 window.DUR = DUR;
 </script></body></html>
