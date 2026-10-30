@@ -201,18 +201,18 @@
     candle: "A candle shows one day's open, high, low and close. Where it closes inside its range tells you who won the day.",
     closeloc: "Close location: 100% = closed at the day's high (buyers won), 0% = closed at the low (sellers won).",
     swinglvl: "Swing high / low: a local peak or trough on the chart. Traders treat them as resistance and support.",
-    rr: "Reward-to-risk: how much you stand to gain at the target for each dollar risked to the stop. 2× or better is the usual bar.",
+    rr: "Room ratio: the distance to resistance compared with the distance to support.",
   };
   const term = (key, label) => `<abbr class="term" title="${esc(G[key] || "")}">${label}</abbr>`;
   // What each model answer means, in one sentence.
   const EX = {
     tone: { risk_on: "Buyers are in control: futures up, fear gauge down. Dips are more likely to get bought.", risk_off: "Sellers are in control: futures down or fear rising. Rallies are more likely to get sold.", mixed: "Signals disagree. Expect choppy trade until something breaks the tie." },
-    vol: ["Calm day expected. Ranges should stay small.", "A normal day. Two-way trade, nothing extraordinary on the calendar.", "Expect bigger swings. There is a catalyst or a large overnight move in play.", "Extreme conditions. Size down and expect gaps."],
+    vol: ["Calm day expected. Ranges should stay small.", "A normal day. Two-way trade, nothing extraordinary on the calendar.", "Expect bigger swings. There is a catalyst or a large overnight move in play.", "Extreme conditions. Gaps and very wide ranges are likely."],
     driver: { fed_rates: "The Fed and bond yields are steering everything today.", macro_data: "Economic data is the story.", earnings: "Company results are setting the tone.", ai_tech: "AI and big tech are the story.", geopolitics: "Politics and trade headlines are moving prices.", energy_commodities: "Oil, metals or commodities are leading.", crypto: "Crypto is setting the mood.", deals: "Deal news is the driver.", regulatory_legal: "Regulation or court news is the driver.", no_dominant_driver: "No single story. A technical, flow-driven day." },
     lead: { mega_cap_tech: "The biggest tech names should lead.", semis: "Chip stocks should lead.", small_caps_cyclicals: "Small caps and cyclicals should lead.", financials: "Banks and brokers should lead.", energy_materials: "Energy and materials should lead.", healthcare_biotech: "Healthcare and biotech should lead.", consumer: "Consumer names should lead.", defensives: "Defensive sectors should hold up best.", crypto_linked: "Crypto-linked stocks should lead.", unclear: "No group stands out." },
     rates: { tailwind: "Bond yields are easing, which helps stocks, especially growth names.", headwind: "Yields are rising, which pressures stock valuations.", neutral: "Rates are not a big factor today.", growth_scare: "Yields are dropping because growth looks weak. Good for bonds and defensives, bad for cyclicals." },
     flow: { into_growth_tech: "Money is crowding into big tech and chips.", into_cyclicals_small_caps: "Money is moving into small caps and economy-sensitive stocks.", into_defensives: "Money is hiding in staples, utilities and gold.", into_bonds_cash: "Money is leaving stocks for bonds and cash.", broad_risk_on: "Money is flowing into almost everything.", broad_risk_off: "Money is leaving almost everything.", mixed: "No clear direction in the flows." },
-    bias: { long: "Leaning higher over the next few days.", short: "Leaning lower over the next few days.", neutral: "No clear direction. Wait for a better setup." },
+    bias: { long: "Leaning higher over the next few days.", short: "Leaning lower over the next few days.", neutral: "No clear direction over the next few days." },
     setup: { breakout: "Pushing through recent highs. Momentum traders chase these.", pullback_in_uptrend: "Healthy dip inside an uptrend. Classic buy-the-dip zone.", breakdown: "Falling through recent lows. Momentum is to the downside.", bounce_in_downtrend: "Bouncing inside a downtrend. Often short-lived.", extended_reversal_risk: "Ran too far, too fast. Chasing here is risky.", range: "Bouncing between the same levels. Buy low, sell high inside the box.", news_gap: "Jumped on fresh news. The story matters more than the chart.", no_clear_setup: "Nothing actionable right now." },
     day: ["Too quiet to day trade.", "Tradeable, but nothing special today.", "In play today: enough movement and a reason to watch it.", "Prime day-trade candidate: big range, volume and a fresh catalyst."],
     swing: ["No edge for a multi-day hold.", "Marginal swing setup.", "Reasonable swing setup with a clear line in the sand.", "High-quality swing setup: strong trend and a clear stop."],
@@ -253,10 +253,10 @@
   const PA = {
     structure: { uptrend_hh_hl: "Uptrend: higher highs and higher lows.", downtrend_lh_ll: "Downtrend: lower highs and lower lows.", expanding_hh_ll: "Whipsaw: higher highs but lower lows; range is widening.", contracting_lh_hl: "Coiling: lower highs and higher lows; a break is coming.", mixed: "No clean structure.", undefined: "Not enough swings to judge.", breakout_from_downtrend_lh_ll: "Breaking out: price just cleared the last swing high after a run of lower highs; trend may be turning up.", breakout_from_expanding_hh_ll: "Breaking out of a whipsaw range to the upside.", breakdown_from_uptrend_hh_hl: "Breaking down: price just lost the last swing low after a run of higher lows; trend may be turning down.", breakdown_from_expanding_hh_ll: "Breaking down out of a whipsaw range." },
     control: { buyers_in_control: "Buyers are in control.", sellers_in_control: "Sellers are in control.", buyers_exhausting: "Buyers are tiring; the rise is losing conviction.", sellers_exhausting: "Sellers are tiring; the drop is losing conviction.", indecision: "Nobody is pressing; wait for a decisive candle." },
-    entry: ["No entry here.", "Early; wait for a confirming close.", "Reasonable entry at a level.", "Textbook entry: everything lines up."],
+    entry: ["Not near a clear level.", "Early: no confirming close yet.", "Sitting at a level.", "At a clear level, and the reads line up."],
   };
 
-  // Before-you-take-the-position checklist: code rules over data the model and technicals already produced.
+  // Agreement checklist: code rules over data the model and technicals already produced.
   function checklist(s, r) {
     const a = s.ai, t = s.technicals, pa = s.price_action || {}, f = s.fundamentals || {};
     if (!a) return null;
@@ -272,21 +272,21 @@
       { ok: a.extended.p < 0.6 && isNum(t.dist_sma20_pct) && isNum(t.atr_pct) && Math.abs(t.dist_sma20_pct) <= 2 * t.atr_pct, label: "Not stretched", why: `${fpct(t.dist_sma20_pct, 1)} from the 20-day average; extended ${(a.extended.p * 100).toFixed(0)}%` },
       { ok: pa.direction === (long ? "up" : "down") && (long ? pa.close_location >= 0.6 : pa.close_location <= 0.4), label: "Last candle agrees", why: `${pretty(pa.pattern || "ordinary")} candle, closed ${isNum(pa.close_location) ? (pa.close_location * 100).toFixed(0) + "% up its range" : "–"}` },
       { ok: isNum(pa.volume_vs_avg) && pa.volume_vs_avg >= 1.0, label: "Volume backs it", why: `${isNum(pa.volume_vs_avg) ? pa.volume_vs_avg.toFixed(2) + "× average volume" : "volume unknown"}` },
-      { ok: !!pl && pl.rr >= 1.5, label: "Room to run", why: pl && isNum(pl.rr) ? `reward ${pl.rr.toFixed(1)}× the risk` : "no plan" },
+      { ok: !!pl && pl.rr >= 1.5, label: "Room to run", why: pl && isNum(pl.rr) ? `${pl.rr.toFixed(1)}× more room to the far level than the near one` : "no levels" },
       { ok: a.event_risk.p < 0.6 && !(isNum(f.days_to_earnings) && f.days_to_earnings >= 0 && f.days_to_earnings <= 5), label: "No event this week", why: isNum(f.days_to_earnings) && f.days_to_earnings >= 0 ? `earnings in ${f.days_to_earnings} days` : "nothing scheduled" },
       { ok: isNum(t.rsi14) && (long ? t.rsi14 < 70 : t.rsi14 > 30), label: "RSI not at an extreme", why: `RSI ${fnum(t.rsi14, 0)}` },
-      { ok: a.entry_quality ? a.entry_quality.score >= 2 : false, label: "Clean entry", why: a.entry_quality ? PA.entry[Math.round(a.entry_quality.score)] : "no read" },
+      { ok: a.entry_quality ? a.entry_quality.score >= 2 : false, label: "At a clear level", why: a.entry_quality ? PA.entry[Math.round(a.entry_quality.score)] : "no read" },
     ];
     const passed = items.filter((i) => i.ok).length;
     const verdict = passed >= 8 ? "ready" : passed >= 6 ? "almost" : "not_yet";
-    const text = { ready: "Ready: most boxes are ticked.", almost: "Almost: fix the open items or size down.", not_yet: "Not yet: too many boxes open." }[verdict];
+    const text = { ready: "Most of the reads agree.", almost: "The reads are mixed.", not_yet: "Few of the reads agree." }[verdict];
     return { lean, items, passed, total: items.length, verdict, text };
   }
   const checklistHtml = (ck, full) => {
     if (!ck) return "";
     if (!ck.items.length) return `<div class="ck ck-wait">${esc(ck.text)}</div>`;
     const rows = ck.items.map((i) => `<li class="${i.ok ? "ok" : "no"}"><span class="ck-mark" aria-hidden="true">${i.ok ? '<svg viewBox="0 0 12 12"><path d="M2.5 6.5 5 9l4.5-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '<svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'}</span><span class="ck-label">${i.label}</span><span class="ck-why">${esc(i.why)}</span></li>`).join("");
-    return `<details class="ck ck-${ck.verdict}" ${full ? "open" : ""}><summary><span class="ck-score">${ck.passed}/${ck.total}</span> <b>${{ ready: "Ready", almost: "Almost", not_yet: "Not yet" }[ck.verdict]}</b> <span class="muted">${esc(ck.text)} · checklist</span></summary><ul>${rows}</ul></details>`;
+    return `<details class="ck ck-${ck.verdict}" ${full ? "open" : ""}><summary><span class="ck-score">${ck.passed}/${ck.total}</span> <b>${{ ready: "Mostly agree", almost: "Mixed", not_yet: "Few agree" }[ck.verdict]}</b> <span class="muted">${esc(ck.text)} · checklist</span></summary><ul>${rows}</ul></details>`;
   };
   const pretty = (k) => String(k || "").replace(/_/g, " ");
   const conf = () => "";                            // confidence is shown as a LOW / MED / HIGH word (convTag), never a percentage
@@ -381,9 +381,9 @@
       target = isNum(t.lo20) && t.lo20 < px * 0.99 ? t.lo20 : px - 2 * atr;
     }
     const risk = Math.abs(px - stop), reward = Math.abs(target - px), rr = risk ? reward / risk : 0;
-    const verdict = rr >= 2 ? "good odds" : rr >= 1.2 ? "fair odds" : "poor odds right here; wait for a pullback";
+    const verdict = rr >= 2 ? "more room above than below" : rr >= 1.2 ? "room is about even" : "less room than the near level";
     return { lean, stop, target, risk, reward, rr,
-      text: `${lean === "long" ? "Buy" : "Short"} near ${fnum(px)} · stop ${fnum(stop)} (${fpct((stop / px - 1) * 100, 1)}) · target ${fnum(target)} (${fpct((target / px - 1) * 100, 1)}) · reward ${rr.toFixed(1)}× the risk: ${verdict}` };
+      text: `Leans ${lean === "long" ? "higher" : "lower"} from ${fnum(px)} · near level ${fnum(stop)} (${fpct((stop / px - 1) * 100, 1)}) · far level ${fnum(target)} (${fpct((target / px - 1) * 100, 1)}) · ${verdict}` };
   }
 
   function nowStrip(s, r) {
@@ -1507,7 +1507,7 @@
       const px = x.q.last, lo2 = Math.min(pl.stop, px, pl.target), hi2 = Math.max(pl.stop, px, pl.target), rg = hi2 - lo2 || 1, at = (v) => (((v - lo2) / rg) * 100).toFixed(1);
       const longSide = pl.target > px;
       const sup = Math.min(pl.stop, pl.target), res = Math.max(pl.stop, pl.target);
-      planHtml = `<div class="wd-plan"><h5>Key levels · from the swing read</h5>
+      planHtml = `<div class="wd-plan"><h5>Key levels</h5>
         <div class="wd-pbar"><span class="risk" style="left:${Math.min(at(pl.stop), at(px))}%;width:${Math.abs(at(px) - at(pl.stop))}%"></span><span class="rew" style="left:${Math.min(at(px), at(pl.target))}%;width:${Math.abs(at(pl.target) - at(px))}%"></span>
           <i class="stop" style="left:${at(pl.stop)}%"></i><i class="now" style="left:${at(px)}%"></i><i class="tgt" style="left:${at(pl.target)}%"></i></div>
         <div class="wd-pn"><span class="down">Support <b>${fnum(sup)}</b></span><span>Now <b>${fnum(px)}</b></span><span class="up">Resistance <b>${fnum(res)}</b></span><span class="wd-rr">${fpct((res / px - 1) * 100, 1)} to resistance · ${fpct((sup / px - 1) * 100, 1)} to support</span></div></div>`;
@@ -2382,7 +2382,7 @@
         <div class="col">
           <div><div class="chart tall" data-chart="${esc(s.ticker)}"></div><div class="legend"><span><i class="k1"></i>SMA 20</span><span><i class="k2"></i>SMA 50</span><span>dashed: prior high / low, pivot, 20-day high / low, swing levels</span></div></div>
           ${paTile(s)}
-          <div class="tile"><div class="tile-label">Before you take the position</div>${explain("Ten checks a disciplined trader runs before pressing the button. Each line says why it passed or failed.")}${checklistHtml(checklist(s, r), true)}</div>
+          <div class="tile"><div class="tile-label">How many reads agree</div>${explain("Ten checks on trend, structure, mood, volume, levels and events. Each line says why it passed or failed. A description of the chart, not a signal to act.")}${checklistHtml(checklist(s, r), true)}</div>
           ${judg}
         </div>
         <div class="col">
