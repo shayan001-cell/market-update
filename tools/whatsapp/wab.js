@@ -1,14 +1,15 @@
 // OneView WhatsApp bridge on Baileys (no browser): login by QR, list groups, send to groups by name or id.
 //   node wab.js login                          -> writes qr.png; scan in WhatsApp > Linked devices
 //   node wab.js groups                         -> "<id>\t<name>\t<members>" for every group the account is in
-//   node wab.js send "<id|name>[,<id|name>...]" <file>
+//   node wab.js send "<id|name>[,<id|name>...]" <file>              (a .txt file is sent as text)
+//   node wab.js send "<id|name>[,...]" <picture.png> [caption.txt]   (a .png/.jpg is sent as a picture)
 //   node wab.js resolve "<invite link>"        -> group id + name
 const path = require("path"), fs = require("fs");
 const P = require("pino");
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser } = require("@whiskeysockets/baileys");
 const root = path.resolve(__dirname, "..", "..");
 const authDir = process.env.MU_WA_AUTH || path.join(root, "output", "wa-baileys");
-const [cmd, arg1, arg2] = process.argv.slice(2);
+const [cmd, arg1, arg2, arg3] = process.argv.slice(2);
 if (!cmd) { console.error("usage: node wab.js login | groups | send <targets> <file> | resolve <invite>"); process.exit(2); }
 const logger = P({ level: "silent" });
 
@@ -43,7 +44,9 @@ async function main() {
         done = true; clearTimeout(deadline); setTimeout(() => process.exit(0), 800); return;
       }
       if (cmd === "send") {
-        const text = fs.readFileSync(arg2, "utf8");
+        const isPic = /\.(png|jpe?g)$/i.test(arg2 || "");
+        const text = isPic ? (arg3 ? fs.readFileSync(arg3, "utf8") : "") : fs.readFileSync(arg2, "utf8");
+        const msg = isPic ? { image: fs.readFileSync(arg2), caption: text || undefined, mimetype: /\.png$/i.test(arg2) ? "image/png" : "image/jpeg" } : { text };
         const targets = String(arg1 || "").split(",").map((x) => x.trim()).filter(Boolean);
         let ok = 0;
         for (const t of targets) {
@@ -53,8 +56,8 @@ async function main() {
           else { const g = list.find((x) => x.name === t) || list.find((x) => x.name.toLowerCase().includes(t.toLowerCase())); jid = g ? g.id : null; }
           if (!jid) { console.error(`not found: ${t}`); continue; }
           try {
-            const sent = await sock.sendMessage(jid, { text });
-            if (sent && sent.key && sent.key.id) { ok += 1; console.log(`sent ${text.length} chars to ${jid} (${sent.key.id})`); } else console.error(`no confirmation for ${jid}`);
+            const sent = await sock.sendMessage(jid, msg);
+            if (sent && sent.key && sent.key.id) { ok += 1; console.log(`sent ${isPic ? "picture + " : ""}${text.length} chars to ${jid} (${sent.key.id})`); } else console.error(`no confirmation for ${jid}`);
           } catch (e) { console.error(`failed for ${jid}: ${e.message}`); }
           await new Promise((r) => setTimeout(r, 2500));
         }
