@@ -359,6 +359,7 @@ def _lite(symbols: list[str], snapshot: dict[str, Any], history: pd.DataFrame, s
     """Quote + daily technicals for every symbol the build touched, so a ticker added to a
     watchlist on the page shows real numbers instantly even without a full analysis."""
     out: dict[str, Any] = {}
+    caps = fetch.fetch_market_caps()
     keep = ("trend", "rsi14", "atr14", "atr_pct", "sma20", "sma50", "above_sma20", "above_sma50", "above_sma200", "dist_sma20_pct",
             "ret_5d", "ret_1m", "ret_3m", "hi20", "lo20", "prev_high", "prev_low", "pct_from_hi52", "new_high_20d", "new_low_20d")
     for t in symbols:
@@ -374,7 +375,7 @@ def _lite(symbols: list[str], snapshot: dict[str, Any], history: pd.DataFrame, s
         name, kind = sym_names.get(t, (config.INDEX_ETFS.get(t) or config.SECTOR_ETFS.get(t) or t, "ETF" if t in config.INDEX_ETFS or t in config.SECTOR_ETFS else "Stock"))
         out[t] = {"name": name, "kind": kind, "last_price": s["last_price"], "chg_pct": s["gap_pct"], "rel_volume": s["rel_volume"],
                   "avg_dollar_volume": s["avg_dollar_volume"], "technicals": {k: tech.get(k) for k in keep},
-                  "scan": _scan_slim(scan_stats.get(t)), "on_theme": t in theme}
+                  "scan": _scan_slim(scan_stats.get(t)), "on_theme": t in theme, "market_cap": caps.get(t) if kind == "Stock" else None}
     return out
 
 

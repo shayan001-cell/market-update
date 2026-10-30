@@ -3743,3 +3743,103 @@ input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{b
   .lp-dock{bottom:12px;max-width:calc(100% - 24px);overflow-x:auto} .lp-dock button{padding:8px 11px}
   .lp-final-in .lp-btn{width:100%;justify-content:space-between}
 }
+
+/* ==== OVERVIEW v2: three plain answers, your stocks, movers; detail folded away (secOverview) ==== */
+.ov2{display:grid;gap:16px;container-type:inline-size;padding-bottom:24px}
+.ov2 .num{font-family:var(--num);font-variant-numeric:tabular-nums}
+.ov-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;padding:4px 2px 2px}
+.ov-hi{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.ov-head h2{margin:0;font-family:var(--display);font-size:clamp(22px,2.2vw,30px);font-weight:650;letter-spacing:-.03em;line-height:1.1}
+.ov-head h2 span{color:var(--muted)}
+.ov-meta{display:flex;align-items:center;gap:12px}
+.ov-k{display:block;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+
+/* the three answers */
+.ov-answers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.ova{position:relative;display:flex;flex-direction:column;gap:10px;padding:20px 20px 18px;border-radius:20px;background:linear-gradient(180deg,var(--surface),var(--surface-2));border:1px solid var(--line);box-shadow:var(--lift);overflow:hidden;min-width:0}
+.ova::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--tone,var(--line-2))}
+.ova.up{--tone:var(--up)} .ova.down{--tone:var(--down)} .ova.warn{--tone:var(--warn)} .ova.flat{--tone:var(--flat)} .ova.mood{--tone:var(--mc,var(--flat))}
+.ova.dir{cursor:pointer;transition:transform .35s var(--ease-out),border-color .35s var(--ease-out)} .ova.dir:hover{transform:translateY(-2px);border-color:var(--line-2)}
+.ova-q{font-size:13px;font-weight:500;color:var(--text-2)}
+.ova-a{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.ova-a b{font-family:var(--display);font-size:clamp(30px,3.2vw,44px);font-weight:650;letter-spacing:-.04em;line-height:1;color:var(--tone,var(--text))}
+.ova.mood .ova-a b{color:var(--mc)}
+.ova-a span{font-size:15px;color:var(--text-2)} .ova-a small{font-size:11px;color:var(--muted)}
+.ova p{margin:0;font-size:13.5px;line-height:1.5;color:var(--text-2)} .ova p b{color:var(--text);font-weight:600}
+.ova .aspark{width:100%;height:46px;margin-top:2px}
+.ova-cap{font-size:10.5px;color:var(--muted);margin-top:-8px;text-align:right}
+.ova-mini{list-style:none;margin:auto 0 0;padding:10px 0 0;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.ova-mini li{display:grid;gap:2px;font-size:11.5px;color:var(--muted);cursor:pointer} .ova-mini b{font-size:13px}
+.ova-meter{position:relative;display:flex;gap:3px;height:10px;margin-top:4px}
+.ova-meter i{border-radius:5px;background:var(--c);opacity:.28} .ova-meter i.on{opacity:1}
+.ova-meter em{position:absolute;top:-4px;width:4px;height:18px;margin-left:-2px;border-radius:2px;background:var(--text);box-shadow:0 0 0 3px var(--surface)}
+.ova-scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-top:-4px}
+.ova-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ova-chip{font-size:11.5px;padding:3px 9px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:var(--text-2);text-transform:capitalize}
+.ova-chip.calm{color:var(--up);border-color:color-mix(in srgb,var(--up) 35%,transparent)} .ova-chip.jumpy{color:var(--down);border-color:color-mix(in srgb,var(--down) 35%,transparent)}
+.ova-link{margin-top:auto;align-self:flex-start;background:none;border:0;padding:0;font:inherit;font-size:12.5px;color:var(--accent);cursor:pointer} .ova-link:hover{text-decoration:underline}
+
+/* in plain words */
+.ov-take{padding:18px 20px;border-radius:18px;border:1px solid color-mix(in srgb,var(--accent) 25%,var(--line));background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 9%,transparent),transparent 70%),var(--surface)}
+.ovt-lead{margin:0 0 10px;font-family:var(--display);font-size:clamp(16px,1.4vw,19px);font-weight:600;letter-spacing:-.015em;line-height:1.35;color:var(--text)}
+.ovt-lead b{color:var(--accent)}
+.ovt-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.ovt-list li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.5;color:var(--text-2)} .ovt-list b{color:var(--text)}
+.ovt-ic{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:7px;font-size:12px;background:var(--surface-2);border:1px solid var(--line);color:var(--text-2)}
+.ovt-list li.warn .ovt-ic{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+
+/* panels: your stocks, movers */
+.ov-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+.ov-two > .pz{margin:0}
+.ovp{padding:16px 16px 10px;border-radius:18px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--lift);min-width:0}
+.ovp-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
+.ovp-h h3{margin:0;font-size:15px;font-weight:600} .ovp-h h3 span{margin-left:6px;font-size:12px;font-weight:400;color:var(--muted)}
+.ovp .lnk{font-size:12.5px}
+.ovr-list{list-style:none;margin:0;padding:0}
+.ovr{display:grid;grid-template-columns:minmax(0,1.4fr) auto minmax(54px,.6fr) minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 6px;border-top:1px solid var(--line);cursor:pointer;border-radius:10px;transition:background .25s var(--ease-out)}
+.ovr:first-child{border-top:0} .ovr:hover{background:var(--surface-2)}
+.ovr-id{display:grid;min-width:0} .ovr-id b{font-family:var(--num);font-size:13.5px} .ovr-id i{font-style:normal;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ovr-m{display:grid;justify-items:end;font-size:12.5px} .ovr-m small{font-family:var(--font);font-size:10px;color:var(--muted)}
+.ovr-px{justify-self:end;text-align:right} .ovr-px .qx{display:grid;justify-items:end;gap:1px} .ovr-px .px{font-family:var(--num);font-size:13.5px} .ovr-px .delta{font-size:12px}
+.ovr .pill{justify-self:end;white-space:nowrap}
+.ov-movers .ovr{grid-template-columns:minmax(0,1fr) auto auto} .ov-movers .ovr-m{display:none}
+.ovm{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.ovm h4{margin:2px 0 4px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:600} .ovm-col.up h4{color:var(--up)} .ovm-col.down h4{color:var(--down)}
+.ov-movers .ovr-px .px{display:none}
+.ov-empty{padding:14px 6px;font-size:13px;color:var(--muted);line-height:1.5}
+.ov-more-n{padding:8px 6px 4px;font-size:12px;color:var(--muted)}
+
+/* market cap tag, used wherever a ticker shows */
+.cap{display:inline-flex;align-items:baseline;gap:5px;padding:2px 8px;border-radius:999px;font-family:var(--num);font-size:11.5px;color:var(--text-2);background:var(--surface-2);border:1px solid var(--line);white-space:nowrap;justify-self:start}
+.cap i{font-style:normal;font-family:var(--font);font-size:10px;color:var(--muted)}
+.cap.mega{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))} .cap.small,.cap.micro{border-color:color-mix(in srgb,var(--warn) 35%,var(--line))}
+.cap.fund{font-family:var(--font);color:var(--muted)} .cap.wait,.cap.none{color:var(--muted);font-family:var(--font)}
+
+/* glossary */
+.ov-words{padding:16px 18px;border-radius:18px;background:var(--surface);border:1px dashed var(--line-2)}
+.ovw{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.ovw-i b{display:block;font-size:13.5px;margin-bottom:4px} .ovw-i p{margin:0;font-size:12.5px;line-height:1.5;color:var(--text-2)}
+
+/* the folded detail */
+.ov-detail{border-radius:18px;border:1px solid var(--line);background:var(--surface)}
+.ov-detail > summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px}
+.ov-detail > summary::-webkit-details-marker{display:none}
+.ov-detail > summary b{display:block;font-size:15px} .ov-detail > summary i{font-style:normal;font-size:12.5px;color:var(--muted)}
+.ov-detail > summary em{flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--line-2);position:relative;transition:transform .35s var(--ease-out)}
+.ov-detail > summary em::before{content:"";position:absolute;left:9px;top:8px;width:8px;height:8px;border-right:1.5px solid var(--text-2);border-bottom:1.5px solid var(--text-2);transform:rotate(45deg)}
+.ov-detail[open] > summary em{transform:rotate(180deg)}
+.ov-detail-in{display:grid;gap:14px;padding:0 14px 16px}
+
+@container (max-width:900px){
+  .ov-answers{grid-template-columns:minmax(0,1fr)}
+  .ov-two{grid-template-columns:minmax(0,1fr)}
+  .ovw{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@container (max-width:520px){
+  .ovr{grid-template-columns:minmax(0,1fr) auto auto;row-gap:4px} .ovr .cap{grid-column:1;grid-row:2} .ovr-m{display:none} .ovr .pill{grid-column:2/4;grid-row:2;justify-self:end}
+  .ovm{grid-template-columns:minmax(0,1fr)} .ovw{grid-template-columns:minmax(0,1fr)}
+}
+.ov2 > .pz,.ov2 .ov-two > .pz{grid-column:auto;grid-row:auto}
+.ova > *{align-self:stretch} .ova > .ova-link{align-self:flex-start}
+.wr-id b .cap,.sc-row .sym .cap,.tk-name .cap{margin-left:4px;padding:1px 6px;font-size:10.5px;vertical-align:1px;font-weight:500}
+.wr-id b .cap i,.sc-row .sym .cap i{display:none}

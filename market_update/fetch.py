@@ -584,6 +584,35 @@ def fetch_calendar(session: date) -> list[dict[str, Any]]:
 # Earnings calendar (Nasdaq)
 # ---------------------------------------------------------------------------
 NASDAQ_EARNINGS = "https://api.nasdaq.com/api/calendar/earnings"
+NASDAQ_SCREENER = "https://api.nasdaq.com/api/screener/stocks"
+
+
+def fetch_market_caps() -> dict[str, float]:
+    """Market cap for every US-listed stock (~7,000) from Nasdaq's public screener: one request, cached 12 hours.
+    Yahoo-style symbols (BRK/B -> BRK-B). ETFs and crypto are not in it: a fund has assets, not a market cap."""
+    hit = _cache_get("market_caps", 12 * 3600)
+    if hit:
+        return hit
+    try:
+        r = requests.get(NASDAQ_SCREENER, params={"tableonly": "true", "limit": "25", "offset": "0", "download": "true"}, headers=UA, timeout=30)
+        r.raise_for_status()
+        out: dict[str, float] = {}
+        for row in ((r.json() or {}).get("data") or {}).get("rows") or []:
+            try:
+                cap = float(row.get("marketCap") or 0)
+            except (TypeError, ValueError):
+                continue
+            sym = (row.get("symbol") or "").strip().upper().replace("/", "-")
+            if sym and cap > 0:
+                out[sym] = cap
+        if len(out) > 1000:
+            _cache_put("market_caps", out)
+            return out
+    except Exception as e:  # noqa: BLE001
+        log.warning("market caps failed: %s", e)
+    return _cache_get("market_caps", -1) or {}
+
+
 
 
 def _parse_cap(s: str | None) -> float | None:

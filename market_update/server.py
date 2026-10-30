@@ -1356,6 +1356,14 @@ async def api_track_record_scored() -> JSONResponse:
     return JSONResponse(await asyncio.to_thread(db.recent_scored, 8), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/caps")
+async def api_caps(syms: str = "") -> JSONResponse:
+    """Public: market cap for up to 400 symbols (US stocks; funds and crypto have none), from the cached Nasdaq screener."""
+    caps = await asyncio.to_thread(fetch.fetch_market_caps)
+    want = [x.strip().upper() for x in syms.split(",") if x.strip()][:400]
+    return JSONResponse({t: caps.get(t) for t in want}, headers={"Cache-Control": "max-age=3600"})
+
+
 @app.get("/api/alerts")
 async def api_alerts_get(request: Request) -> dict[str, Any]:
     email = _session_email(request)

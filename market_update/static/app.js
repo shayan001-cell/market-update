@@ -1466,7 +1466,7 @@
   function wlRow(x) {
     const on = x.t === wlSel;
     return `<li class="wl-row ${on ? "on" : ""} t-${x.tone}" data-wl-sel="${esc(x.t)}" role="option" aria-selected="${on}" tabindex="${on ? 0 : -1}">
-      <span class="wr-id"><b>${esc(x.t)}</b><i>${esc(x.name)}</i></span>
+      <span class="wr-id"><b>${esc(x.t)} ${capTag(x.t)}</b><i>${esc(x.name)}</i></span>
       <span class="wr-spark">${x.closes.length > 1 ? areaSpark(x.closes, cls(x.closes[x.closes.length - 1] - x.closes[0]), "ws" + x.t.replace(/[^A-Za-z0-9]/g, "")) : `<span class="wr-nochart">${analyzing.has(x.t) ? "analysing" : "quote only"}</span>`}</span>
       <span class="wr-px">${priceHtml(x.t, x.s || x.l || {})}</span>
       <span class="wr-read">${x.v ? `<em class="wr-pill ${x.tone}">${esc(x.v.word)}</em>` : `<em class="wr-pill none">${analyzing.has(x.t) ? "Analysing" : "No read"}</em>`}</span>
@@ -1660,7 +1660,7 @@
   let brief = null;                     // {date, briefs: {morning, midday, close}}
   async function pollBrief() {
     if (STATIC_MODE) return;
-    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (onFeedView() && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); else { const pu = $(".view.home .pulse"), cm = $(".view.home .col-main"); if (pu) pu.insertAdjacentElement("afterend", tmp.firstElementChild); else if (cm) cm.prepend(tmp.firstElementChild); } refreshPulse("levels"); wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
+    try { const res = await api("/api/brief", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); const sig = j.status === "ok" ? Object.values(j.briefs || {}).map((b) => b.generated_at).join("|") : ""; if (j.status === "ok" && (!brief || brief.sig !== sig)) { brief = j; brief.sig = sig; if (onFeedView() && report) { const el = $(".briefs"); const tmp = document.createElement("div"); tmp.innerHTML = secBrief(report); if (el) el.replaceWith(tmp.firstElementChild); /* the Overview stays simple: briefings live in Live > Intraday view */ refreshPulse("levels"); wireStocks(); jumpToBrief(); } } } catch (e) { /* server restarting */ }
   }
   const BRIEF_MOVE = { push_higher: ["Pointing higher", "up"], pullback_then_higher: ["Stretched: a dip first is likelier", "flat"], range_bound: ["Range-bound", "flat"], break_lower: ["At risk of breaking lower", "down"], rebound: ["Set up for a rebound", "up2"] };
   const BRIEF_DRIVER = { momentum: "rising averages and higher highs", overbought: "overbought on the 1-hour chart", resistance_overhead: "resistance right overhead", support_nearby: "support close underneath", trend_intact: "the trend held through the last dip", trend_broken: "the trend broke" };
@@ -1703,7 +1703,7 @@
     const el = $(".briefs"); if (!el) return;
     briefOpen = "morning"; const d = el.querySelector('[data-brief-slot="morning"]'); if (d) d.classList.add("open");
     el.scrollIntoView({ block: "start", behavior: "smooth" });
-    try { history.replaceState(null, "", "#view=home"); } catch (e) {}
+    try { history.replaceState(null, "", "#view=" + currentView); } catch (e) {}
   }
   function briefCard(b, slot, label, at, today) {
     if (!b) return `<article class="bcard pending" data-brief-slot="${slot}"><div class="bcard-h"><b>${label}</b><span class="muted">${at} ET</span></div><div class="muted">${slot === "morning" ? "Arrives at 07:00 every day." : slot === "midday" ? "Arrives at 13:00 on market days." : "Arrives after the close on market days."}</div></article>`;
@@ -2861,7 +2861,7 @@
     const body = rows.slice(0, 30).map((x) => { const a = x.ai || {}, ses = x.session || {}, rd = a.read ? SC.read[a.read.choice] : null, t = x.ticker;
       const vw = x.above_vwap != null ? x.above_vwap : ses.above_vwap, rp = isNum(x.range_pos) ? x.range_pos : ses.range_pos, rv = isNum(x.rvol_tod) ? x.rvol_tod : ses.rvol_time_of_day;
       return `<tr class="clickable sc-row ${x.qualifies === false ? "dim" : ""}" data-ticker-page="${esc(t)}" title="Open ${esc(t)}: chart, verdict, smart money">
-        <td class="sym"><b>${esc(t)}</b><div class="meta2">${esc(x.name || "")}</div></td>
+        <td class="sym"><b>${esc(t)}</b> ${capTag(t)}<div class="meta2">${esc(x.name || "")}</div></td>
         <td class="num">${priceHtml(t, x)}</td>
         <td class="num rv"><b class="${isNum(rv) && rv >= 2 ? "up" : ""}">${isNum(rv) ? rv.toFixed(1) + "×" : "–"}</b><div class="meta2">${fvol(ses.session_volume)} today</div></td>
         ${tfs.map((k) => tfCell(x, k)).join("")}
@@ -3792,7 +3792,7 @@
     if (STATIC_MODE) return;
     try { const res = await api("/api/gamma", { cache: "no-store" }); if (!res.ok) return; const j = await res.json(); if (j.status !== "ok") { setTimeout(pollGamma, 20000); return; }
       const changed = !gammaSnap || gammaSnap.at !== j.at; gammaSnap = j; gammaRecv = Date.now();
-      if (changed && currentView === "home" && report) { const el = $("[data-cj]"); const tmp = document.createElement("div"); tmp.innerHTML = secCalm(); if (el && tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else if (!el && tmp.firstElementChild) { const h = $(".pulse .pulse-head"); if (h) h.insertAdjacentElement("afterend", tmp.firstElementChild); } } } catch (e) { /* server restarting */ }
+      if (changed && currentView === "home" && report) { const el = $("[data-cj]"); const tmp = document.createElement("div"); tmp.innerHTML = secCalm(); if (el && tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else if (!el && tmp.firstElementChild) { const h = $(".pulse .pulse-head"); if (h) h.insertAdjacentElement("afterend", tmp.firstElementChild); }  const sw = $("[data-ov-swing]"); if (sw && report) { const t2 = document.createElement("div"); t2.innerHTML = ovAnswers(report); const n = t2.querySelector("[data-ov-swing]"); if (n) sw.replaceWith(n); const tk = $(".ov-take"); if (tk) { t2.innerHTML = ovTakeaway(report); tk.replaceWith(t2.firstElementChild); } } } } catch (e) { /* server restarting */ }
   }
   const CJ_MOOD = { greed: ["Greedy", "very few puts: call buyers are crowding in", "down"], calls: ["Calls leading", "more call buying than usual here", "up"], normal: ["Normal", "the usual mix of hedging and betting", "flat"], hedging: ["Extra hedging", "more puts than usual: protection is being bought", "warn"], fear: ["Fearful", "puts are piling in", "down"] };
   const cjNum = (x, key) => (isNum(x) ? fnum(x, key === "SPY" ? 2 : 0) : "–");
@@ -3899,6 +3899,152 @@
       <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
     </section>`;
   }
+  // ======================= OVERVIEW v2: three plain answers first, the detail folded away =======================
+  // Built for someone new to trading: is the market up, how does it feel, are swings calm or big; then their own stocks
+  // and today's biggest movers, each with its market cap. Every number comes from the report, the live quotes or the
+  // options map; the sentences are rules over those numbers, not forecasts or advice.
+  // Market cap: stock fundamentals, else the build's quick quotes, else /api/caps (Nasdaq screener, cached on the server).
+  const CAPS = {}; const capAsked = new Set();
+  const liteOf = (t) => ((report && report.lite) || {})[t];
+  const kindOf = (t) => { const s = stockFor(t); if (s && s.kind) return s.kind; const l = liteOf(t); if (l && l.kind) return l.kind; return /-USD$/.test(t) ? "Crypto" : /^\^|=F$|=X$/.test(t) ? "Index" : "Stock"; };
+  function capOf(t) {
+    const s = stockFor(t); const a = s && (s.fundamentals || {}).market_cap; if (isNum(a)) return a;
+    const l = liteOf(t); if (l && isNum(l.market_cap)) return l.market_cap;
+    return isNum(CAPS[t]) ? CAPS[t] : null;
+  }
+  const CAP_SIZES = [[200e9, "Mega"], [10e9, "Large"], [2e9, "Mid"], [300e6, "Small"], [0, "Micro"]];
+  const capSize = (c) => (CAP_SIZES.find(([lo]) => c >= lo) || CAP_SIZES[4])[1];
+  function capTag(t) {
+    const k = kindOf(t);
+    if (ETF_KINDS.has(k)) return `<span class="cap fund" data-cap="${esc(t)}" title="A fund holds many companies, so it has no market cap of its own">Fund</span>`;
+    if (k === "Crypto") return `<span class="cap fund" data-cap="${esc(t)}">Crypto</span>`;
+    if (k === "Index") return "";
+    const c = capOf(t); if (!isNum(c)) { capAsked.has(t) || wantCaps([t]); return `<span class="cap wait" data-cap="${esc(t)}">cap…</span>`; }
+    return `<span class="cap ${capSize(c).toLowerCase()}" data-cap="${esc(t)}" title="Market cap: the value of all the company's shares. ${capSize(c)} cap.">${fcap(c)}<i>${capSize(c)}</i></span>`;
+  }
+  let capTimer = null; const capQueue = new Set();
+  function wantCaps(list) {
+    if (STATIC_MODE) return; list.forEach((t) => { if (!capAsked.has(t)) { capAsked.add(t); capQueue.add(t); } });
+    clearTimeout(capTimer); capTimer = setTimeout(async () => { const syms = [...capQueue]; capQueue.clear(); if (!syms.length) return;
+      try { const res = await api(`/api/caps?syms=${encodeURIComponent(syms.join(","))}`); if (!res.ok) return; const j = await res.json();
+        Object.entries(j).forEach(([t, v]) => { CAPS[t] = isNum(v) ? v : NaN; });
+        document.querySelectorAll(".cap.wait[data-cap]").forEach((el) => { const t = el.getAttribute("data-cap"); if (!(t in j)) return; const tmp = document.createElement("span"); tmp.innerHTML = isNum(CAPS[t]) ? capTag(t) : `<span class="cap none" data-cap="${esc(t)}">–</span>`; el.replaceWith(tmp.firstElementChild); });
+      } catch (e) { /* server restarting */ } }, 120);
+  }
+  let ovMoreOpen = false;
+  const ovDay = () => (marketStateNow() === "open" ? "today" : "in the last session");
+  function ovMood(r) {
+    const ins = pulseInputs(r); if (!ins.length) return null;
+    const score = Math.round(ins.reduce((a, x) => a + x.s, 0) / ins.length); const zone = MOOD_ZONES.find(([lo, hi]) => score >= lo && score < hi) || MOOD_ZONES[4];
+    const lo = [...ins].sort((a, b) => a.s - b.s)[0], hi = [...ins].sort((a, b) => b.s - a.s)[0];
+    return { score, word: zone[2], col: zone[3], hi, lo, n: ins.length };
+  }
+  function ovSwings() {
+    const g = gammaSnap; const vx = g && (g.vix || {}).VIX; const vl = vx ? vx.last : (() => { const m = report && macroOf(report, "^VIX"); return m ? qp("^VIX", m).last : null; })();
+    const P = (g && g.products) || []; const calm = P.filter((p) => cjZone(p) === "calm").length;
+    const fromMap = P.length ? (calm === P.length ? "calm" : calm === 0 ? "jumpy" : "mixed") : null;
+    const fromVix = isNum(vl) ? (vl < 20 ? "calm" : vl < 28 ? "mixed" : "jumpy") : null;
+    const k = fromMap === "jumpy" || fromVix === "jumpy" ? (fromMap === "calm" || fromVix === "calm" ? "mixed" : "jumpy") : fromMap === "mixed" || fromVix === "mixed" ? "mixed" : fromMap || fromVix || null;
+    return { k, vix: vl, P, calm };
+  }
+  const OV_SW = { calm: ["Calm", "Small, orderly moves. Dips and pops tend to fade.", "up"], mixed: ["Mixed", "Some markets calm, some jumpy. Expect a few sharp moves.", "warn"], jumpy: ["Jumpy", "Bigger swings than usual. Moves can run further and faster.", "down"] };
+  function ovAnswers(r) {
+    const spy = idxOf(r, "SPY"); const q = spy ? qp("SPY", spy) : {}; const ch = q.chg;
+    const dir = !isNum(ch) ? ["–", "flat", "No price yet"] : Math.abs(ch) < 0.15 ? ["Flat", "flat", `barely moved ${ovDay()}`] : ch > 0 ? ["Up", "up", `up ${fpct(ch, 1, false)} ${ovDay()}`] : ["Down", "down", `down ${fpct(Math.abs(ch), 1, false)} ${ovDay()}`];
+    const closes = ((spy && spy.ohlc) || []).slice(-30).map((c) => c.c);
+    const others = [["QQQ", "Nasdaq 100"], ["DIA", "Dow 30"], ["IWM", "Small caps"]].map(([s, l]) => { const x = idxOf(r, s); if (!x) return ""; const qq = qp(s, x);
+      return `<li data-ticker-page="${s}"><span>${l}</span><b class="num ${cls(qq.chg)}" data-q="${s}">${fpct(qq.chg, 1)}</b></li>`; }).join("");
+    const m = ovMood(r), sw = ovSwings(), S = sw.k ? OV_SW[sw.k] : null;
+    const moodCard = m ? `<article class="ova mood" style="--mc:${m.col}"><span class="ova-q">How does the market feel?</span>
+        <div class="ova-a"><b>${m.word}</b><span class="num">${m.score}<small>/100</small></span></div>
+        <div class="ova-meter" aria-hidden="true">${MOOD_ZONES.map(([lo, hi, n, c]) => `<i style="--c:${c};flex:${hi - lo}" class="${n === m.word ? "on" : ""}"></i>`).join("")}<em style="left:${m.score}%"></em></div>
+        <div class="ova-scale"><span>Fear</span><span>Neutral</span><span>FOMO</span></div>
+        <p>Strongest sign: <b>${esc(m.hi.k.toLowerCase())}</b> (${esc(m.hi.v)}). Weakest: <b>${esc(m.lo.k.toLowerCase())}</b> (${esc(m.lo.v)}).</p></article>`
+      : `<article class="ova mood"><span class="ova-q">How does the market feel?</span><div class="ova-a"><b>–</b></div><p>Not enough data yet.</p></article>`;
+    const mapLine = sw.P.length ? sw.P.map((p) => `<span class="ova-chip ${cjZone(p)}">${esc(p.key)} ${cjZone(p)}</span>`).join("") : "";
+    const swingCard = `<article class="ova swing ${S ? S[2] : ""}" data-ov-swing><span class="ova-q">Are the swings calm or big?</span>
+        <div class="ova-a"><b>${S ? S[0] : "–"}</b>${isNum(sw.vix) ? `<span class="num">VIX ${fnum(sw.vix, 1)}</span>` : ""}</div>
+        <p>${S ? S[1] : "Reading the fear gauge…"}</p>
+        ${mapLine ? `<div class="ova-chips">${mapLine}</div>` : ""}
+        <button type="button" class="ova-link" data-ov-more>See the options map</button></article>`;
+    return `<div class="ov-answers">
+      <article class="ova dir ${dir[1]}" data-ticker-page="SPY" role="button" tabindex="0"><span class="ova-q">Is the market up?</span>
+        <div class="ova-a"><b>${dir[0]}</b><span class="num">${isNum(q.last) ? fnum(q.last) : ""}</span></div>
+        <p>The S&amp;P 500, the 500 biggest US companies, is <b>${dir[2]}</b>.</p>
+        ${areaSpark(closes, cls(closes.length > 1 ? closes[closes.length - 1] - closes[0] : 0), "ovspy")}<span class="ova-cap">last 30 days</span>
+        <ul class="ova-mini">${others}</ul></article>
+      ${moodCard}${swingCard}</div>`;
+  }
+  function ovTakeaway(r) {
+    const spy = idxOf(r, "SPY"); const q = spy ? qp("SPY", spy) : {}; const m = ovMood(r), sw = ovSwings(), L = levelsFor(r, "SPY");
+    const list = activeList(); const ups = list.filter((t) => (qp(t, stockFor(t) || liteOf(t)).chg || 0) > 0).length;
+    const earn = list.map((t) => { const s = stockFor(t); const d = s && (s.fundamentals || {}).days_to_earnings; return isNum(d) && d >= 0 && d <= 7 ? [t, d] : null; }).filter(Boolean);
+    const mv = !isNum(q.chg) ? "" : Math.abs(q.chg) < 0.15 ? "is flat" : q.chg > 0 ? "is rising" : "is falling";
+    const parts = [mv && `The market ${mv}`, m && `the mood is <b>${m.word.toLowerCase()}</b>`, sw.k && `swings are <b>${OV_SW[sw.k][0].toLowerCase()}</b>`].filter(Boolean);
+    const lead = parts.length ? parts.join(", ").replace(/, ([^,]*)$/, " and $1") + "." : "";
+    const watch = [
+      L ? `<li><span class="ovt-ic">↕</span><span>S&amp;P 500 lines to watch: <b>floor ${fnum(L.S)}</b> and <b>ceiling ${fnum(L.R)}</b>. A normal day moves it about ±${fnum(L.atr)}.</span></li>` : "",
+      list.length ? `<li><span class="ovt-ic">★</span><span><b>${ups} of ${list.length}</b> of your stocks are up ${ovDay()}.</span></li>` : "",
+      earn.length ? `<li class="warn"><span class="ovt-ic">!</span><span>Earnings within a week: <b>${earn.map(([t, d]) => `${esc(t)} (${d ? d + "d" : "today"})`).join(", ")}</b>. Prices can jump on the report.</span></li>` : "",
+    ].join("");
+    return `<section class="ov-take"><span class="ov-k">In plain words</span><p class="ovt-lead">${lead}</p>${watch ? `<ul class="ovt-list">${watch}</ul>` : ""}</section>`;
+  }
+  function ovRow(t, rec, extra) {
+    const q = qp(t, rec); const v = rec ? verdictFor(rec) : null; const nmx = (rec && rec.name) || "";
+    const m1 = rec && (rec.technicals || {}).ret_1m;
+    return `<li class="ovr" data-ticker-page="${esc(t)}" role="button" tabindex="0">
+      <span class="ovr-id"><b>${esc(t)}</b><i>${esc(nmx)}</i></span>
+      ${capTag(t)}
+      <span class="ovr-m num ${cls(m1)}" title="Change over the past month">${isNum(m1) ? fpct(m1, 1) : ""}<small>${isNum(m1) ? "1 month" : ""}</small></span>
+      <span class="ovr-px">${priceHtml(t, rec)}</span>
+      ${extra != null ? extra : v ? `<span class="pill ${v.cls}">${esc(v.word)}</span>` : `<span class="pill flat">no read</span>`}</li>`;
+  }
+  function ovStocks(r) {
+    const list = activeList();
+    if (!list.length) return `<section class="ovp ov-mine"><div class="ovp-h"><h3>Your stocks</h3></div><div class="ov-empty">Add a few tickers on the <button type="button" class="lnk" data-view-link="watch">Watchlist</button> page and they show up here with their price, size and OneView's read.</div></section>`;
+    const rows = list.slice(0, 12).map((t) => ovRow(t, stockFor(t) || liteOf(t))).join("");
+    return `<section class="ovp ov-mine"><div class="ovp-h"><h3>Your stocks <span>${esc(lists.active)}</span></h3><button type="button" class="lnk" data-view-link="watch">Open watchlist ›</button></div>
+      <ul class="ovr-list">${rows}</ul>${list.length > 12 ? `<div class="ov-more-n">+${list.length - 12} more on your watchlist</div>` : ""}</section>`;
+  }
+  function ovMovers(r) {
+    const L = (r.lite || {}); const rows = Object.entries(L).filter(([t, x]) => x.kind === "Stock" && isNum(capOf(t)) && capOf(t) >= 2e9).map(([t, x]) => ({ t, x, c: qp(t, x).chg })).filter((o) => isNum(o.c));
+    if (rows.length < 6) return "";
+    const up = [...rows].sort((a, b) => b.c - a.c).slice(0, 5).filter((o) => o.c > 0), dn = [...rows].sort((a, b) => a.c - b.c).slice(0, 5).filter((o) => o.c < 0);
+    const col = (arr, h, k) => `<div class="ovm-col ${k}"><h4>${h}</h4><ul class="ovr-list">${arr.map((o) => ovRow(o.t, o.x, "")).join("") || '<li class="ov-empty">None</li>'}</ul></div>`;
+    return `<section class="ovp ov-movers"><div class="ovp-h"><h3>Biggest moves ${marketStateNow() === "open" ? "today" : "last session"} <span>companies worth $2B or more</span></h3></div>
+      <div class="ovm">${col(up, "Up the most", "up")}${col(dn, "Down the most", "down")}</div></section>`;
+  }
+  const OV_WORDS = [
+    ["Market cap", "What the whole company is worth: share price × number of shares. Mega is $200B+, large $10B+, mid $2–10B, small under $2B. Smaller companies usually swing more."],
+    ["S&amp;P 500", "The 500 largest US companies in one number. When people say “the market”, they usually mean this."],
+    ["VIX", "The fear gauge: how big a move options traders expect. Under 15 is calm, 20 is normal, over 30 is panic."],
+    ["Floor and ceiling", "Prices where buyers (floor) or sellers (ceiling) stepped in before. Price often pauses there, then breaks through or turns."],
+  ];
+  function ovWords() {
+    return `<section class="ov-words"><span class="ov-k">New here? Four words that come up everywhere</span><div class="ovw">${OV_WORDS.map(([h, p]) => `<div class="ovw-i"><b>${h}</b><p>${p}</p></div>`).join("")}</div></section>`;
+  }
+  function secOverview(r) {
+    const st = { pre: "Pre-market", open: "Market open", post: "After hours", closed: "Market closed" }[r.market_state] || "";
+    const hr = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false }).format(new Date()));
+    const hi = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+    const who = user && (user.name || "").split(" ")[0];
+    return `<section class="ov2">
+      <div class="ov-head"><div><span class="ov-hi">${hi}${who ? ", " + esc(who) : ""}</span><h2>Here is the market in <span>three answers</span></h2></div>
+        <div class="ov-meta">${mkTimer()}<span class="pz-live ${r.market_state === "open" ? "on" : ""}"><i></i>${st} · ${esc(r.generated_at.slice(11, 16))} ET</span></div></div>
+      ${ovAnswers(r)}
+      ${ovTakeaway(r)}
+      <div class="ov-two">${ovStocks(r)}${ovMovers(r)}</div>
+      <div class="ov-two">${pulseLevels(r)}${pulseSectors(r)}</div>
+      ${pulseVitals(r)}
+      ${ovWords()}
+      <details class="ov-detail" data-ov-detail${ovMoreOpen ? " open" : ""}><summary><span><b>More detail</b><i>options map, mood breakdown, the crowd, top traders, betting odds, risk radar</i></span><em aria-hidden="true"></em></summary>
+        <div class="ov-detail-in">${mkBets()}${secCalm()}<div class="pulse-grid">${pulseGauge(r)}${heroCrowd(r)}${heroPros(r)}${heroBets(r)}${pulseRadar(r)}</div></div></details>
+      <div class="deep-h"><span>Deep dive</span><i>briefings, big money, the President's posts, the crowd and today's runners are in Live</i><button type="button" class="btn" data-lv="liveview">Open Intraday view</button></div>
+    </section>`;
+  }
+  document.addEventListener("toggle", (e) => { if (e.target && e.target.matches && e.target.matches("[data-ov-detail]")) ovMoreOpen = e.target.open; }, true);
+  document.addEventListener("click", (e) => { const b = e.target.closest("[data-ov-more]"); if (!b) return; e.stopPropagation(); const d = $("[data-ov-detail]"); if (!d) return; d.open = true; ovMoreOpen = true;
+    const cj = d.querySelector("[data-cj]") || d; setTimeout(() => cj.scrollIntoView({ behavior: "smooth", block: "start" }), 30); });
   function refreshPulse(which) {
     if (currentView !== "home" || !report) return;
     const make = { gauge: pulseGauge, levels: pulseLevels, sectors: pulseSectors, crowd: heroCrowd, pros: heroPros, bets: heroBets }[which]; const el = $(`.pz[data-pz="${which}"]`); if (!make || !el) return;
@@ -3911,7 +4057,7 @@
 
   function viewHtml(r) {
     switch (currentView) {
-      case "home": return `<div class="view home"><div class="col-main">${secPulse(r)}</div>${secToday(r)}</div>`;
+      case "home": return `<div class="view home"><div class="col-main">${secOverview(r)}</div>${secToday(r)}</div>`;
       case "live": return `<div class="view home live"><div class="col-main">${secLive(r)}</div>${secToday(r)}</div>`;
       case "liveview": return `<div class="view home liveview"><div class="col-main">${secLiveViewHead(r)}${secBrief(r)}<div class="home-hero">${secBigMoney(r)}${secVoices(r)}</div>${secCrowd(r)}${secPros(r)}${secOdds(r)}<div class="home-top">${moodPanel(r)}${verdictPanel(r)}</div>${secRunners(r)}${secMeaning(r)}</div>${secToday(r)}</div>`;
       case "charts": return `<div class="view one chs-view">${secCharts()}</div>`;
@@ -3941,7 +4087,7 @@
     const watched = isWatched(t);
     const hero = `<header class="tk-hero">
       <button class="btn sm ghost" data-back-home>‹ Home</button>
-      <div class="tk-id"><div class="tk-sym">${esc(t)}</div><div class="tk-name">${esc(src.name || "")}${src.sector ? ` <span class="muted">· ${esc(src.sector)}</span>` : ""}${src.kind ? ` <span class="tag ${src.kind === "ETF" ? "acc" : ""}">${esc(src.kind)}</span>` : ""}</div></div>
+      <div class="tk-id"><div class="tk-sym">${esc(t)}</div><div class="tk-name">${esc(src.name || "")}${src.sector ? ` <span class="muted">· ${esc(src.sector)}</span>` : ""}${src.kind ? ` <span class="tag ${src.kind === "ETF" ? "acc" : ""}">${esc(src.kind)}</span>` : ""}${ETF_KINDS.has(kindOf(t)) ? "" : " " + capTag(t)}</div></div>
       <div class="tk-price">${priceHtml(t, src)}<span class="muted" data-qstamp style="font-size:10px">${quoteStamp()}</span></div>
       ${verdictFor(s || (q ? { ...q, ticker: t } : null)) ? `<div class="tk-verdict">${verdictBlock(s || { ...q, ticker: t }, { whyN: 4 })}</div>` : `<div class="tk-verdict verdict flat"><div class="verdict-word">${analyzing.has(t) ? "ANALYSING" : s ? "NO VERDICT" : "QUOTE ONLY"}</div><div class="verdict-why">${analyzing.has(t) ? "About 20 seconds: history, news, smart money, options and the model reads." : s ? "The model did not return a stance for this build." : STATIC_MODE ? "Daily technicals only on the public copy." : "Press Analyze for the full model read."}</div></div>`}
       <div class="tk-actions">${!s && !STATIC_MODE ? `<button class="btn sm" data-analyze="${esc(t)}" ${analyzing.has(t) ? "disabled" : ""}>${analyzing.has(t) ? "Analysing…" : "Analyze"}</button>` : ""}<a class="btn sm ghost" href="${tvLink(t)}" target="_blank" rel="noopener">Open chart</a>${watched ? `<button class="btn sm ghost" data-remove="${esc(t)}">Remove from watchlist</button>` : `<button class="btn sm" data-add-ticker="${esc(t)}">Add to watchlist</button>`}</div>
