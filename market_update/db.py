@@ -478,6 +478,15 @@ def verdict_day_detail(day: str) -> list[dict[str, Any]]:
             "SELECT ticker, kind, verdict, price, ts, horizon_days, eval_price, eval_ts, hit FROM verdicts WHERE ts >= ? AND ts < ? ORDER BY ts", (lo, hi))]
 
 
+def recent_scored(per_kind: int = 8) -> dict[str, list[dict[str, Any]]]:
+    """The latest calls whose window has closed and were scored, per kind (the public landing page shows them)."""
+    with connect() as con:
+        return {k: [dict(r) for r in con.execute(
+            "SELECT ticker, kind, verdict, price, ts, horizon_days, eval_price, eval_ts, hit FROM verdicts "
+            "WHERE kind = ? AND hit IS NOT NULL ORDER BY eval_ts DESC LIMIT ?", (k, per_kind))]
+            for k in ("intraday", "swing", "desk")}
+
+
 # ---- alerts (settings only for now; delivery comes later) -----------------------------------------
 def get_alert(email: str) -> dict[str, Any]:
     with connect() as con:

@@ -3111,11 +3111,220 @@
   const WA_GROUP = "https://chat.whatsapp.com/C4NROWURa0SI1hoegnfHOc?mode=gi_t";
   const waJoin = () => `<a class="wa-join" href="${WA_GROUP}" target="_blank" rel="noopener"><span class="wa-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 1.8a8.2 8.2 0 1 1-4.2 15.3l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 0 1 12 3.8zm-3 4.4c-.2 0-.5 0-.7.3-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.2 5 4.4 2.5 1 3 .8 3.5.7.5 0 1.7-.7 1.9-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3l-2-1c-.3-.1-.5-.1-.7.1l-.9 1.1c-.2.2-.3.2-.6.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.6-1.2.1-.2 0-.4 0-.5l-.9-2.1c-.2-.6-.5-.5-.7-.5z"/></svg></span><span class="wa-t"><b>Join the OneView group on WhatsApp</b><span>The team's latest moves, posted as they happen: what we are watching, buying and stepping away from.</span></span><i aria-hidden="true">Join ›</i></a>`;
   const brandLogo = (w) => `<img class="ov-logo" src="static/brand/oneview-logo.png?v=6" alt="OneView" width="${w || 190}" style="height:auto">`;
+  // ---- PUBLIC LANDING PAGE: what a signed-out visitor sees first. Every number on it is live from the public verdict ledger
+  // (/api/track-record), wins and misses alike; nothing is invented (no reviews, no member counts). Sign-in sits behind it.
+  let landing = !/[?&]signin=1/.test(location.search) && !/signin/.test(location.hash);
+  let lpRecord = null, lpScored = null, lpKind = "all", lpObs = null;
+  const LP_KINDS = [["all", "All calls"], ["intraday", "Day trades"], ["swing", "Swing"], ["desk", "Desk"]];
+  const LP_WINDOW = { intraday: "1-day window", swing: "7-day window", desk: "7-day window", long_term: "90-day window" };
+  const LP_WORD = { stay_out: "Stay out", re_entry: "Re-entry", tactical_rebound: "Quick bounce", buy_dip_to_support: "Dip to support", fade_the_gap: "Fade the gap",
+    short_momentum: "Momentum down", long_momentum: "Momentum up", buying_today: "Buyers in control", selling_today: "Sellers in control", drifting_down: "Drifting down",
+    drifting_up: "Drifting up", avoid: "Avoid", momentum_down: "Momentum down", momentum_up: "Momentum up", short_setup: "Short setup", trend_up: "Trend up",
+    trend_down: "Trend down", buy_the_dip: "Dip buy", buy_now: "Strength" };
+  const lpWord = (v) => LP_WORD[v] || String(v || "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const lpIc = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+  const LP_IC = {
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    pulse: '<path d="M3 12h4l2.5-6 4 12L16 12h5"/>', gauge: '<path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/>',
+    list: '<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".8"/><circle cx="4" cy="12" r=".8"/><circle cx="4" cy="18" r=".8"/>',
+    radar: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/>', desk: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', bank: '<path d="M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 21h18"/>',
+    eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', xray: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h5M8 16h8"/>',
+    crowd: '<circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M2 20c.8-3.5 3.2-5 6-5s5.2 1.5 6 5M14 20c.4-2.4 1.8-3.6 3.5-3.6S21 17.6 21 20"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>', layers: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+    map: '<circle cx="6" cy="7" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="13" cy="17" r="2.5"/><path d="M8 8l3.5 7M16 7.5l-2 7.5M8.5 7h7"/>',
+    bell: '<path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4z"/><path d="M10 21h4"/>', chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    check: '<path d="M4 12l5 5L20 6"/>', arrow: '<path d="M5 12h13M13 6l6 6-6 6"/>', ledger: '<path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/>',
+  };
+  const LP_SERVICES = [
+    ["sun", "Morning briefing", "Before the bell: what moved overnight, the levels that matter and the day's events, on the site and in the WhatsApp group.", "Daily"],
+    ["pulse", "Live intraday read", "A direction read every 15 minutes, today's timeline, and where SPY and QQQ sit against VWAP and the day's range.", "Every 15 min"],
+    ["gauge", "Calm or Jumpy?", "The options map for ES, NQ and SPY: VIX, gamma walls, the flip level and put/call, drawn as a road a beginner can read.", "Every 10 min"],
+    ["list", "Watchlists", "Named lists with a day-trade, swing and long-term read on every name, a setup score and a 30-day sparkline.", "Yours"],
+    ["radar", "Volume scanner", "Unusual relative volume on 30-minute, 1-hour and 2-hour bars, plus small-float names that are moving.", "Live"],
+    ["desk", "Trading desk", "Re-entry, hold, trim or stay-out for more than 900 mid to mega caps, scored on trend, momentum and the macro backdrop.", "900+ names"],
+    ["cal", "Earnings calendar", "The week's reports with consensus, then the review: beat, in line or miss, and how the stock actually took it.", "Weekly"],
+    ["bank", "Big money bets", "Hedge funds' calls and puts from their SEC 13F filings: new, added, cut or closed, conviction funds apart from the giants.", "Quarterly"],
+    ["eye", "Smart money", "Insider buying and selling, and the options flow that stands out from a name's normal.", "Daily"],
+    ["xray", "Tipster X-ray", "A report card for any StockTwits account: hit rate against the market, a luck test, and every call as a receipt.", "Any account"],
+    ["crowd", "Crowd and odds", "StockTwits mood against each name's normal, and real-money odds from Polymarket and Kalshi on the Fed and the S&amp;P 500.", "Live"],
+    ["globe", "Macro desk", "Rates and the curve, the dollar, oil, gold and Bitcoin, money flows between assets, and weekly index charts with levels.", "Daily"],
+    ["layers", "US themes and sectors", "Ten market themes ranked leading, improving, weakening or lagging against the S&amp;P 500 over a week, a month and a quarter.", "Daily"],
+    ["map", "Company map", "Who a company sells to and buys from, read from its 10-K, drawn as a map you can click through.", "On demand"],
+    ["bell", "Posts that move markets", "The latest posts from the White House with a read on which markets they touch, next to what the Reddit crowd is saying.", "Live"],
+    ["ledger", "Public track record", "Every verdict written down with its price and checked after its window. Open to anyone, no sign-in needed.", "Public"],
+  ];
+  const LP_PILLARS = [
+    ["01", "Stocks", "We read<br>the business", "Earnings against consensus, the customers and suppliers in the 10-K, insider trades and where each name sits in its trend.", ["Earnings reviews", "10-K customers", "Insider trades", "Trend and momentum"]],
+    ["02", "Macro and indexes", "We read<br>the backdrop", "Volatility and its curve, rates and the yield curve, the dollar and commodities, and the odds the market puts on the Fed.", ["VIX curve", "Rates and 2s10s", "Dollar, oil, gold", "Fed odds"]],
+    ["03", "Options and money", "We read<br>the money", "Dealer gamma and the levels it pins, put/call against normal, and what the big funds hold in options each quarter.", ["Gamma walls", "Put/call", "13F option books", "Unusual volume"]],
+    ["04", "Every call", "We keep<br>the score", "Each read is logged with its price. After its window it is checked and goes on the public record, right or wrong.", ["Price at the call", "Fixed windows", "Hits and misses", "Open to anyone"]],
+  ];
+  const LP_STEPS = [
+    ["Collect", "Prices, filings, option chains, earnings and posts, refreshed through the session.", "DATA"],
+    ["Read", "Rules and typed model questions turn the data into a plain read: up, down, or wait.", "READ"],
+    ["Publish", "On the site, in the morning briefing and in the WhatsApp group, with the levels and the reason.", "SHARE"],
+    ["Score", "After the window closes the price is checked again. Hit or miss, it goes on the public record.", "SCORE"],
+  ];
+  const LP_SOURCES = ["SEC EDGAR", "Nasdaq", "Cboe", "Yahoo Finance", "FRED", "StockTwits", "Polymarket", "Kalshi", "OpenFIGI", "TradingView"];
+  const LP_FAQ = [
+    ["What is OneView?", "A free market research desk: stocks, options, macro and the crowd on one screen, with a plain-English read on each and a public record of how those reads turned out."],
+    ["Is this financial advice?", "No. Everything on OneView is market data, arithmetic over that data and model reads from typed questions. None of it is a recommendation to buy or sell anything, and you trade at your own risk."],
+    ["How is the track record scored?", "When a read is published, the price is written down. After its window (1 day for a day-trade read, 7 days for swing and desk reads, 90 days for a long-term view) the price is checked again. A bullish read is a hit if the price rose, a bearish read if it fell. Reads with no direction, such as wait or hold, are listed but not scored."],
+    ["What does it cost?", "Nothing. There is no card, no password and no trial that turns into a charge. You sign in with your email."],
+    ["How fresh is the data?", "Quotes and option chains can be delayed by up to 15 minutes, filings arrive when the SEC publishes them, and the live views refresh every 10 to 15 minutes during the session."],
+    ["What do you keep about me?", "Your email, the display name you choose, your watchlists and settings, and a log of sign-ins and page activity so the site can be kept running. Nothing is sold, and nothing is shared beyond the services that run the site, such as the mail sender."],
+  ];
+  function lpTotals(kind) {
+    const j = lpRecord; if (!j) return null;
+    if (kind === "all") { const t = j.totals || {}; return { n: t.n || 0, scored: t.scored || 0, hits: t.hits || 0 }; }
+    return (j.by_verdict || []).filter((r) => r.kind === kind).reduce((a, r) => ({ n: a.n + (r.n || 0), scored: a.scored + (r.scored || 0), hits: a.hits + (r.hits || 0) }), { n: 0, scored: 0, hits: 0 });
+  }
+  const lpInt = (x) => (isNum(x) ? Math.round(x).toLocaleString("en-US") : "–");
+  function lpScoreHtml() {
+    const tabs = `<div class="lp-tabs" role="tablist">${LP_KINDS.map(([k, l]) => `<button type="button" role="tab" aria-selected="${k === lpKind}" class="${k === lpKind ? "on" : ""}" data-lp-kind="${k}">${l}</button>`).join("")}</div>`;
+    if (!lpRecord) return `${tabs}<div class="lp-tiles">${[0, 1, 2].map(() => `<div class="lp-tile sk"><i></i><b></b></div>`).join("")}</div><div class="lp-rows">${[0, 1, 2, 3, 4].map(() => `<div class="lp-row sk"><i></i></div>`).join("")}</div>`;
+    if (lpRecord.error) return `${tabs}<div class="lp-empty">The live scorecard cannot reach the server right now. <a href="${esc(API || "")}/track-record" target="_blank" rel="noopener">Open the public record ↗</a></div>`;
+    const t = lpTotals(lpKind), rate = t.scored ? (t.hits / t.scored) * 100 : null;
+    const tiles = [["Calls logged", lpInt(t.n), lpKind === "all" ? "since " + new Date((lpRecord.totals || {}).since * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : (LP_WINDOW[lpKind] || "")],
+      ["Scored", lpInt(t.scored), "windows closed"], ["Hit rate", rate == null ? "–" : rate.toFixed(1) + "%", lpInt(t.hits) + " hits · " + lpInt(t.scored - t.hits) + " misses"]];
+    const kinds = lpKind === "all" ? ["intraday", "swing", "desk"] : [lpKind];
+    const rows = kinds.flatMap((k) => ((lpScored || {})[k] || []).slice(0, lpKind === "all" ? 2 : 6)).sort((a, b) => (b.eval_ts || 0) - (a.eval_ts || 0));
+    const body = rows.length ? rows.map((r) => { const mv = isNum(r.eval_price) && r.price ? (r.eval_price / r.price - 1) * 100 : null;
+      return `<div class="lp-row"><b class="lp-sym">${esc(r.ticker)}</b><span class="lp-call">${esc(lpWord(r.verdict))}<small>${esc(LP_WINDOW[r.kind] || r.kind)}</small></span>
+        <span class="lp-px num">${fnum(r.price, 2)}<i>→</i>${fnum(r.eval_price, 2)}</span><span class="lp-mv num ${mv > 0 ? "up" : mv < 0 ? "down" : ""}">${fpct(mv, 1)}</span>
+        <span class="lp-res ${r.hit ? "hit" : "miss"}">${r.hit ? "Hit" : "Miss"}</span></div>`; }).join("")
+      : `<div class="lp-empty">No calls in this group have finished their window yet.</div>`;
+    return `${tabs}<div class="lp-tiles">${tiles.map(([l, v, s], i) => `<div class="lp-tile${i === 2 ? " key" : ""}"><span>${l}</span><b class="num">${v}</b><small>${esc(s)}</small></div>`).join("")}</div>
+      <div class="lp-rows"><div class="lp-row lp-rh"><span>Name</span><span>Call</span><span>Price then → after</span><span>Move</span><span>Result</span></div>${body}</div>`;
+  }
+  function lpTape() {
+    if (!report) return "";
+    const pick = [["SPY", "S&P 500"], ["QQQ", "Nasdaq 100"], ["DIA", "Dow"], ["IWM", "Russell 2000"], ["^VIX", "VIX"], ["^TNX", "10-year"], ["DX-Y.NYB", "Dollar"], ["CL=F", "Oil"], ["GC=F", "Gold"], ["BTC-USD", "Bitcoin"], ["NVDA", "Nvidia"], ["AAPL", "Apple"]];
+    const items = pick.map(([sym, lbl]) => { try { const o = (report.indices || []).find((x) => x.symbol === sym) || (report.macro || []).find((x) => x.symbol === sym) || ((report.lite || {})[sym] ? { symbol: sym, ...(report.lite[sym]) } : null);
+      if (!o) return ""; const q = qp(sym, o); if (!isNum(q.last)) return "";
+      return `<span><i>${lbl}</i><b class="num">${fnum(q.last, 2)}</b><em class="num ${q.chg > 0 ? "up" : q.chg < 0 ? "down" : ""}">${fpct(q.chg, 2)}</em></span>`; } catch (e) { return ""; } }).filter(Boolean).join("");
+    return items ? `<div class="lp-tape" aria-label="Markets now"><div class="lp-tape-in">${items}${items}</div></div>` : "";
+  }
+  function landingHtml() {
+    const t = lpRecord && !lpRecord.error ? lpRecord.totals || {} : null;
+    const stat = t ? `<b class="num">${lpInt(t.n)}</b> calls logged · <b class="num">${lpInt(t.scored)}</b> scored · every one public` : `Every call logged, scored and public`;
+    const nav = [["why", "Why OneView"], ["services", "Services"], ["record", "Track record"], ["pricing", "Pricing"], ["faq", "FAQ"]];
+    const cta = (label, cls = "") => `<button type="button" class="lp-btn ${cls}" data-lp-signin><span>${label}</span><i>${lpIc(LP_IC.arrow)}</i></button>`;
+    return `<div class="lp" id="lp">
+      <header class="lp-nav"><div class="lp-nav-in">
+        <button type="button" class="lp-logo" data-lp-go="top" aria-label="OneView home">${brandLogo(132)}</button>
+        <nav aria-label="Sections">${nav.map(([k, l]) => `<button type="button" data-lp-go="${k}">${l}</button>`).join("")}</nav>
+        <div class="lp-nav-act"><button type="button" class="lp-link" data-lp-signin>Member login</button>${cta("Get started", "sm")}</div>
+      </div></header>
+
+      <section class="lp-hero" id="lp-top"><div class="lp-glow" aria-hidden="true"><i></i><i></i></div><div class="lp-grid-bg" aria-hidden="true"></div>
+        <div class="lp-wrap lp-hero-in">
+          <div class="lp-hero-l lp-rv">
+            <span class="lp-eye"><i></i>Research desk · free</span>
+            <h1>Market research<br>that <em>keeps score</em>.</h1>
+            <p class="lp-lede">Stocks, options, macro and the crowd on one screen, each with a plain-English read. Every call we publish is written down with its price and checked when its window closes: the hits and the misses.</p>
+            <div class="lp-ctas">${cta("Get started free")}<button type="button" class="lp-btn ghost" data-lp-go="record"><span>See every call</span><i>${lpIc(LP_IC.ledger)}</i></button></div>
+            <p class="lp-fine">Information, not advice. Past results do not predict future ones. You trade at your own risk.</p>
+            <div class="lp-proof"><span class="lp-dot"></span><span id="lp-stat">${stat}</span></div>
+          </div>
+          <div class="lp-hero-r lp-rv" style="--d:120ms"><div class="lp-shell"><div class="lp-core lp-score" id="lp-record">
+            <div class="lp-score-h"><div><b>Scorecard</b><span>Live from the ledger · every call counts</span></div><span class="lp-live"><i></i>Live</span></div>
+            <div id="lp-score-body">${lpScoreHtml()}</div>
+            <button type="button" class="lp-more" data-lp-public>Open the full public record <i>↗</i></button>
+          </div></div></div>
+        </div>
+        ${lpTape()}
+      </section>
+
+      <section class="lp-sec lp-strip"><div class="lp-wrap lp-feats">
+        ${[["ledger", "Open record", "Every call is public, right or wrong."], ["gauge", "Risk first", "Levels and what would prove a read wrong."], ["pulse", "Through the session", "Live views refresh every 10 to 15 minutes."], ["list", "Built around you", "Your lists, your names, your horizon."]]
+          .map(([ic, h, p], i) => `<div class="lp-feat lp-rv" style="--d:${i * 70}ms"><span class="lp-ic">${lpIc(LP_IC[ic])}</span><div><b>${h}</b><span>${p}</span></div></div>`).join("")}
+      </div></section>
+
+      <section class="lp-sec lp-sources"><div class="lp-wrap"><span class="lp-k lp-rv">Built on public market data</span>
+        <div class="lp-src lp-rv">${LP_SOURCES.map((s) => `<span>${s}</span>`).join("")}</div></div></section>
+
+      <section class="lp-sec paper" id="lp-why"><div class="lp-wrap">
+        <div class="lp-head lp-rv"><span class="lp-k">Why OneView</span><h2>What goes into every read</h2><p>Headlines tell you what happened. A read needs the business, the backdrop, the money and an honest record of past calls, so OneView pulls all four onto one screen.</p></div>
+        <div class="lp-pillars">${LP_PILLARS.map(([n, k, h, p, tags], i) => `<article class="lp-pillar lp-rv" style="--d:${i * 80}ms"><div class="lp-pn"><span>${n}</span>${k}</div><h3>${h}</h3><p>${p}</p><ul>${tags.map((x) => `<li>${lpIc(LP_IC.check)}${x}</li>`).join("")}</ul></article>`).join("")}</div>
+      </div></section>
+
+      <section class="lp-sec" id="lp-services"><div class="lp-wrap">
+        <div class="lp-head lp-rv"><span class="lp-k">Services</span><h2>Sixteen tools, one sign-in</h2><p>Everything below is included for every member. Open a tool from the menu once you are in; each one explains itself in plain words.</p></div>
+        <div class="lp-svc">${LP_SERVICES.map(([ic, h, p, tag], i) => `<article class="lp-s lp-rv${[0, 5, 7, 9].includes(i) ? " wide" : ""}" style="--d:${(i % 4) * 60}ms"><div class="lp-s-top"><span class="lp-ic">${lpIc(LP_IC[ic])}</span><em>${tag}</em></div><h3>${h}</h3><p>${p}</p></article>`).join("")}</div>
+      </div></section>
+
+      <section class="lp-sec paper" id="lp-method"><div class="lp-wrap lp-method">
+        <div class="lp-head lp-rv"><span class="lp-k">Method</span><h2>From raw data to a scored call</h2><p>The same four steps run for every name, every session. The last step is the one most research skips.</p></div>
+        <ol class="lp-steps">${LP_STEPS.map(([h, p, tag], i) => `<li class="lp-step lp-rv" style="--d:${i * 90}ms"><span class="lp-sn num">0${i + 1}</span><div><h3>${h}</h3><p>${p}</p></div><em>${tag}</em></li>`).join("")}</ol>
+      </div></section>
+
+      <section class="lp-sec" id="lp-pricing"><div class="lp-wrap lp-price">
+        <div class="lp-head lp-rv"><span class="lp-k">Pricing</span><h2>Free. No card, no password.</h2><p>OneView is free while it grows. Sign in with your email and every tool on this page is yours.</p>
+          <ul class="lp-assure">${["No card needed", "Nothing renews", "Leave any time", "Information, not advice"].map((x) => `<li>${lpIc(LP_IC.check)}${x}</li>`).join("")}</ul></div>
+        <div class="lp-shell lp-rv" style="--d:100ms"><div class="lp-core lp-plan">
+          <span class="lp-tag">Membership</span><div class="lp-amt"><b class="num">$0</b><span>per month</span></div>
+          <p>Full access to the research desk, the live views and your own watchlists.</p>
+          <ul>${["Morning briefing and live intraday read", "Calm or Jumpy? options map", "Watchlists, scanner and trading desk", "Earnings, 13F books and smart money", "Tipster X-ray, crowd and odds", "Posts that move markets", "The WhatsApp group"].map((x) => `<li>${lpIc(LP_IC.check)}${x}</li>`).join("")}</ul>
+          ${cta("Create my free desk")}
+        </div></div>
+      </div></section>
+
+      <section class="lp-sec paper" id="lp-faq"><div class="lp-wrap lp-faq">
+        <div class="lp-head lp-rv"><span class="lp-k">FAQ</span><h2>Before you sign in</h2></div>
+        <div class="lp-qs">${LP_FAQ.map(([q, a], i) => `<details class="lp-q lp-rv" style="--d:${i * 50}ms"${i === 0 ? " open" : ""}><summary>${q}<i aria-hidden="true"></i></summary><p>${a}</p></details>`).join("")}</div>
+      </div></section>
+
+      <section class="lp-sec lp-final"><div class="lp-wrap lp-final-in lp-rv"><div><h2>See the market the way the record does.</h2><p>Free, with your email. Your desk is ready in under a minute.</p></div>${cta("Get started free")}</div></section>
+
+      <footer class="lp-foot"><div class="lp-wrap">
+        <div class="lp-foot-top">${brandLogo(120)}<nav>${nav.map(([k, l]) => `<button type="button" data-lp-go="${k}">${l}</button>`).join("")}<button type="button" data-lp-public>Public record ↗</button><a href="${WA_GROUP}" target="_blank" rel="noopener">WhatsApp group ↗</a></nav></div>
+        <p><b>Important.</b> OneView provides market data and research for information and education only. It is not financial advice and does not recommend buying or selling any security. Past results do not guarantee future results. Trading and investing carry a real risk of loss. Speak to a qualified adviser before you make investment decisions.</p>
+        <small>© ${new Date().getFullYear()} OneView. Quotes can be delayed up to 15 minutes.</small>
+      </div></footer>
+
+      <nav class="lp-dock" aria-label="Jump to">${[["top", "Home"], ["why", "Why"], ["services", "Services"], ["record", "Results"], ["pricing", "Pricing"]].map(([k, l]) => `<button type="button" data-lp-go="${k}" data-dock="${k}">${l}</button>`).join("")}</nav>
+    </div>`;
+  }
+  function lpPaintScore() { const b = $("#lp-score-body"); if (b) b.innerHTML = lpScoreHtml();
+    const s = $("#lp-stat"), t = lpRecord && !lpRecord.error ? lpRecord.totals || {} : null; if (s && t) s.innerHTML = `<b class="num">${lpInt(t.n)}</b> calls logged · <b class="num">${lpInt(t.scored)}</b> scored · every one public`; }
+  async function lpLoad() {
+    if (lpRecord && !lpRecord.error) return;
+    try { const [a, b] = await Promise.all([api("/api/track-record", { cache: "no-store" }), api("/api/track-record/scored", { cache: "no-store" }).catch(() => null)]);
+      if (!a.ok) throw new Error(a.status); lpRecord = await a.json(); lpScored = b && b.ok ? await b.json() : {}; }
+    catch (e) { lpRecord = { error: true }; }
+    lpPaintScore();
+  }
+  function wireLanding() {
+    const g = $("#gate"), root = $("#lp"); if (!g || !root) return;
+    const go = (k) => { const el = k === "top" ? $("#lp-top") : k === "record" ? $("#lp-record") : $("#lp-" + k); if (!el) return;
+      const y = el.getBoundingClientRect().top + g.scrollTop - (k === "top" ? 0 : k === "record" ? 110 : 64); g.scrollTo({ top: Math.max(0, y), behavior: "smooth" }); };
+    root.addEventListener("click", (e) => {
+      const s = e.target.closest("[data-lp-signin]"); if (s) { landing = false; renderGate(); setTimeout(() => { const i = $("#login-email"); if (i) i.focus(); }, 60); return; }
+      const p = e.target.closest("[data-lp-public]"); if (p) { open((API || "") + "/track-record", "_blank", "noopener"); return; }
+      const k = e.target.closest("[data-lp-kind]"); if (k) { lpKind = k.dataset.lpKind; lpPaintScore(); return; }
+      const n = e.target.closest("[data-lp-go]"); if (n) go(n.dataset.lpGo);
+    });
+    const nav = root.querySelector(".lp-nav"), dock = root.querySelector(".lp-dock");
+    g.addEventListener("scroll", () => { const y = g.scrollTop; nav.classList.toggle("stuck", y > 24); dock.classList.toggle("show", y > innerHeight * 0.7); }, { passive: true });
+    if (lpObs) lpObs.disconnect();
+    const reveal = root.querySelectorAll(".lp-rv");
+    if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion: reduce)").matches) reveal.forEach((x) => x.classList.add("in"));
+    else { lpObs = new IntersectionObserver((es) => es.forEach((x) => { if (x.isIntersecting) { x.target.classList.add("in"); lpObs.unobserve(x.target); } }), { root: g, rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+      reveal.forEach((x) => lpObs.observe(x)); }
+    const secs = ["top", "why", "services", "pricing"].map((k) => [k, $("#lp-" + k)]).filter((x) => x[1]);
+    const spy = new IntersectionObserver((es) => es.forEach((x) => { if (!x.isIntersecting) return; const k = (x.target.id || "").replace("lp-", "");
+      dock.querySelectorAll("[data-dock]").forEach((b) => b.classList.toggle("on", b.dataset.dock === k)); }), { root: g, rootMargin: "-45% 0px -50% 0px" });
+    secs.forEach(([, el]) => spy.observe(el));
+    lpLoad();
+  }
   function loginHtml() {
     const form = STATIC_MODE
-      ? `<div class="ov-form" id="login-core"><h1>Welcome to OneView</h1><p>Sign-in runs on the app server; this copy is not connected to one yet.</p>
+      ? `<div class="ov-form" id="login-core"><button type="button" class="lg-back" data-lp-home>← OneView home</button><h1>Welcome to OneView</h1><p>Sign-in runs on the app server; this copy is not connected to one yet.</p>
         ${APP_URL ? `<a class="ov-primary" href="${esc(APP_URL)}/?signin=1">Go to the sign-in page</a>` : `<p class="ov-hint">Ask the site owner for the app link.</p>`}</div>`
       : `<div class="ov-form" id="login-core">
+        <button type="button" class="lg-back" data-lp-home>← OneView home</button>
         <span class="lg-kicker">Sign in or create your desk</span>
         <h1>Welcome to OneView</h1>
         <p>Enter your email and you go straight to your dashboard. No password, no card, no email to wait for.</p>
@@ -3142,7 +3351,7 @@
         <p class="lg-sub">One page that shows what is happening and what could happen next, from the crowd, the proven traders and the money on the line.</p>
         <div class="lg-proof">
           <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-bars" aria-hidden="true">${bars}</div><b>What people are saying</b><span>About 200 posts per name, read newest first, so the headline is the mood right now.</span></div></div>
-          <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-badge" aria-hidden="true"><em>70%+</em><small>right</small></div><b>Top traders, measured</b><span>Every call scored against what the price did. Only the ones who are right 70% of the time or more.</span></div></div>
+          <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-badge" aria-hidden="true"><em>Edge</em><small>or luck?</small></div><b>Tipsters, x-rayed</b><span>Any StockTwits account graded against the market, with a luck test and every call as a receipt.</span></div></div>
           <div class="lg-tile"><div class="lg-core"><div class="lg-vis lg-stack" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div><b>Real-money odds</b><span>The Fed, the S&amp;P 500 and your names, priced by Polymarket and Kalshi.</span></div></div>
         </div>
         ${live}
@@ -3183,11 +3392,16 @@
     const lb = $("#logout-btn"); if (lb) { lb.hidden = !user; if (user) setLabel(lb, `Sign out · ${(user.name || user.email.split("@")[0]).slice(0, 14)}`); }
     if (!gateNeeded()) { g.hidden = true; g.setAttribute("aria-hidden", "true"); g.innerHTML = ""; renderNav(); return; }
     const bye = !user && signedOutNote && !byeDismissed && !STATIC_MODE;
-    const html = (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? (bye ? goodbyeHtml() : loginHtml()) : disclaimerHtml()));
+    const land = landing && (STATIC_MODE ? gateOpen : !user && !bye);
+    if (land && g.querySelector("#lp") && !g.hidden) { if (!g.querySelector(".lp-tape") && report) { const h = g.querySelector(".lp-hero"); if (h) h.insertAdjacentHTML("beforeend", lpTape()); } return; }   // already up: a data refresh must not reset the visitor's scroll
+    const html = land ? landingHtml() : (STATIC_MODE ? (gateOpen ? loginHtml() : disclaimerHtml()) : (!user ? (bye ? goodbyeHtml() : loginHtml()) : disclaimerHtml()));
     g.hidden = false; g.removeAttribute("aria-hidden"); g.innerHTML = html; positionGate();
+    g.classList.toggle("gate-land", land); g.scrollTop = 0;
+    if (land) wireLanding();
+    g.querySelectorAll("[data-lp-home]").forEach((b) => b.addEventListener("click", () => { landing = true; renderGate(); }));
     const full = !user;                                    // sign-in and goodbye take the whole screen, above the site header
     g.classList.toggle("gate-full", full); if (full) { g.style.setProperty("--gate-top", "0px"); g.style.setProperty("--gate-left", "0px"); }
-    const again = g.querySelector("[data-signin-again]"); if (again) again.addEventListener("click", () => { byeDismissed = true; signedOutNote = false; renderGate(); });
+    const again = g.querySelector("[data-signin-again]"); if (again) again.addEventListener("click", () => { byeDismissed = true; signedOutNote = false; landing = false; renderGate(); });
     wireGate(); startLoginFx();
     document.querySelectorAll("[data-gate-close]").forEach((gc) => gc.addEventListener("click", () => { gateOpen = false; if (gateNeeded()) renderGate(); else leaveGate(() => renderGate()); }));
     const decline = () => { try { sessionStorage.removeItem("mu-disc-s"); } catch (e) {} signOut(); };

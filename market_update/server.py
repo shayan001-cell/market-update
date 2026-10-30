@@ -1350,6 +1350,12 @@ async def api_track_record_day(day: str) -> JSONResponse:
     return JSONResponse({"day": day, "calls": await asyncio.to_thread(db.verdict_day_detail, day)}, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/track-record/scored")
+async def api_track_record_scored() -> JSONResponse:
+    """Public: the latest scored calls per kind, wins and misses alike, for the landing page's scorecard."""
+    return JSONResponse(await asyncio.to_thread(db.recent_scored, 8), headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/alerts")
 async def api_alerts_get(request: Request) -> dict[str, Any]:
     email = _session_email(request)
