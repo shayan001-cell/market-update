@@ -17,11 +17,14 @@ e = html.escape
 
 
 def pct(v, d=1):
-    return "n/a" if v is None else f"{'+' if v > 0 else '−' if v < 0 else ''}{abs(v):.{d}f}%"
+    if v is None: return "n/a"
+    if round(abs(v), d) == 0: return f"{0:.{d}f}%"
+    return f"{'+' if v > 0 else '−'}{abs(v):.{d}f}%"
 
 
 def tone(v):
-    return "up" if (v or 0) > 0 else "down" if (v or 0) < 0 else "flat"
+    v = v or 0
+    return "up" if v >= 0.05 else "down" if v <= -0.05 else "flat"
 
 
 def money(v):
