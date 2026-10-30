@@ -172,7 +172,7 @@ def email(name: str, d: dict[str, Any], site_url: str, unsubscribe_url: str) -> 
 
     def section(title: str, accent: str, body: str, note: str = "") -> str:
         return (f'<tr><td style="padding:22px 28px 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-                f'<td style="border-left:3px solid {accent};padding:0 0 0 10px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{C["ink"]}">{e(title)}</td>'
+                f'<td style="padding:0;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{C["ink"]}"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:{accent};margin:0 8px 1px 0;vertical-align:middle"></span>{e(title)}</td>'
                 f'<td align="right" style="font-size:11.5px;color:{C["quiet"]}">{e(note)}</td></tr></table>'
                 f'<div style="padding-top:10px">{body}</div></td></tr>')
 
