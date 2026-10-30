@@ -8,6 +8,8 @@ A calm, instrument-grade trading desk at night. The canvas is a deep zinc off-bl
 - **Motion:** Fluid CSS (6): spring-weighted transitions and staggered reveals, plus one perpetual signal (the live dot). Nothing decorative loops.
 
 ## 2. Color Palette & Roles
+Every colour comes from `market_update/static/tokens.json` (DTCG: primitives, then semantic tokens), built into `tokens.css` by `python3 scripts/build_tokens.py`. No hex or rgba is written by hand in styles.css or app.js; canvas and SVG code reads a token with `tok("rise-400")` / `tokA("rise-400", .3)`.
+
 - **Night Zinc** (#09090B): the page canvas, everywhere.
 - **Plate** (#121216): first-level surfaces such as cards, panels and the menu rail.
 - **Raised Plate** (#17171C): second level, for inner tiles, hovered rows and selected menu items.
@@ -25,12 +27,13 @@ On the marketing pages (the landing page and the WhatsApp art), the logo's **Sig
 - **Display:** Sora, at weights 600–650, with tracking of -0.03em to -0.045em. Hierarchy comes from weight and colour; the first heading on an app page is never above 30px.
 - **Body:** Geist, at 13.5–15px with 1.5–1.6 leading, capped at 65 characters per line, in Soft Ink.
 - **Numbers:** Geist Mono with tabular figures, for every price, percentage, count and timestamp, so columns of figures line up.
+- **Floor:** nothing on screen is smaller than 11px.
 - **Labels:** Geist, 11px, uppercase, tracked +0.12em to +0.16em, in Quiet Ink. Use for eyebrows and group headers only.
 - **Banned:** Inter, system serif fonts, and any serif inside the app.
 
 ## 4. Component Stylings
-- **Menu rail:** a floating Plate pill with a hairline border and a top highlight, detached from the header edges. Items are Quiet Ink text and turn Bright Ink on a Raised Plate background on hover. The active page gets a Raised Plate fill, Bright Ink text, its icon, and a 2px Ember bar under the label. There are no orange blocks, no glows and no sweep animations.
-- **Menu panel:** a double-bezel. The outer shell is a 6px translucent tray; inside it sits a Plate core with a header (group name plus one plain sentence) and items as icon tiles (34px, 10px radius, hairline). Each item has a title in Bright Ink and a description in Quiet Ink. The current page is marked with an Ember bar on the left of its tile. Items cascade in over 30ms steps. A footer line shows the keys (↑ ↓ Enter Esc) in mono.
+- **Menu rail:** a floating Plate pill with a hairline border and a top highlight, detached from the header edges. Items are Quiet Ink text and turn Bright Ink on a Raised Plate background on hover. The active page gets a Raised Plate fill, Bright Ink text, its icon, and a 4px Ember dot under the label. There are no orange blocks, no glows and no sweep animations.
+- **Menu panel:** a double-bezel. The outer shell is a 6px translucent tray; inside it sits a Plate core with a header (group name plus one plain sentence) and items as icon tiles (34px, 10px radius, hairline). Each item has a title in Bright Ink and a description in Quiet Ink. The current page is the filled Raised Plate tile with a hairline ring and an Ember icon ring; no bar. Items cascade in over 30ms steps. A footer line shows the keys (↑ ↓ Enter Esc) in mono.
 - **Phone menu:** a bottom tab bar (icon over label) with the active tab marked by an Ember dot. Group panels open as a bottom sheet with the same double-bezel and 44px touch rows.
 - **Buttons:** pills. The primary button is an Ember fill with Night Zinc text; secondary buttons are ghost with a hairline. On press they scale to 0.98. There are no outer glows.
 - **Cards:** 18–22px radius, Plate fill, hairline border and a canvas-tinted shadow. Use them only where grouping needs elevation; inside cards, separate rows with hairlines.
@@ -63,9 +66,13 @@ On the marketing pages (the landing page and the WhatsApp art), the logo's **Sig
   - No neon glows, no purple, no gradient text on app headings.
   - No full Ember fills for navigation.
   - No custom cursors.
+- No coloured border on one side only of a card, quote, row or callout: a full hairline carries the tone.
+- No native `<select>`: use the `lbx()` listbox in app.js.
+- No symbol characters (check marks, crosses, stars) as icons: use the `ICO` line icons.
 - **Copy:**
   - No "Elevate", "Seamless", "Unleash" or "Next-Gen".
   - No filler text such as "scroll to explore".
+  - No em or en dashes in interface copy; a missing value reads "n/a", a range reads "3 to 6".
 - **Honesty:**
   - No invented numbers, reviews, member counts or ratings. Every figure on a page comes from live data.
   - No recommendation language. OneView is information, not advice.

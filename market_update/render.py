@@ -13,7 +13,7 @@ def static_version() -> str:
     old copy can tell it is old by comparing with /api/status."""
     import hashlib
     h = hashlib.sha1()
-    for name in ("index.html", "styles.css", "app.js"):
+    for name in ("index.html", "tokens.css", "styles.css", "app.js"):
         h.update((config.STATIC_DIR / name).read_bytes())
     return h.hexdigest()[:10]
 
@@ -24,6 +24,8 @@ def render_html(report: dict[str, Any]) -> str:
     js = (config.STATIC_DIR / "app.js").read_text()
     data = json.dumps(report, default=str).replace("</", "<\\/")
     html = html.replace("__PUBLIC_URL__", config.PUBLIC_URL).replace("__APP_URL__", config.APP_URL).replace("__API_URL__", config.API_URL)
+    tokens = (config.STATIC_DIR / "tokens.css").read_text()
+    html = html.replace('<link rel="stylesheet" href="/static/tokens.css">', f"<style>\n{tokens}\n</style>")
     html = html.replace('<link rel="stylesheet" href="/static/styles.css">', f"<style>\n{css}\n</style>")
     symbols = json.dumps(fetch.fetch_symbol_index(), separators=(",", ":")).replace("</", "<\\/")
     html = html.replace('<script src="/static/app.js"></script>',

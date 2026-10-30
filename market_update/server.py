@@ -837,7 +837,7 @@ async def index(request: Request) -> HTMLResponse:
     html = (config.STATIC_DIR / "index.html").read_text()
     html = html.replace('<script src="/static/app.js"></script>', f'<script>window.MU_VERSION = "{_APP_VERSION}";</script>\n<script src="/static/app.js"></script>')
     html = html.replace("__PUBLIC_URL__", os.environ.get("MU_PUBLIC_URL", "").rstrip("/") or _public_url(request)).replace("__APP_URL__", "").replace("__API_URL__", "")
-    for name in ("app.js", "styles.css"):
+    for name in ("app.js", "tokens.css", "styles.css"):
         v = int((config.STATIC_DIR / name).stat().st_mtime)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
     return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})
