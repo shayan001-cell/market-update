@@ -509,9 +509,10 @@ def set_alert(email: str, enabled: bool, rvol_threshold: float, min_price: float
 
 # ---- morning-briefing email recipients ---------------------------------------------------------
 def brief_recipients() -> list[dict[str, Any]]:
-    """Everyone who has signed in at least once and has not opted out."""
+    """Everyone who has signed in at least once and has not opted out, most recently active first
+    (people who use the site are the least likely to mark the email as spam)."""
     with connect() as con:
-        return [dict(r) for r in con.execute("SELECT email, name, active_list FROM users WHERE last_login IS NOT NULL AND COALESCE(brief_opt_out, 0) = 0 ORDER BY email")]
+        return [dict(r) for r in con.execute("SELECT email, name, active_list, last_login FROM users WHERE last_login IS NOT NULL AND COALESCE(brief_opt_out, 0) = 0 ORDER BY last_login DESC")]
 
 
 def set_brief_opt_out(email: str, flag: bool) -> None:
