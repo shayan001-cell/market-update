@@ -58,14 +58,19 @@ def noul(p: float) -> dict[str, Any]:
     return {"type": "noul", "p": round(_clamp(p, 0.02, 0.95), 3), "rules": True}
 
 
+def _starts(t: str, w: str) -> int:
+    """How often w appears at the start of a word in t ("nato" must not match inside "senator"; "tariff" still matches "tariffs")."""
+    return len(re.findall(r"(?<![a-z0-9])" + re.escape(w), t))
+
+
 def _has(text: str, *words: str) -> bool:
     t = text.lower()
-    return any(w in t for w in words)
+    return any(_starts(t, w) for w in words)
 
 
 def _count(text: str, words: tuple[str, ...]) -> int:
     t = text.lower()
-    return sum(t.count(w) for w in words)
+    return sum(_starts(t, w) for w in words)
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +693,7 @@ def trump(st: dict[str, Any]) -> dict[str, Any]:
     # Campaign posts (endorsements, voting drives, court and media fights) name taxes, farmers or "bills" in passing and are
     # not market news. Unless they carry a hard market word, they are not market.
     hard = len(re.findall(r"\b(tariffs?|the fed|federal reserve|powell|interest rates?|oil|opec|bitcoin|crypto|stock market|the dow|nasdaq|s&p|apple|nvidia|intel|tesla|boeing|pharma|drug prices?|banks?|automakers?)\b", text.lower()))
-    if not hard and _count(text, ("endorse", "endorsement", "congressman", "congresswoman", "candidate", "early voting", "vote", "senate", "governor",
+    if not hard and _count(text, ("endorse", "endorsement", "congressman", "congresswoman", "candidate", "early voting", "vote", "senate", "senator", "governor", "radio", "interview",
                                   "america first patriot", "re-elect", "district", "hoax", "indict", "framed", "jarrett")):
         theme, n = "not_market", 0
     rel = 0.75 if n >= 2 else 0.55 if n == 1 else 0.1

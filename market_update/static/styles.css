@@ -4014,3 +4014,14 @@ header.topbar .topnav .side-item.active::after{width:4px;height:4px;margin-left:
 .ovt-ic .ico{width:14px;height:14px}
 /* type floor: nothing on screen under 11px (relative sizes included) */
 small{font-size:max(11px,.85em)}
+
+/* Blossom block under the Reddit table: ticker chips by post count, then the most-read posts */
+.bl-blk{margin-top:14px;padding-top:12px;border-top:1px solid var(--line-default);display:grid;gap:8px}
+.bl-blk h4{margin:0}
+.bl-chips{display:flex;flex-wrap:wrap;gap:6px}
+.bl-chip{display:inline-flex;align-items:baseline;gap:6px;min-height:32px;padding:5px 10px;border-radius:999px;border:1px solid var(--line-default);background:var(--surface-raised);color:var(--text-primary);font:inherit;font-size:12px;cursor:pointer;transition:background .2s cubic-bezier(.16,1,.3,1),border-color .2s cubic-bezier(.16,1,.3,1),transform .12s}
+.bl-chip span{color:var(--text-secondary);font-variant-numeric:tabular-nums}
+.bl-chip:hover{border-color:var(--line-strong);background:color-mix(in srgb,var(--p-ember-500) 7%,var(--surface-raised))}
+.bl-chip:active{transform:scale(.98)}
+.bl-chip:focus-visible{outline:2px solid var(--action-accent-text);outline-offset:2px}
+.bl-sub{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary)}

@@ -1,6 +1,6 @@
 """The 1 pm midday update: what has happened since the open, what is moving the market, who said what, and
 what is on the clock into the close. Numbers come from the report; the short written read comes from the AI
-provider (DeepSeek today) and is checked for advice language before it is used, with a rule-written fallback.
+provider (Gemini today) and is checked for advice language before it is used, with a rule-written fallback.
 
 build(report)  -> data dict (all facts, no model call)
 write(data)    -> {headline, so_far, drivers, voices, into_close, engine}
@@ -8,6 +8,7 @@ write(data)    -> {headline, so_far, drivers, voices, into_close, engine}
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 from . import db, morning_update as MU
 
 ET = ZoneInfo("America/New_York")
+MIDDAY_GEMINI = "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"   # free models tried in order for the 1 pm note
 # words that turn a description into a recommendation: the written read is rejected if it uses any
 ADVICE = re.compile(r"\b(buy|buying opportunity|sell|short (it|the)|go long|go short|target|stop[- ]loss|stops?\b|entry|enter|exit|recommend\w*|should|must|consider|opportunit\w+|load up|take profits?)\b", re.I)
 
@@ -71,7 +73,9 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
         "presidents_posts": [{"said_by": "the President" + (" (a repost)" if p.get("repost") else ""), "text": p.get("text"), "at_et": p.get("at"),
                               "topic": (p.get("theme") or "").replace("_", " "), "sectors_it_touches": p.get("who"),
                               "oneview_read": {"bullish_for_stocks": "good for stocks", "bearish_for_stocks": "bad for stocks"}.get(p.get("direction"), "mixed")} for p in (base.get("posts") or [])[:3]],
-        "posts": base.get("posts") or [], "crowd": base.get("crowd") or [], "spy_mood": base.get("spy_mood") or {},
+        "posts": base.get("posts") or [], "crowd": base.get("crowd") or [],
+        "blossom_most_posted": {"source": "Blossom Social's Market News topic", "posts_read": (base.get("blossom") or {}).get("count") or 0,
+                                "tickers_by_posts": (base.get("blossom") or {}).get("rows") or []}, "spy_mood": base.get("spy_mood") or {},
         "heavy": base.get("heavy") or [], "ahead": ahead, "after_close": after_close,
     }
 
@@ -84,7 +88,7 @@ SYSTEM = (
     "Quote who said what exactly as labelled (presidents_posts.said_by). Plain English, short sentences, no emoji, no dashes. Numbers as given, with % where they are percentages.\n"
     "Return JSON only: {\"headline\": at most 12 words, \"so_far\": 2 sentences on the session so far, "
     "\"drivers\": 2 sentences on what is moving it (sectors, the biggest movers), \"voices\": 1 to 2 sentences on who said what "
-    "(the President's posts, headlines since the open, the crowd), \"into_close\": 2 sentences on the levels and scheduled events "
+    "(the President's posts, headlines since the open, the crowd on Reddit and on Blossom), \"into_close\": 2 sentences on the levels and scheduled events "
     "still ahead today, written as facts (for example: yesterday's high is 774.4; the Fed's Waller speaks at 14:00)}."
 )
 
@@ -102,7 +106,8 @@ def _fallback(d: dict[str, Any]) -> dict[str, Any]:
         "drivers": (f"{lead.get('label', 'n/a')} leads ({lead.get('chg_1d', 0):+.1f}%) and {lag.get('label', 'n/a')} lags ({lag.get('chg_1d', 0):+.1f}%)."
                     + (f" Biggest big-cap moves: {d['up'][0]['ticker']} {d['up'][0]['chg']:+.1f}% and {d['down'][0]['ticker']} {d['down'][0]['chg']:+.1f}%." if d["up"] and d["down"] else "")),
         "voices": ((f"The President posted: \"{d['posts'][0]['text'][:120]}\". " if d["posts"] else "No market-moving posts from the President today. ")
-                   + (f"The crowd on the S&P 500 reads {d['spy_mood'].get('score')}/100, {d['spy_mood'].get('label')}." if d["spy_mood"].get("score") is not None else "")),
+                   + (f"The crowd on the S&P 500 reads {d['spy_mood'].get('score')}/100, {d['spy_mood'].get('label')}." if d["spy_mood"].get("score") is not None else "")
+                   + ((lambda b: f" On Blossom, the most posted-about names are {', '.join(x['ticker'] for x in b[:3])}." if b else "")(d["blossom_most_posted"]["tickers_by_posts"]))),
         "into_close": (f"Yesterday's S&P 500 high and low were {n2(lv.get('prev_high'))} and {n2(lv.get('prev_low'))}."
                        + (f" Still ahead today: {'; '.join(str(x['time']) + ' ' + str(x['title']) for x in d['ahead'][:2])}." if d["ahead"] else " Nothing major left on the calendar today.")
                        + (f" Reporting after the close: {', '.join(x['symbol'] for x in d['after_close'])}." if d["after_close"] else "")),
@@ -131,15 +136,25 @@ def write(d: dict[str, Any]) -> dict[str, Any]:
         base_url, key, model = settings()
         client = openai.OpenAI(base_url=base_url, api_key=key, timeout=60, max_retries=1)
         facts = json.dumps(_round({k: v for k, v in d.items() if k != "posts"}), default=str)
+        # Gemini's free tier caps each model at a small number of requests a day, and the rest of the app can use up the main
+        # model's share; the note keeps its own list and moves to the next model when one is out of quota.
+        models = [m.strip() for m in os.environ.get("MU_MIDDAY_MODELS", MIDDAY_GEMINI).split(",") if m.strip()] if "gemini" in model else [model]
+    except Exception:  # noqa: BLE001
+        return _fallback(d)
+    for m in models:
         for attempt in range(2):
-            think = {"reasoning_effort": "low"} if "gemini" in model else {}      # Gemini thinks first; keep it short so the answer fits
-            r = client.chat.completions.create(model=model, max_tokens=2500, temperature=0.3, **think,
-                                               messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": facts}],
-                                               response_format={"type": "json_object"}, extra_body=EXTRA_BODY.get(config.AI_PROVIDER) or None)
-            out = json.loads(r.choices[0].message.content)
+            try:
+                think = {"reasoning_effort": "low"} if "gemini" in m else {}      # Gemini thinks first; keep it short so the answer fits
+                r = client.chat.completions.create(model=m, max_tokens=2500, temperature=0.3, **think,
+                                                   messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": facts}],
+                                                   response_format={"type": "json_object"}, extra_body=EXTRA_BODY.get(config.AI_PROVIDER) or None)
+                raw = r.choices[0].message.content or ""
+                out = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+            except openai.RateLimitError:
+                break                                                              # this model is out of quota: try the next
+            except Exception:  # noqa: BLE001
+                continue
             out = {k: _clean(out.get(k, "")) for k in ("headline", "so_far", "drivers", "voices", "into_close")}
             if all(out.values()) and not any(ADVICE.search(v) for v in out.values()):
-                return {**out, "engine": config.AI_PROVIDER}
-    except Exception:  # noqa: BLE001
-        pass
+                return {**out, "engine": config.AI_PROVIDER, "model": m}
     return _fallback(d)

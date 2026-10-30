@@ -1156,6 +1156,83 @@ def fetch_reddit_crowd() -> dict[str, Any]:
     return out
 
 
+_BLOSSOM_TOPIC = "TOPIC-1670944602936-YItlEti6_kPwalIyp44Z8cCx0"
+_BLOSSOM_URL = f"https://www.blossomsocial.com/topics/Market-News__{_BLOSSOM_TOPIC}"   # public topic page, allowed by robots.txt
+_CASHTAG = re.compile(r"(?<![\w$])\$+([A-Z]{1,5}(?:\.[A-Z]{1,2})?)\b")
+
+
+def _blossom_items(page: str) -> list[dict[str, Any]]:
+    """The topic page ships its first page of posts inside the Next.js flight data; pull the Items list out of it."""
+    chunks = re.findall(r'self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)', page, re.S)
+    t = "".join(json.loads('"' + c + '"') for c in chunks)
+    i = t.find('{"state":{"mutations"')
+    if i < 0:
+        return []
+    depth, ins, esc = 0, False, False
+    for j in range(i, len(t)):
+        ch = t[j]
+        if ins:
+            esc, ins = (False, ins) if esc else (ch == "\\", ch != '"')
+        elif ch == '"':
+            ins = True
+        elif ch in "{}":
+            depth += 1 if ch == "{" else -1
+            if depth == 0:
+                break
+    out = []
+    for q in json.loads(t[i:j + 1])["state"]["queries"]:
+        if (q.get("queryKey") or [None])[0] == "public-topic-feed":
+            for p in (q["state"]["data"] or {}).get("pages") or []:
+                out += p.get("Items") or []
+    return out
+
+
+def fetch_blossom_crowd() -> dict[str, Any]:
+    """What people on Blossom's Market News topic are posting: the tickers tagged most often over the last 24 hours and the
+    most-read posts. One page read at most every 15 minutes; posts are kept on disk so the 24 hours fill in between reads."""
+    cached = _cache_get("blossom_crowd", 900)
+    if cached:
+        return cached
+    store: dict[str, Any] = _cache_get("blossom_posts", -1) or {}
+    status = "ok"
+    try:
+        r = requests.get(_BLOSSOM_URL, headers=UA | {"Accept": "text/html"}, timeout=20)
+        r.raise_for_status()
+        for it in _blossom_items(r.text):
+            pid = it.get("postId")
+            if not pid:
+                continue
+            title, cap = (it.get("title") or "").strip(), (it.get("caption") or "").strip()
+            tags = {(c.get("companyInfo") or {}).get("symbol") for c in it.get("taggedCompanies") or []}
+            tickers = sorted({x for x in tags | set(_CASHTAG.findall(title + " " + cap)) if x})
+            slug = re.sub(r"[^A-Za-z0-9]+", "-", (it.get("aiGeneratedTitle") or title or "post").replace("%", "percent")).strip("-")[:80] or "post"
+            rc = it.get("reactionCount") or {}
+            store[pid] = {"id": pid, "ts": it.get("timestamp"), "title": title, "text": cap[:600], "tickers": tickers,
+                          "views": it.get("viewCount") or 0, "comments": it.get("commentCount") or 0, "reactions": sum(v for v in rc.values() if isinstance(v, int)),
+                          "user": ((it.get("userData") or {}).get("username")), "url": f"https://www.blossomsocial.com/posts/{slug}__{pid}"}
+    except Exception as e:  # noqa: BLE001
+        log.warning("blossom topic read failed: %s", e)
+        status = "unavailable" if not store else "stale"
+    cutoff = (datetime.now().timestamp() - 86400) * 1000
+    store = {k: v for k, v in store.items() if (v.get("ts") or 0) >= cutoff}
+    _cache_put("blossom_posts", store)
+    posts = sorted(store.values(), key=lambda p: -(p.get("ts") or 0))
+    tally: dict[str, dict[str, Any]] = {}
+    for p in posts:
+        for t in p["tickers"]:
+            row = tally.setdefault(t, {"ticker": t, "posts": 0, "views": 0, "last": p["ts"]})
+            row["posts"] += 1
+            row["views"] += p["views"]
+    rows = sorted(tally.values(), key=lambda x: (-x["posts"], -x["views"]))
+    first = min((p["ts"] for p in posts if p.get("ts")), default=None)
+    out = {"rows": rows[:15], "top_posts": sorted(posts, key=lambda p: -p["views"])[:5], "count": len(posts),
+           "since": datetime.fromtimestamp(first / 1000, tz=config.ET).isoformat() if first else None,
+           "source": "Blossom Social, Market News topic", "url": _BLOSSOM_URL, "as_of": now_et().isoformat(), "status": status if posts else "unavailable"}
+    if posts:
+        _cache_put("blossom_crowd", out)
+    return out
+
+
 def fetch_index_members() -> list[dict[str, Any]]:
     """S&P 500 (large and mega caps) and S&P 400 (mid caps) members from Wikipedia, cached for a week.
     Rows: {symbol, name, sector, index}."""

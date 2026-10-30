@@ -71,6 +71,8 @@ def build(d):
     read = {"bullish_for_stocks": ("Good for stocks", "up"), "bearish_for_stocks": ("Bad for stocks", "down")}.get((post or {}).get("direction"), ("Mixed for stocks", "flat"))
     mood = d.get("spy_mood") or {}
     crowd_html = "".join(f'<div class="c"><b>{e(c["ticker"])}</b><span>{int(c.get("mentions") or 0)} mentions</span><i class="{"up" if c.get("mood") == "Bullish" else "down" if c.get("mood") == "Bearish" else "flat"}">{e(c.get("mood") or "")}</i></div>' for c in (d.get("crowd") or [])[:4]) or '<p class="none">Quiet on the forums.</p>'
+    bl = (d.get("blossom") or {}).get("rows") or []
+    bl_html = ('<div class="bl"><small>On Blossom</small>' + "".join(f'<span><b>{e(x["ticker"])}</b> {x["posts"]} {"post" if x["posts"] == 1 else "posts"}</span>' for x in bl[:4]) + '</div>') if bl else ""
     post_html = (f'<div class="post"><p>{e(post["text"][:150])}</p><span><i class="{read[1]}">{read[0]}</i>'
                  f'{" · " + e(post["theme"].replace("_", " ")) if post.get("theme") else ""}</span></div>') if post else '<p class="none">No market-moving posts in the last 24 hours.</p>'
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OneView morning brief</title>
@@ -79,7 +81,7 @@ def build(d):
 :root{{--bg:#09090B;--plate:#121216;--raised:#17171C;--hair:rgba(255,255,255,.08);--ink:#F4F4F5;--soft:#CFCFD6;--quiet:#8A8A96;--blue:#3B7BFF;--blue2:#8FB0FF;--up:#3DDC97;--down:#FF6B85;--warn:#F7C85A}}
 *{{box-sizing:border-box;margin:0;padding:0}}
 html,body{{width:1080px;height:1350px;background:var(--bg);overflow:hidden}}
-body{{font-variant-numeric:tabular-nums;font-family:"Geist",system-ui,sans-serif;color:var(--ink);padding:56px 60px 44px;display:flex;flex-direction:column;gap:22px;position:relative}}
+body{{font-variant-numeric:tabular-nums;font-family:"Geist",system-ui,sans-serif;color:var(--ink);padding:48px 60px 36px;display:flex;flex-direction:column;gap:16px;position:relative}}
 .glow{{position:absolute;inset:0;pointer-events:none;background:radial-gradient(680px 460px at 0% -8%,rgba(36,91,255,.30),transparent 62%)}}
 .z{{position:relative}}
 .top{{display:flex;justify-content:space-between;align-items:center}}
@@ -113,8 +115,9 @@ li.cal:first-of-type{{margin-top:4px}}
 .post i{{font-style:normal;font-weight:600}}
 .none{{font-size:21px;color:var(--quiet)}}
 .crowd{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}}
-.c{{padding:12px 14px;border-radius:16px;background:var(--raised);box-shadow:inset 0 0 0 1.5px var(--hair)}}
+.c{{padding:10px 14px;border-radius:16px;background:var(--raised);box-shadow:inset 0 0 0 1.5px var(--hair)}}
 .c b{{display:block;font-size:24px;font-weight:650}} .c span{{display:block;font-size:16px;color:var(--quiet);margin:4px 0}} .c i{{font-style:normal;font-size:17px;font-weight:600}}
+.bl{{display:flex;align-items:baseline;gap:22px;margin-top:12px;font-size:19px;color:var(--soft)}} .bl small{{font-size:15px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--quiet)}} .bl b{{color:var(--ink);font-weight:650}}
 .up{{color:var(--up)}} .down{{color:var(--down)}} .flat{{color:var(--soft)}}
 .foot{{margin-top:auto;display:flex;justify-content:space-between;align-items:center;gap:20px;font-size:17px;color:var(--quiet)}}
 .foot b{{color:var(--blue2);font-weight:600;font-size:20px}}
@@ -132,7 +135,7 @@ li.cal:first-of-type{{margin-top:4px}}
   <div class="f"><small>The crowd on the S&amp;P 500</small><b>{mood.get("score", "n/a")}<i class="flat">/100</i> <i class="{"up" if mood.get("label") == "bullish" else "down" if mood.get("label") == "bearish" else "flat"}">{e((mood.get("label") or "").capitalize())}</i></b></div>
 </div></div>
 <div class="z box"><span class="k">What the President posted</span>{post_html}</div>
-<div class="z box"><span class="k">Most talked-about on Reddit</span><div class="crowd">{crowd_html}</div></div>
+<div class="z box"><span class="k">Most talked-about on Reddit</span><div class="crowd">{crowd_html}</div>{bl_html}</div>
 <div class="z foot"><span>Information and entertainment only. Not financial advice.</span><b>Full desk: OneView</b></div>
 </body></html>"""
 

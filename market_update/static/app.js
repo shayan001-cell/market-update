@@ -1977,7 +1977,7 @@
       const mood = x.wsb_sentiment ? `<span class="${x.wsb_sentiment === "Bullish" ? "up" : "down"}">${x.wsb_sentiment.toLowerCase()}</span>` : '<span class="muted">n/a</span>';
       return `<tr class="clickable" data-ticker-page="${esc(x.ticker)}"><td class="sym"><b>${esc(x.ticker)}</b><div class="meta2">${esc((x.name || "").slice(0, 26))}</div></td><td class="num"><b>${isNum(x.mentions) ? x.mentions : "n/a"}</b>${isNum(d) ? `<div class="delta ${cls(d)}">${fpct(d, 0)} 24h</div>` : ""}</td><td>${mood}${isNum(x.wsb_comments) ? `<div class="meta2">${x.wsb_comments} comments</div>` : ""}</td><td class="num">${isNum(q.last) ? priceHtml(x.ticker, null) : '<span class="muted">n/a</span>'}</td><td>${v ? `<span class="pill ${v.cls}">${v.word}</span>` : '<span class="muted">not analysed</span>'}</td></tr>`; }).join("");
     const clash = (C.rows || []).slice(0, 10).filter((x) => { const v = verdictFor(stockFor(x.ticker)); return v && x.wsb_sentiment === "Bullish" && v.cls === "down"; }).map((x) => x.ticker);
-    const srcLine = `${T.source ? esc(T.source) : "Trump feed unavailable"} · ${(C.sources || []).length ? "Reddit via " + esc((C.sources || []).map((x) => x.split(" (")[0]).join(" + ")) : "Reddit feed unavailable"}`;
+    const srcLine = `${T.source ? esc(T.source) : "Trump feed unavailable"} · ${(C.sources || []).length ? "Reddit via " + esc((C.sources || []).map((x) => x.split(" (")[0]).join(" + ")) : "Reddit feed unavailable"}${S.blossom && S.blossom.count ? " · Blossom Social (Market News topic)" : ""}`;
     return `<section class="voices"><h3>Voices moving the tape <span class="muted" data-qstamp-src>free public feeds</span></h3>
       ${explain(`The President's posts and a sudden Reddit crowd have both moved prices without warning. The model reads each post once: does it matter, which way, and for whom. Reddit numbers are mention counts, not a forecast; a spike means a crowded name, and crowded names reverse hard. <span class="muted">Sources: ${srcLine}.</span>`)}
       <div class="voices-grid">
@@ -1986,13 +1986,27 @@
           ${posts.length > shown.length || socialAll ? `<button class="lnk" data-social-all>${socialAll ? "show only market-moving posts" : `show all ${posts.length} recent posts`}</button>` : ""}</div>
         <div class="cr-col"><h4>Where the crowd is going ${C.status === "unavailable" ? '<span class="tag warn">feed unavailable</span>' : '<span class="muted">Reddit mentions, last 24 hours</span>'}</h4>
           ${rows ? `<table class="tbl cr-tbl"><thead><tr><th>Name</th><th>Mentions</th><th>Crowd mood</th><th>Price</th><th>Desk read</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">No crowd data right now.</div>'}
-          ${clash.length ? `<div class="meta2 warn" style="margin-top:6px">Crowd bullish, desk bearish: ${clash.join(", ")}. That gap is where crowded trades usually end.</div>` : ""}</div>
+          ${clash.length ? `<div class="meta2 warn" style="margin-top:6px">Crowd bullish, desk bearish: ${clash.join(", ")}. That gap is where crowded trades usually end.</div>` : ""}
+          ${secBlossom(S.blossom)}</div>
       </div></section>`;
+  }
+  // Blossom Social's Market News topic: the tickers its posts tag most over the last 24 hours, and the most-read posts
+  function secBlossom(B) {
+    if (!B) return "";
+    if (B.status === "unavailable" || !B.count) return `<div class="bl-blk"><h4>On Blossom <span class="tag warn">feed unavailable</span></h4></div>`;
+    const hrs = B.since ? Math.max(1, Math.round((Date.now() - Date.parse(B.since)) / 3600000)) : null;
+    const chips = (B.rows || []).slice(0, 8).map((x) => `<button type="button" class="bl-chip" data-ticker-page="${esc(x.ticker)}"><b>${esc(x.ticker)}</b><span>${x.posts} ${x.posts === 1 ? "post" : "posts"}</span></button>`).join("");
+    const top = (B.top_posts || []).slice(0, 3).map((p) => { const t = postText(p.title || p.text || "").replace(/\s+/g, " ").trim();
+      return `<li class="tp-post"><div class="tp-text">${esc(t.length > 180 ? t.slice(0, 177) + "…" : t)}</div><div class="meta2">${p.user ? esc(p.user) + " · " : ""}${fvol(p.views)} views · ${p.ts ? agoIso(new Date(p.ts).toISOString()) : ""}${p.url ? ` · <a href="${esc(p.url)}" target="_blank" rel="noopener">open the post</a>` : ""}</div></li>`; }).join("");
+    return `<div class="bl-blk"><h4>On Blossom <span class="muted">Market News topic · ${B.count} posts${hrs ? ` over the last ${hrs} h` : ""} · tickers by posts</span></h4>
+      ${chips ? `<div class="bl-chips">${chips}</div>` : '<div class="empty">No tickers tagged yet.</div>'}
+      ${top ? `<div class="bl-sub">Most-read posts</div><ul class="tp-list">${top}</ul>` : ""}
+      <div class="meta2">What members post, not a forecast. <a href="${esc(B.url || "https://www.blossomsocial.com")}" target="_blank" rel="noopener">Open the topic on Blossom</a></div></div>`;
   }
   async function pollSocial() {
     if (STATIC_MODE || !report) return;
     try { const res = await api("/api/social", { cache: "no-store" }); if (!res.ok) return; social = await res.json();
-      if (currentView === "home") { const el = $(".voices"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secVoices(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } } } catch (e) { /* server restarting */ }
+      { const el = $(".voices"); if (el) { const tmp = document.createElement("div"); tmp.innerHTML = secVoices(report); el.replaceWith(tmp.firstElementChild); wireStocks(); } } } catch (e) { /* server restarting */ }
   }
   function secRunners(r) {
     const rows = [];

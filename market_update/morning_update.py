@@ -115,6 +115,8 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
     # the crowd
     crowd = [{"ticker": r.get("ticker"), "mentions": r.get("mentions"), "change": ((r["mentions"] / r["mentions_24h_ago"] - 1) * 100) if r.get("mentions") and r.get("mentions_24h_ago") else None,
               "mood": r.get("wsb_sentiment")} for r in ((soc.get("crowd") or {}).get("rows") or [])[:5]]
+    bl = soc.get("blossom") or {}
+    blossom = {"rows": [{"ticker": r.get("ticker"), "posts": r.get("posts")} for r in (bl.get("rows") or [])[:5]], "count": bl.get("count") or 0}
     st = fetch._cache_get("stocktwits_snapshot", 12 * 3600) or {}
     spy_mood = ((st.get("moods") or {}).get("SPY") or {}) if isinstance(st, dict) else {}
     # the big money: hedge funds' biggest new or added option bets (13F), today's heaviest option trades, insider buying
@@ -157,7 +159,7 @@ def build(report: dict[str, Any]) -> dict[str, Any]:
         watch.append("Reporting today: " + (f"{', '.join(bo)} before the open" if bo else "") + ("; " if bo and ac else "") + (f"{', '.join(ac)} after the close" if ac else "") + ".")
     session = report.get("session_date") or fetch.now_et().date().isoformat()
     return {"date": session, "es": es, "nq": nq, "vix": vix, "tnx": tnx, "oil": oil, "watch": watch[:3], "news": news, "earn_today": earn_today, "reported": reported,
-            "posts": market_posts[:2], "posts_recent": recent, "crowd": crowd, "spy_mood": {"score": spy_mood.get("score"), "label": (spy_mood.get("label") or "").replace("_", " ").lower()} if spy_mood else None,
+            "posts": market_posts[:2], "posts_recent": recent, "crowd": crowd, "blossom": blossom, "spy_mood": {"score": spy_mood.get("score"), "label": (spy_mood.get("label") or "").replace("_", " ").lower()} if spy_mood else None,
             "big": big, "period": period, "heavy": heavy, "insiders": insiders, "lead": secs[:3], "lag": secs[-3:][::-1] if len(secs) > 3 else [], "gauges": gauges[:3]}
 
 
@@ -215,7 +217,9 @@ def email(name: str, d: dict[str, Any], site_url: str, unsubscribe_url: str) -> 
                   for i, c in enumerate(d["crowd"])]
     sm = d.get("spy_mood")
     crowd = (f'<p style="margin:0 0 8px;font-size:14px;color:{C["soft"]}">StockTwits mood on the S&amp;P 500: <b style="color:{C["ink"]}">{round(sm["score"])}</b> / 100 ({e(sm.get("label") or "")}; 50 is normal).</p>' if sm and _num(sm.get("score")) else "") + \
-            (f'<div style="font-size:12px;color:{C["quiet"]};margin-bottom:4px">Most-talked-about on Reddit\'s trading forums, last 24 hours</div>' + table(crowd_rows) if crowd_rows else "")
+            (f'<div style="font-size:12px;color:{C["quiet"]};margin-bottom:4px">Most-talked-about on Reddit\'s trading forums, last 24 hours</div>' + table(crowd_rows) if crowd_rows else "") + \
+            (f'<p style="margin:10px 0 0;font-size:13px;color:{C["soft"]}">On Blossom\'s Market News topic ({d["blossom"]["count"]} posts): most posted about '
+             + ", ".join(f'<b style="color:{C["ink"]}">{e(x["ticker"])}</b> {x["posts"]}' for x in d["blossom"]["rows"][:4]) + '.</p>' if d.get("blossom") and d["blossom"]["rows"] else "")
     big_rows = [row([(f'<b>{e(b["fund"])}</b>', ""), (f'{"New" if b["change"] == "new" else "Added to"} <b>{e(b["ticker"])}</b> {e(b["type"])}s', "font-size:13.5px"),
                      (e(_cap(b["value"])), "text-align:right;font-size:13.5px;font-weight:600")], i == 0) for i, b in enumerate(d["big"])]
     heavy_rows = [row([(f'<b>{e(h["ticker"])}</b>', ""), (f'{h["strike"]:g} {e(h["side"])}s · expires {e(h["expiry"][5:])}', "font-size:13px"),

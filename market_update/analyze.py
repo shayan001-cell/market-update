@@ -627,9 +627,10 @@ def _weekly_levels(f: pd.DataFrame, last: float | None) -> dict[str, Any]:
 
 async def social_snapshot(judge: "Judge") -> dict[str, Any]:
     """Free public voices: Trump's posts (read once each by the model, reads kept on disk) and the
-    Reddit crowd's ticker mentions. Nothing here needs a paid key."""
+    Reddit crowd's ticker mentions, and the tickers Blossom's Market News topic is posting about. Nothing here needs a paid key."""
     trump = fetch.fetch_trump_posts(25)
     crowd = fetch.fetch_reddit_crowd()
+    blossom = fetch.fetch_blossom_crowd()
     reads: dict[str, Any] = fetch._cache_get("trump_reads", 14 * 86400) or {}
     # Only model reads are kept: a rule read is cheap and the rules improve, so it is redone on every build (and a model
     # read replaces it as soon as the model is reachable).
@@ -649,7 +650,7 @@ async def social_snapshot(judge: "Judge") -> dict[str, Any]:
             reads[p["id"]] = R.trump({"text": p["text"][:1500]})
     for p in trump.get("posts", []):
         p["ai"] = reads.get(p["id"])
-    return _clean({"trump": trump, "crowd": crowd, "as_of": datetime.now(tz=config.ET).isoformat()})
+    return _clean({"trump": trump, "crowd": crowd, "blossom": blossom, "as_of": datetime.now(tz=config.ET).isoformat()})
 
 
 async def build_report(use_ai: bool = True, max_cards: int | None = None) -> dict[str, Any]:
