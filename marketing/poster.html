@@ -52,7 +52,7 @@ h1 span{color:var(--blue2)}
 .feed h1{font-size:88px} .feed .lede{font-size:27px} .feed .a b{font-size:46px} .feed .a{padding:20px 20px 18px} .feed .core{padding:22px;gap:16px}
 .feed .r{padding:12px 22px;font-size:22px} .feed .f{padding:16px 20px} .feed .f .ic{width:52px;height:52px} .feed .f b{font-size:22px} .feed .f span{font-size:17px}
 .feed .cta div b{font-size:30px} .feed .cta div span{font-size:20px} .feed .cta i{width:72px;height:72px} .feed .top img{width:220px}
-.status .only-feed{display:none}
+.status .only-feed{display:none} .status .feats .f:last-child{grid-column:1/-1}
 .feed .only-status{display:none}
 </style></head>
 <body class="feed">
@@ -75,14 +75,15 @@ h1 span{color:var(--blue2)}
   </div>
 </div></div>
 <div class="z feats">
-  <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg></span><div><b>Every call scored</b><span>6,206 logged, wins and misses public</span></div></div>
+  <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M2 20c.8-3.5 3.2-5 6-5s5.2 1.5 6 5M14 20c.4-2.4 1.8-3.6 3.5-3.6S21 17.6 21 20"/></svg></span><div><b>What people are saying</b><span>StockTwits and Reddit, measured</span></div></div>
   <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/></svg></span><div><b>Options map</b><span>ES, NQ, SPY every 10 minutes</span></div></div>
-  <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8 14l2 2 4-4"/></svg></span><div><b>Earnings, reviewed</b><span>beat or miss, and how it traded</span></div></div>
-  <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg></span><div><b>Big money bets</b><span>hedge funds' calls and puts</span></div></div>
+  <div class="f only-status"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8 14l2 2 4-4"/></svg></span><div><b>Earnings, reviewed</b><span>beat or miss, and how it traded</span></div></div>
+  <div class="f only-status"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20.5h18"/></svg></span><div><b>Big money bets</b><span>hedge funds' calls and puts</span></div></div>
   <div class="f only-status"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5M8 11h1.5l1-2 1.5 4 1-2H14"/></svg></span><div><b>Tipster X-ray</b><span>is that trader any good?</span></div></div>
-  <div class="f only-status"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></svg></span><div><b>Live intraday read</b><span>direction every 15 minutes</span></div></div>
+  <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></span><div><b>The President's posts</b><span>read for what they could touch</span></div></div>
+  <div class="f"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="13" cy="17" r="2.5"/><path d="M8 8l3.5 7M16 7.5l-2 7.5M8.5 7h7"/></svg></span><div><b>Company map</b><span>who it buys from and sells to</span></div></div>
 </div>
 <div class="z cta"><div><b>Free. Sign in with your email.</b><span>No card, no password. Link in the message.</span></div><i><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></div>
-<p class="z fine">Market data and research for information only. Not financial advice. Prices from the last session; they change.</p>
+<p class="z fine">For information and entertainment only. Not financial advice. Prices from the last session; they change.</p>
 <script>const m=location.hash.slice(1);if(m)document.body.className=m;</script>
 </body></html>

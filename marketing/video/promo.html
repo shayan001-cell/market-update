@@ -1,0 +1,135 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OneView promo</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@500;600&family=Sora:wght@600;650;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#09090B;--ink:#F4F4F5;--soft:#CFCFD6;--quiet:#8A8A96;--blue:#3B7BFF;--blue2:#8FB0FF;--hair:rgba(255,255,255,.09)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1080px;height:1920px;overflow:hidden;background:var(--bg);font-family:"Geist",sans-serif;color:var(--ink)}
+.bg{position:absolute;inset:0;background:radial-gradient(900px 700px at var(--gx,20%) var(--gy,10%),rgba(36,91,255,.32),transparent 62%),radial-gradient(800px 700px at 100% 85%,rgba(61,220,151,.09),transparent 60%)}
+.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);background-size:72px 72px;-webkit-mask-image:radial-gradient(ellipse 85% 60% at 30% 25%,#000,transparent 78%)}
+.scene{position:absolute;inset:0;opacity:0;will-change:opacity,transform}
+.brand{position:absolute;left:72px;top:96px;width:230px;opacity:.95}
+.step{position:absolute;right:72px;top:104px;font:600 22px/1 "Geist Mono",monospace;color:var(--quiet);letter-spacing:.08em}
+.eye{display:inline-flex;align-items:center;gap:12px;padding:12px 22px;border-radius:999px;font-size:20px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--blue2);background:rgba(36,91,255,.14);box-shadow:inset 0 0 0 1.5px rgba(143,176,255,.32)}
+.eye i{width:10px;height:10px;border-radius:50%;background:#3DDC97;box-shadow:0 0 0 5px rgba(61,220,151,.2)}
+.cap{position:absolute;left:72px;right:72px;top:220px}
+.cap h2{font-family:"Sora",sans-serif;font-weight:650;font-size:84px;line-height:1;letter-spacing:-.045em;margin-top:28px}
+.cap h2 span{color:var(--blue2)}
+.cap p{margin-top:26px;font-size:32px;line-height:1.4;color:var(--soft);max-width:900px}
+.frame{position:absolute;left:60px;right:60px;top:var(--ft,700px);bottom:var(--fb,150px);padding:10px;border-radius:44px;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1.5px var(--hair),0 60px 120px -50px rgba(0,0,0,.95)}
+.frame .win{position:relative;width:100%;height:100%;border-radius:35px;overflow:hidden;background:#0E0E12;box-shadow:inset 0 1.5px 0 rgba(255,255,255,.07)}
+.frame img{position:absolute;left:0;top:0;width:100%;will-change:transform}
+.frame .fade{position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(transparent,#0E0E12)}
+.intro h1{position:absolute;left:72px;right:72px;top:620px;font-family:"Sora",sans-serif;font-weight:650;font-size:98px;line-height:.98;letter-spacing:-.05em}
+.intro h1 span{display:block}
+.intro h1 .b{color:var(--blue2)}
+.intro p{position:absolute;left:72px;right:120px;top:880px;font-size:36px;line-height:1.45;color:var(--soft)}
+.intro .logo{position:absolute;left:72px;top:420px;width:380px}
+.tri{position:absolute;left:60px;right:60px;top:700px;bottom:170px}
+.tri .card{position:absolute;left:0;right:0;top:0;height:100%;padding:10px;border-radius:44px;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1.5px var(--hair)}
+.tri .card .win{width:100%;height:100%;border-radius:35px;overflow:hidden;background:#0E0E12;position:relative}
+.tri .card img{position:absolute;left:0;top:0;width:100%}
+.tri .tag{position:absolute;left:36px;bottom:36px;padding:14px 24px;border-radius:999px;background:rgba(9,9,11,.85);box-shadow:inset 0 0 0 1.5px var(--hair);font:600 30px/1 "Geist",sans-serif}
+.outro .logo{position:absolute;left:50%;top:520px;width:420px;transform:translateX(-50%)}
+.outro h2{position:absolute;left:72px;right:72px;top:760px;text-align:center;font-family:"Sora",sans-serif;font-weight:650;font-size:104px;line-height:1;letter-spacing:-.045em}
+.outro h2 span{color:var(--blue2)}
+.outro .cta{position:absolute;left:110px;right:110px;top:1120px;display:flex;align-items:center;justify-content:space-between;padding:22px 22px 22px 46px;border-radius:999px;background:linear-gradient(180deg,#4C86FF,#245BFF);box-shadow:inset 0 1.5px 0 rgba(255,255,255,.3),0 40px 80px -30px rgba(36,91,255,.95)}
+.outro .cta b{font-family:"Sora",sans-serif;font-size:42px;font-weight:650;letter-spacing:-.02em}
+.outro .cta i{display:grid;place-items:center;width:96px;height:96px;border-radius:50%;background:rgba(255,255,255,.18)}
+.outro .cta svg{width:42px;height:42px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.outro .sub{position:absolute;left:72px;right:72px;top:1290px;text-align:center;font-size:32px;color:var(--soft)}
+.outro .url{position:absolute;left:72px;right:72px;top:1360px;text-align:center;font:600 34px/1 "Geist Mono",monospace;color:var(--blue2)}
+.fine{position:absolute;left:72px;right:72px;bottom:70px;text-align:center;font-size:22px;color:#6E6E7A}
+.bar{position:absolute;left:72px;right:72px;bottom:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.07)} .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--blue)}
+</style></head><body>
+<div class="bg" id="bg"></div><div class="grid"></div>
+
+<section class="scene intro" id="s0">
+  <img class="logo" src="../../market_update/static/brand/oneview-logo.png" alt="">
+  <h1><span id="w1">The whole market,</span><span class="b" id="w2">on one screen.</span></h1>
+  <p id="w3">The crowd, the President's posts, the money and the companies behind every stock. In plain English. Free.</p>
+</section>
+
+<section class="scene" id="s1" data-img="overview-answers.png">
+  <img class="brand" src="../../market_update/static/brand/oneview-logo.png" alt=""><span class="step">01 / 06</span>
+  <div class="cap"><span class="eye"><i></i>Your overview</span><h2>The market in<br><span>three answers.</span></h2><p>Is it up? How does it feel? Are the swings calm or big? Then your stocks, with their market cap.</p></div>
+  <div class="frame" style="--ft:800px;--fb:220px"><div class="win"><img id="i1" src="cap/overview-stack.png" alt=""><div class="fade"></div></div></div>
+</section>
+
+<section class="scene" id="s2">
+  <img class="brand" src="../../market_update/static/brand/oneview-logo.png" alt=""><span class="step">02 / 06</span>
+  <div class="cap"><span class="eye"><i></i>The crowd</span><h2>What people<br><span>are saying.</span></h2><p>200 fresh StockTwits posts per name, bull side against bear side, and what Reddit is piling into.</p></div>
+  <div class="frame" style="--ft:800px;--fb:220px"><div class="win"><img id="i2" src="cap/crowd.png" alt=""><div class="fade"></div></div></div>
+</section>
+
+<section class="scene" id="s3">
+  <img class="brand" src="../../market_update/static/brand/oneview-logo.png" alt=""><span class="step">03 / 06</span>
+  <div class="cap"><span class="eye"><i></i>The President's posts</span><h2>He posts.<br><span>We read it.</span></h2><p>Every post from Truth Social, sorted into market news or not, with what it could touch. Campaign posts are marked not market news.</p></div>
+  <div class="frame" style="--ft:780px;--fb:200px"><div class="win"><img id="i3" src="cap/president-posts.png" alt=""><div class="fade"></div></div></div>
+</section>
+
+<section class="scene" id="s4">
+  <img class="brand" src="../../market_update/static/brand/oneview-logo.png" alt=""><span class="step">04 / 06</span>
+  <div class="cap"><span class="eye"><i></i>Company map</span><h2>Type a company.<br><span>See its whole map.</span></h2><p>Who it buys from, who it sells to and who it builds with, straight from its 10-K, with the money flow next to it.</p></div>
+  <div class="frame" style="--ft:820px;--fb:330px"><div class="win"><img id="i4" src="cap/company-map.png" alt=""><div class="fade"></div></div></div>
+</section>
+
+<section class="scene" id="s5">
+  <img class="brand" src="../../market_update/static/brand/oneview-logo.png" alt=""><span class="step">05 / 06</span>
+  <div class="cap"><span class="eye"><i></i>Options map</span><h2>Calm<br><span>or jumpy?</span></h2><p>VIX, dealer gamma and put/call for ES, NQ and SPY, drawn as a road you can read in seconds. Every 10 minutes.</p></div>
+  <div class="frame" style="--ft:860px;--fb:220px"><div class="win"><img id="i5" src="cap/calm-jumpy.png" alt=""><div class="fade"></div></div></div>
+</section>
+
+<section class="scene" id="s6">
+  <img class="brand" src="../../market_update/static/brand/oneview-logo.png" alt=""><span class="step">06 / 06</span>
+  <div class="cap"><span class="eye"><i></i>And more</span><h2>Earnings, big money<br><span>and tipster X-rays.</span></h2></div>
+  <div class="tri">
+    <div class="card" id="c1"><div class="win"><img src="cap/earnings.png" alt=""></div><span class="tag">Earnings, reviewed</span></div>
+    <div class="card" id="c2"><div class="win"><img src="cap/big-bets.png" alt=""></div><span class="tag">Hedge funds' option bets</span></div>
+    <div class="card" id="c3"><div class="win"><img src="cap/xray.png" alt=""></div><span class="tag">Is that trader any good?</span></div>
+  </div>
+</section>
+
+<section class="scene outro" id="s7">
+  <img class="logo" src="../../market_update/static/brand/oneview-logo.png" alt="">
+  <h2>See the market<br><span>clearly.</span></h2>
+  <div class="cta"><b>Free. Sign in with your email.</b><i><svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg></i></div>
+  <p class="sub">No card. No password.</p>
+  <p class="url">shayan001-cell.github.io/market-update</p>
+</section>
+
+<p class="fine" id="fine">For information and entertainment only. Not financial advice.</p>
+<div class="bar"><i id="prog"></i></div>
+
+<script>
+// Timeline: [scene id, start s, end s]. render(t) is pure, so every frame is reproducible.
+const T = [["s0", 0, 3.6], ["s1", 3.4, 9.2], ["s2", 9.0, 15.0], ["s3", 14.8, 20.8], ["s4", 20.6, 26.4], ["s5", 26.2, 31.8], ["s6", 31.6, 38.4], ["s7", 38.2, 43.0]];
+const DUR = 43.0, X = 0.45;                       // cross-fade length
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+const inout = (x) => { x = Math.min(1, Math.max(0, x)); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+function vis(t, a, b) { return Math.min(ease((t - a) / X), ease((b - t) / X)); }
+function pan(img, t, a, b) {                    // slow scroll through a tall capture, Ken Burns style
+  if (!img || !img.naturalHeight) return; const win = img.parentElement; const h = img.clientHeight, H = win.clientHeight;
+  const p = inout((t - a - 0.6) / (b - a - 1.2)); const travel = Math.max(0, h - H);
+  img.style.transform = `translateY(${-travel * p}px) scale(${1 + 0.02 * (1 - p)})`; img.style.transformOrigin = "top center";
+}
+function rise(el, t, at, dist = 40) { if (!el) return; const k = ease((t - at) / 0.7); el.style.opacity = k; el.style.transform = `translateY(${(1 - k) * dist}px)`; }
+window.render = (t) => {
+  for (const [id, a, b] of T) { const el = document.getElementById(id); const v = t >= a - 0.01 && t <= b + 0.01 ? vis(t, a, b) : 0; el.style.opacity = v;
+    el.style.transform = `translateY(${(1 - ease((t - a) / 0.8)) * 30}px)`; }
+  rise(document.getElementById("w1"), t, 0.2, 60); rise(document.getElementById("w2"), t, 0.6, 60); rise(document.getElementById("w3"), t, 1.2, 30);
+  const logo = document.querySelector("#s0 .logo"); const lk = ease(t / 0.8); logo.style.opacity = lk; logo.style.transform = `scale(${0.92 + 0.08 * lk})`;
+  [1, 2, 3, 4, 5].forEach((n) => { const [, a, b] = T[n]; pan(document.getElementById("i" + n), t, a, b); const cap = document.querySelector(`#s${n} .cap`); rise(cap, t, a + 0.15, 36);
+    const fr = document.querySelector(`#s${n} .frame`); if (fr) { const k = ease((t - a - 0.35) / 0.8); fr.style.opacity = k; fr.style.transform = `translateY(${(1 - k) * 80}px)`; } });
+  const [, a6, b6] = T[6]; const seg = (b6 - a6 - 0.4) / 3; rise(document.querySelector("#s6 .cap"), t, a6 + 0.15, 36);
+  ["c1", "c2", "c3"].forEach((c, i) => { const el = document.getElementById(c); const s = a6 + 0.3 + i * seg; const kin = ease((t - s) / 0.6), kout = i < 2 ? ease((t - (s + seg)) / 0.6) : 0;
+    el.style.opacity = kin * (1 - kout); el.style.transform = `translateX(${(1 - kin) * 120 - kout * 120}px) rotate(${(1 - kin) * 2}deg)`;
+    const img = el.querySelector("img"); if (img && img.naturalHeight) { const h = img.clientHeight, H = el.querySelector(".win").clientHeight; const p = inout((t - s) / seg); img.style.transform = `translateY(${-Math.max(0, h - H) * p * 0.6}px)`; } });
+  const [, a7] = T[7]; rise(document.querySelector("#s7 .logo"), t, a7 + 0.1, 30); rise(document.querySelector("#s7 h2"), t, a7 + 0.3, 50);
+  rise(document.querySelector("#s7 .cta"), t, a7 + 0.7, 40); rise(document.querySelector("#s7 .sub"), t, a7 + 1.0, 20); rise(document.querySelector("#s7 .url"), t, a7 + 1.2, 20);
+  const cta = document.querySelector("#s7 .cta"); if (t > a7 + 1.6) cta.style.transform = `scale(${1 + 0.015 * Math.sin((t - a7) * 4)})`;
+  document.getElementById("bg").style.setProperty("--gx", (20 + 30 * Math.sin(t / 7)) + "%"); document.getElementById("bg").style.setProperty("--gy", (10 + 12 * Math.cos(t / 9)) + "%");
+  document.getElementById("prog").style.width = (t / DUR * 100) + "%";
+  document.getElementById("fine").style.opacity = t > 3.4 ? 1 : ease((t - 2.4) / 0.8);
+};
+window.DUR = DUR;
+</script></body></html>

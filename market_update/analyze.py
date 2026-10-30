@@ -515,11 +515,11 @@ def _verdict(s: dict[str, Any]) -> dict[str, Any]:
     d20 = t.get("dist_sma20_pct")
     if is_etf:
         if tr == "up":
-            code, word, cls, plain = "trend_up", "TREND UP", "up", "Rising trend. Buying dips toward the 20-day average has worked; do not chase a spike."
+            code, word, cls, plain = "trend_up", "TREND UP", "up", "Rising trend: price is above its 20- and 50-day averages, and dips toward the 20-day have held so far."
         elif tr == "down":
-            code, word, cls, plain = "trend_down", "TREND DOWN", "down", "Falling trend. Bounces have been sold; wait for it to reclaim its averages."
+            code, word, cls, plain = "trend_down", "TREND DOWN", "down", "Falling trend: price is below its averages, and bounces have faded so far."
         else:
-            code, word, cls, plain = "range", "RANGE", "flat", "Moving sideways. Buy near the low end of the range, sell near the top, or wait for a break."
+            code, word, cls, plain = "range", "RANGE", "flat", "Moving sideways between its recent low and high, with no clear trend."
         return {"kind": "etf", "code": code, "word": word, "cls": cls, "plain": plain, "conviction": "high" if tr in ("up", "down") else "med", "why": _why_bullets(s, False)}
     adv = s.get("avg_dollar_volume")
     if (_num(mcap) and mcap >= LARGE_CAP) or (not _num(mcap) and _num(adv) and adv >= 2e9):   # no market cap from the feed: $2B+ traded a day is large by any measure
@@ -532,14 +532,14 @@ def _verdict(s: dict[str, Any]) -> dict[str, Any]:
             code, word, cls, plain = "buying_today", "HEAVY BUYING TODAY", "up", "Up hard today on far more trading than usual: buyers are in charge right now."
         elif _num(r5) and r5 >= 2 and tr != "down":
             code, word, cls = ("momentum_up", "MOMENTUM UP", "up") if strong_vol else ("drifting_up", "DRIFTING UP", "up2")
-            plain = "Moving up on heavy trading: buyers are committed." if strong_vol else "Moving up on light trading: fine to hold, not a reason to chase."
+            plain = "Moving up on heavy trading: buyers are committed." if strong_vol else "Moving up on light trading: a drift higher, not a rush."
         elif _num(r5) and r5 <= -2 and tr != "up":
             code, word, cls = ("momentum_down", "MOMENTUM DOWN", "down") if strong_vol else ("drifting_down", "DRIFTING DOWN", "flat")
             plain = "Falling on heavy trading: sellers are committed." if strong_vol else "Falling on light trading: a drift, not a rush for the exits."
         elif _num(d20) and d20 < -3 and tr == "up":
-            code, word, cls, plain = "pullback_in_uptrend", "PULLBACK", "up2", "A dip inside a rising trend. The usual spot where buyers step back in."
+            code, word, cls, plain = "pullback_in_uptrend", "PULLBACK", "up2", "A dip inside a rising trend: below its 20-day average while the longer trend is still up."
         else:
-            code, word, cls, plain = "flat", "FLAT", "flat", "Going nowhere in particular. No edge either way right now."
+            code, word, cls, plain = "flat", "FLAT", "flat", "Going nowhere in particular. No clear direction right now."
         conv = "high" if (strong_vol and code in ("momentum_up", "momentum_down", "selling_today", "buying_today")) else "med" if code != "flat" else "low"
         why = _why_bullets(s, False)
         if code in ("selling_today", "buying_today"):
@@ -549,9 +549,9 @@ def _verdict(s: dict[str, Any]) -> dict[str, Any]:
             why.insert(0, f"{'Up' if r5 >= 0 else 'Down'} {abs(r5):.1f}% over the past five sessions on {'heavy' if strong_vol else 'ordinary'} trading.")
         return {"kind": "large", "code": code, "word": word, "cls": cls, "plain": plain, "conviction": conv, "why": why[:4], "model": st.get("choice")}
     if st.get("choice"):
-        words = {"buy_now": ("BUY", "up", "Trend, chart and entry all agree, with room to run to the next level."), "buy_the_dip": ("BUY THE DIP", "up2", "Strong stock that has run too far to chase. Wait for a pullback toward its 20-day average."),
-                 "wait_for_breakout": ("WAIT FOR BREAKOUT", "flat", "Looks constructive but is capped under a price ceiling. A close above it is the trigger."), "hold_dont_add": ("HOLD, DON'T ADD", "flat", "If you own it, keep it with a stop. New money has no edge here."),
-                 "avoid": ("AVOID", "down", "The reads conflict, an event is near, or informed money is selling. No trade."), "short_setup": ("SHORT SETUP", "down", "Falling trend with sellers in control and a clean entry for a short.")}
+        words = {"buy_now": ("STRONG SETUP", "up", "Trend, chart and volume all point the same way, upward."), "buy_the_dip": ("STRONG, STRETCHED", "up2", "A strong trend that has run well above its 20-day average."),
+                 "wait_for_breakout": ("UNDER A CEILING", "flat", "Looks constructive but trades below a price level it has not closed above yet."), "hold_dont_add": ("FULLY PRICED", "flat", "A sound trend with little left in the signals right now."),
+                 "avoid": ("CONFLICTED", "down", "The reads disagree, an event is near, or insiders are selling."), "short_setup": ("WEAK SETUP", "down", "A falling trend with sellers in control.")}
         w, cls, plain = words.get(st["choice"], (st["choice"].upper(), "flat", ""))
         return {"kind": "stock", "code": st["choice"], "word": w, "cls": cls, "plain": plain, "conviction": _conviction(st.get("confidence")), "why": _why_bullets(s)}
     return {"kind": "stock", "code": None, "word": "NO VERDICT", "cls": "none", "plain": "The model returned no stance for this build.", "conviction": "low", "why": _why_bullets(s)}
@@ -631,6 +631,9 @@ async def social_snapshot(judge: "Judge") -> dict[str, Any]:
     trump = fetch.fetch_trump_posts(25)
     crowd = fetch.fetch_reddit_crowd()
     reads: dict[str, Any] = fetch._cache_get("trump_reads", 14 * 86400) or {}
+    # Only model reads are kept: a rule read is cheap and the rules improve, so it is redone on every build (and a model
+    # read replaces it as soon as the model is reachable).
+    reads = {k: v for k, v in reads.items() if not any(isinstance(q, dict) and q.get("rules") for q in (v or {}).values())}
     fresh = [p for p in trump.get("posts", []) if p.get("has_text") and p["id"] not in reads]
     if fresh:
         ans = await judge.run_many([{"text": p["text"][:1500], "posted_at": p.get("posted"), "has_media": bool(p.get("media")), "reposts": p.get("reposts")} for p in fresh], J.TRUMP_QUESTIONS)
@@ -641,6 +644,9 @@ async def social_snapshot(judge: "Judge") -> dict[str, Any]:
                 changed = True
         if changed:
             fetch._cache_put("trump_reads", reads)
+    for p in trump.get("posts", []):                       # model off or outside its schedule: the rules answer
+        if p.get("has_text") and p["id"] not in reads:
+            reads[p["id"]] = R.trump({"text": p["text"][:1500]})
     for p in trump.get("posts", []):
         p["ai"] = reads.get(p["id"])
     return _clean({"trump": trump, "crowd": crowd, "as_of": datetime.now(tz=config.ET).isoformat()})

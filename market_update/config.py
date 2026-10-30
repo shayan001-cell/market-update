@@ -250,3 +250,11 @@ DEFAULT_WATCHLIST = ["NVDA", "TSLA", "AMD", "PLTR", "COIN", "INTC", "SPY"]
 # Email-only sign-in (owner's request, 2026-09-28): typing an email signs the person straight in, no mail is sent.
 # Every such sign-in is logged; these sessions never get admin rights (the owner gets an admin link from
 # scripts/admin_link.py on the server machine). MU_INSTANT_LOGIN=0 brings back the emailed link.
+
+
+# The terms every sign-in agrees to (the checkbox on the sign-in card). Bump the version when the wording changes, so the
+# agreements table shows which text each person accepted.
+TERMS_VERSION = "2026-10-30"
+TERMS_SHORT = ("OneView is for information and entertainment only. It is not financial, investment or trading advice, "
+               "and nothing on it is a recommendation to buy, sell or hold anything. Data can be delayed or wrong. "
+               "You make your own decisions and carry your own risk.")

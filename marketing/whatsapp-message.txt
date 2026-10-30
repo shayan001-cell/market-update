@@ -8,7 +8,6 @@ Starting out in trading? OneView answers the three things to check every morning
 Then it shows your own stocks with their market cap, price and a plain-English read.
 
 Also inside, free:
-• Every call scored in public (6,206 logged, wins and misses)
 • Options map for ES, NQ and SPY every 10 minutes
 • Earnings calendar with beat/miss reviews
 • Hedge funds' calls and puts from their 13F filings
@@ -17,4 +16,4 @@ Also inside, free:
 Free. Sign in with your email, no card, no password:
 https://shayan001-cell.github.io/market-update/
 
-Information only, not financial advice.
+For information and entertainment only. Not financial advice.

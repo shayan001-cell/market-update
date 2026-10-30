@@ -53,6 +53,14 @@ CREATE TABLE IF NOT EXISTS activity (
     action TEXT NOT NULL,
     detail TEXT
 );
+CREATE TABLE IF NOT EXISTS agreements (   -- every acceptance of the terms, kept for good: who, when, which text
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at REAL NOT NULL,
+    email TEXT NOT NULL,
+    version TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT
+);
 CREATE TABLE IF NOT EXISTS verdicts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -185,6 +193,12 @@ def touch_login(email: str) -> None:
 def accept_disclaimer(email: str) -> None:
     with connect() as con:
         con.execute("UPDATE users SET accepted_disclaimer_at = ? WHERE email = ?", (time.time(), email))
+
+
+def record_agreement(email: str, version: str, ip: str | None, user_agent: str | None) -> None:
+    with connect() as con:
+        con.execute("INSERT INTO agreements(at, email, version, ip, user_agent) VALUES (?, ?, ?, ?, ?)",
+                    (time.time(), email, version, (ip or "")[:64], (user_agent or "")[:300]))
 
 
 def profile(email: str) -> dict[str, Any] | None:
@@ -476,15 +490,6 @@ def verdict_day_detail(day: str) -> list[dict[str, Any]]:
     with connect() as con:
         return [dict(r) for r in con.execute(
             "SELECT ticker, kind, verdict, price, ts, horizon_days, eval_price, eval_ts, hit FROM verdicts WHERE ts >= ? AND ts < ? ORDER BY ts", (lo, hi))]
-
-
-def recent_scored(per_kind: int = 8) -> dict[str, list[dict[str, Any]]]:
-    """The latest calls whose window has closed and were scored, per kind (the public landing page shows them)."""
-    with connect() as con:
-        return {k: [dict(r) for r in con.execute(
-            "SELECT ticker, kind, verdict, price, ts, horizon_days, eval_price, eval_ts, hit FROM verdicts "
-            "WHERE kind = ? AND hit IS NOT NULL ORDER BY eval_ts DESC LIMIT ?", (k, per_kind))]
-            for k in ("intraday", "swing", "desk")}
 
 
 # ---- alerts (settings only for now; delivery comes later) -----------------------------------------

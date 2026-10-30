@@ -10,3 +10,5 @@ dist/
 .DS_Store
 
 .venv
+marketing/video/cap/
+marketing/video/*.mp4

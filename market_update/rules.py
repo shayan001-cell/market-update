@@ -685,6 +685,12 @@ def trump(st: dict[str, Any]) -> dict[str, Any]:
         c = _count(text, words)
         if c > n:
             theme, n = k, c
+    # Campaign posts (endorsements, voting drives, court and media fights) name taxes, farmers or "bills" in passing and are
+    # not market news. Unless they carry a hard market word, they are not market.
+    hard = len(re.findall(r"\b(tariffs?|the fed|federal reserve|powell|interest rates?|oil|opec|bitcoin|crypto|stock market|the dow|nasdaq|s&p|apple|nvidia|intel|tesla|boeing|pharma|drug prices?|banks?|automakers?)\b", text.lower()))
+    if not hard and _count(text, ("endorse", "endorsement", "congressman", "congresswoman", "candidate", "early voting", "vote", "senate", "governor",
+                                  "america first patriot", "re-elect", "district", "hoax", "indict", "framed", "jarrett")):
+        theme, n = "not_market", 0
     rel = 0.75 if n >= 2 else 0.55 if n == 1 else 0.1
     bull, bear = _count(text, BULL_WORDS + ("deal", "great", "booming", "record", "strong", "lower rates", "cut rates")), _count(text, BEAR_WORDS + ("tariff", "war", "fire", "shut"))
     if theme == "tariffs_trade":

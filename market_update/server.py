@@ -1129,6 +1129,9 @@ async def auth_request(request: Request, payload: dict[str, Any] = Body(...)) ->
     email = str(payload.get("email", "")).strip().lower()
     if not _EMAIL_RE.match(email) or len(email) > 120:
         raise HTTPException(status_code=400, detail="enter a valid email address")
+    if payload.get("agreed") is not True:
+        raise HTTPException(status_code=400, detail="tick the box to confirm OneView is for information and entertainment only")
+    db.record_agreement(email, config.TERMS_VERSION, _client_ip(request), request.headers.get("user-agent", ""))
     if not instant_login_on():
         return JSONResponse(await _issue_link(request, email))
     # Email-only sign-in: no link is sent. Tracked, rate-limited per network address, never admin. Pressing
@@ -1332,8 +1335,9 @@ async def auth_logout(request: Request) -> JSONResponse:
 
 
 @app.get("/api/track-record")
-async def api_track_record() -> JSONResponse:
-    """Public: every verdict the model has made, scored after its horizon against the later price."""
+async def api_track_record(request: Request) -> JSONResponse:
+    """Admin only (2026-10-30, owner's request): every verdict the model has made, scored after its horizon."""
+    _require_admin(request)
     tr = await asyncio.to_thread(db.track_record)
     tr["direction"] = await asyncio.to_thread(db.direction_stats, 60)
     tr["analysis_days"] = await asyncio.to_thread(db.analysis_days, 60)
@@ -1341,8 +1345,9 @@ async def api_track_record() -> JSONResponse:
 
 
 @app.get("/api/track-record/day")
-async def api_track_record_day(day: str) -> JSONResponse:
-    """Public: every verdict call made on one ET day, with its result once the window has closed."""
+async def api_track_record_day(day: str, request: Request) -> JSONResponse:
+    """Admin only: every verdict call made on one ET day, with its result once the window has closed."""
+    _require_admin(request)
     try:
         datetime.fromisoformat(day)
     except ValueError:
@@ -1350,10 +1355,55 @@ async def api_track_record_day(day: str) -> JSONResponse:
     return JSONResponse({"day": day, "calls": await asyncio.to_thread(db.verdict_day_detail, day)}, headers={"Cache-Control": "no-store"})
 
 
-@app.get("/api/track-record/scored")
-async def api_track_record_scored() -> JSONResponse:
-    """Public: the latest scored calls per kind, wins and misses alike, for the landing page's scorecard."""
-    return JSONResponse(await asyncio.to_thread(db.recent_scored, 8), headers={"Cache-Control": "no-store"})
+_showcase: dict[str, Any] = {"at": 0.0, "map": None}
+
+
+@app.get("/api/showcase")
+async def api_showcase() -> JSONResponse:
+    """Public: what the landing page's live board shows to signed-out visitors. The crowd (Reddit and the StockTwits mood
+    on SPY), the President's latest market-relevant posts with their read, and one company's map (NVIDIA's suppliers,
+    partners and customers from its 10-K), refreshed every 6 hours. No personal data."""
+    rep = state.get("report") or {}
+    soc = rep.get("social") or {}
+    # The posts most clearly about money come first: an economic theme over politics, a model read over the rule fallback.
+    strong = {"tariffs_trade", "fed_rates", "taxes_spending", "energy_oil", "specific_company_or_sector", "crypto"}
+    cand = []
+    from . import rules as RU
+    for i, p in enumerate(((soc.get("trump") or {}).get("posts") or [])[:25]):
+        ai = p.get("ai") or {}
+        if (ai.get("theme") or {}).get("rules") and p.get("text"):
+            ai = RU.trump({"text": p["text"]})          # rule reads are cheap: re-read with the current rules
+        rel = (ai.get("market_relevance") or {}).get("p") or 0
+        theme = (ai.get("theme") or {}).get("choice")
+        if rel < 0.55 or not p.get("has_text") or theme in (None, "not_market"):
+            continue
+        rank = rel + (0.35 if theme in strong else 0) + (0.2 if not (ai.get("theme") or {}).get("rules") else 0) - i * 0.01
+        cand.append((rank, {"posted": p.get("posted"), "text": (p.get("text") or "")[:280], "relevance": rel,
+                            "direction": (ai.get("direction") or {}).get("choice"), "theme": theme,
+                            "who": (ai.get("who_benefits") or {}).get("choice")}))
+    posts = [c[1] for c in sorted(cand, key=lambda c: -c[0])[:3]]
+    if len(posts) < 2:                                   # a quiet stretch: show the latest posts, read as not market news
+        seen = {p["text"] for p in posts}
+        for p in ((soc.get("trump") or {}).get("posts") or []):
+            t = (p.get("text") or "")
+            if p.get("has_text") and t and not t.startswith("RT: http") and t[:280] not in seen:
+                posts.append({"posted": p.get("posted"), "text": t[:280], "relevance": 0.1, "direction": None, "theme": "not_market", "who": None})
+            if len(posts) >= 2:
+                break
+    crowd = [{k: r.get(k) for k in ("ticker", "name", "mentions", "mentions_24h_ago", "wsb_sentiment")} for r in ((soc.get("crowd") or {}).get("rows") or [])[:6]]
+    st = state.get("stocktwits") or {}
+    spy = ((st.get("moods") or {}).get("SPY") or {})
+    if time.time() - _showcase["at"] > 6 * 3600 or not _showcase["map"]:
+        try:
+            from . import company as CO
+            g = (await asyncio.to_thread(CO.company, "NVDA", [])).get("graph") or {}
+            _showcase["map"] = {"center": "NVDA", "nodes": (g.get("nodes") or [])[:16]}
+            _showcase["at"] = time.time()
+        except Exception as e:  # noqa: BLE001
+            log.warning("showcase map: %s", e)
+    return JSONResponse({"posts": posts, "crowd": crowd, "st_spy": {"score": spy.get("score"), "label": spy.get("label")} if spy else None,
+                         "map": _showcase["map"], "symbols": len(rep.get("lite") or {}), "as_of": rep.get("generated_at")},
+                        headers={"Cache-Control": "max-age=300"})
 
 
 @app.get("/api/caps")
@@ -1388,35 +1438,10 @@ async def api_alerts_put(request: Request, payload: dict[str, Any] = Body(...)) 
     return out
 
 
-_TRACK_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Track record · OneView</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/static/brand/favicon.png"><link rel="stylesheet" href="/static/styles.css">
-<style>body{background:var(--bg);color:var(--text);margin:0;padding:24px;font-family:var(--sans,system-ui)} .tr-wrap{max-width:1100px;margin:0 auto;display:grid;gap:18px}
-.tr-h{display:flex;align-items:center;gap:12px} .tr-h img{width:34px;height:34px} .tr-h b{font-size:20px} .tr-note{color:var(--text-2);font-size:13px;line-height:1.5;max-width:70ch}
-.tr-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)} .tr-tiles .tile{background:var(--surface-2)}
-table.tbl{width:100%} .hit{color:var(--up)} .miss{color:var(--down)} .open{color:var(--muted)}</style></head><body><div class="tr-wrap">
-<div class="tr-h"><img src="/static/brand/oneview-symbol.png" alt="" style="width:34px;height:34px;border-radius:8px"><div><b>Track record</b><div class="muted" style="font-size:12px">Every verdict the model has made, scored against the price after its time window</div></div></div>
-<p class="tr-note">How this works: each time the desk publishes a verdict on a name, the price at that moment is written down. After the window closes (1 day for a day-trade read, 7 days for a swing read, 90 days for a long-term view) the price is checked again. A bullish call counts as a hit if the price went up, a bearish call if it went down. Calls with no direction (wait, hold, range, flat) are listed but not scored, and so is a call whose price has not moved by the check (the market was shut). Nothing here is advice; it is the desk keeping itself honest.</p>
-<div id="tiles" class="tr-tiles"></div>
-<h3>By verdict</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Window</th><th>Verdict</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byv"></tbody></table></div>
-<h3>Calls, day by day</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Day</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th></tr></thead><tbody id="byd"></tbody></table></div>
-<h3>By name</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Calls</th><th>Scored</th><th>Hits</th><th>Hit rate</th><th>Avg move</th></tr></thead><tbody id="byt"></tbody></table></div>
-<h3>Most recent calls</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Name</th><th>Window</th><th>Verdict</th><th>Price then</th><th>Price after</th><th>Result</th></tr></thead><tbody id="recent"></tbody></table></div>
-<p class="muted" style="font-size:11px">Prices from Yahoo Finance, delayed. Information, not advice.</p></div>
-<script>
-(async()=>{const j=await (await fetch("/api/track-record",{cache:"no-store"})).json();const e=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-const pretty=k=>String(k||"").replace(/_/g," ");const pct=x=>x==null?"–":(x>0?"+":"")+x.toFixed(1)+"%";const rate=(h,n)=>n?Math.round(h/n*100)+"%":"–";
-const T=j.totals||{};document.getElementById("tiles").innerHTML=[["Calls logged",T.n||0,T.since?"since "+new Date(T.since*1000).toLocaleDateString():""],["Scored so far",T.scored||0,"windows that have closed"],["Hit rate",rate(T.hits||0,T.scored||0),(T.hits||0)+" hits"]].map(([l,v,s])=>`<div class="tile"><div class="tile-label">${l}</div><div class="tile-value">${v}</div><div class="tile-sub">${s}</div></div>`).join("");
-document.getElementById("byv").innerHTML=(j.by_verdict||[]).map(r=>`<tr><td>${e(r.kind)}</td><td><b>${e(pretty(r.verdict))}</b></td><td class="num">${r.n}</td><td class="num">${r.scored||0}</td><td class="num">${r.hits||0}</td><td class="num">${rate(r.hits||0,r.scored||0)}</td><td class="num">${pct(r.avg_move_pct)}</td></tr>`).join("")||'<tr><td colspan="7" class="muted">No calls scored yet. Check back after the first windows close.</td></tr>';
-document.getElementById("byd").innerHTML=(j.by_day||[]).map(r=>`<tr><td>${e(r.day)}</td><td class="num">${r.n}</td><td class="num">${r.scored}</td><td class="num">${r.hits}</td><td class="num">${rate(r.hits,r.scored)}</td></tr>`).join("")||'<tr><td colspan="5" class="muted">No calls logged yet.</td></tr>';
-document.getElementById("byt").innerHTML=(j.by_ticker||[]).map(r=>`<tr><td><b>${e(r.ticker)}</b></td><td class="num">${r.n}</td><td class="num">${r.scored||0}</td><td class="num">${r.hits||0}</td><td class="num">${rate(r.hits||0,r.scored||0)}</td><td class="num">${pct(r.avg_move_pct)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">Nothing scored yet.</td></tr>';
-document.getElementById("recent").innerHTML=(j.recent||[]).map(r=>`<tr><td>${new Date(r.ts*1000).toLocaleString()}</td><td><b>${e(r.ticker)}</b></td><td>${e(r.kind)}</td><td>${e(pretty(r.verdict))}</td><td class="num">${r.price!=null?r.price.toFixed(2):"–"}</td><td class="num">${r.eval_price!=null?r.eval_price.toFixed(2):"–"}</td><td class="${r.hit===1?"hit":r.hit===0?"miss":"open"}">${r.hit===1?"hit":r.hit===0?"miss":r.eval_ts?(r.eval_price!=null&&r.price&&Math.abs(r.eval_price/r.price-1)<0.0005?"no move":"not directional"):"open"}</td></tr>`).join("");})();
-</script></body></html>"""
-
-
 @app.get("/track-record")
-async def track_record_page() -> HTMLResponse:
-    """Public: no sign-in needed. The desk's scored history."""
-    return HTMLResponse(_TRACK_HTML, headers={"Cache-Control": "no-store"})
+async def track_record_page() -> RedirectResponse:
+    """The public track record page was retired (2026-10-30); the history lives on the admin Record page."""
+    return RedirectResponse("/", status_code=302)
 
 
 _social_cache: dict[str, Any] = {"at": 0.0, "data": None}
